@@ -61,6 +61,7 @@ to extract alpha signals from market microstructure dynamics.
 
 - [ ] Summarize the features, pros, and cons of Spot OrderBook data.
 - [ ] Fully understand the field structure and data schema.
+- [ ] Add a few papers.
 
 ---
 
