@@ -1,15 +1,15 @@
-# ByBit Spot OrderBook Dataset
+# High-Frequency Spot OrderBook Dataset
 
-This repository manages high-frequency historical Level 2 (DOM) data 
-from ByBit Spot markets. The goal is to structure this data for 
-use in Reinforcement Learning (RL) and Transformer-based models 
-to extract alpha signals from order book dynamics.
+This repository manages high-frequency Level 2 (DOM) data 
+from a major cryptocurrency spot exchange. The goal is to structure 
+this data for use in Reinforcement Learning (RL) and Transformer-based models 
+to extract alpha signals from market microstructure dynamics.
 
 ---
 
 ## 🧭 Mission Summary
 
-- Automate the download and organization of ByBit Spot OrderBook tick data.
+- Automate the download and organization of spot OrderBook tick data.
 - Visualize snapshots and deltas via GUI.
 - Generate datasets at fine timestamp resolutions (e.g., 10s or true tick).
 - Build infrastructure for training RL and Transformer models:
@@ -59,7 +59,7 @@ to extract alpha signals from order book dynamics.
 
 ## 📝 TODO
 
-- [ ] Summarize the features, pros, and cons of ByBit Spot OrderBook data.
+- [ ] Summarize the features, pros, and cons of Spot OrderBook data.
 - [ ] Fully understand the field structure and data schema.
 
 ---
@@ -68,11 +68,12 @@ to extract alpha signals from order book dynamics.
 
 ### `get_hist_ob.py` (🔒 Private)
 
-This script automates the download of historical ByBit Spot OrderBook data.  
+This script automates the download of historical spot order book data.  
 **It is private and intentionally excluded from version control (`.gitignore`)**  
-to prevent unnecessary load on ByBit’s infrastructure by disclosing scraping logic.
+to protect the data collection mechanism from overexposure.
 
-> Please respect the data provider’s infrastructure and fair usage policy.
+> Please note: This script involves rate-sensitive infrastructure.  
+> Public sharing is deliberately restricted.
 
 ---
 
