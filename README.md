@@ -1,1 +1,90 @@
-# RT-Data
+# ByBit Spot OrderBook Dataset
+
+This repository manages high-frequency historical Level 2 (DOM) data 
+from ByBit Spot markets. The goal is to structure this data for 
+use in Reinforcement Learning (RL) and Transformer-based models 
+to extract alpha signals from order book dynamics.
+
+---
+
+## 🧭 Mission Summary
+
+- Automate the download and organization of ByBit Spot OrderBook tick data.
+- Visualize snapshots and deltas via GUI.
+- Generate datasets at fine timestamp resolutions (e.g., 10s or true tick).
+- Build infrastructure for training RL and Transformer models:
+  - Focus exclusively on order book data (exclude chart-based history).
+  - Normalize time series to eliminate symbol dependency.
+  - Use recent time frames to predict future movement likelihood.
+
+---
+
+## 📅 Latest Data Acquisition
+
+- **Date:** 2025-05-12  
+- **Range:** 2025-04-29 to 2025-05-09  
+- **Symbols (45):**
+
+['PEPEUSDT', 'UNIUSDT', 'ADAUSDT', 'AAVEUSDT', 'XRPUSDC', 'SHIBUSDT',
+'SOLUSDT', 'PEPEUSDC', 'ETHUSDT', 'SUIUSDC', 'BCHUSDC', 'SUIUSDT',
+'ONDOUSDT', 'NEARUSDC', 'BTCUSDT', 'DOTUSDC', 'AVAXUSDT', 'TONUSDT',
+'SOLUSDC', 'TONUSDC', 'LTCUSDC', 'DOTUSDT', 'ETHUSDC', 'BTCUSDC',
+'WLDUSDC', 'ADAUSDC', 'XLMUSDC', 'BNBUSDT', 'WBTCUSDT', 'AVAXUSDC',
+'UNIUSDC', 'BCHUSDT', 'LTCUSDT', 'BNBUSDC', 'ONDOUSDC', 'HBARUSDT',
+'SHIBUSDC', 'XRPUSDT', 'WLDUSDT', 'DOGEUSDC', 'XLMUSDT', 'LINKUSDT',
+'DOGEUSDT', 'NEARUSDT', 'LINKUSDC']
+
+
+---
+
+## 📊 OrderBook Field Structure
+
+| Field      | Description |
+|------------|-------------|
+| `data`     | Root object with order book info. |
+| `data.a`   | Asks (ascending price). |
+| `data.a[0]`| Ask price. |
+| `data.a[1]`| Ask size (0 = removed in delta). |
+| `data.b`   | Bids (descending price). |
+| `data.b[0]`| Bid price. |
+| `data.b[1]`| Bid size (0 = removed in delta). |
+| `data.s`   | Symbol (e.g., `BTCUSDT`). |
+| `data.seq` | Cross-sequence ID (lower = older). |
+| `data.u`   | Update ID (`u = 1` = snapshot after restart). |
+| `topic`    | Topic name (e.g., `orderbook.500.BTCUSDT`). |
+| `ts`       | Timestamp (ms). |
+| `type`     | `"snapshot"` or `"delta"`. |
+
+---
+
+## 📝 TODO
+
+- [ ] Summarize the features, pros, and cons of ByBit Spot OrderBook data.
+- [ ] Fully understand the field structure and data schema.
+
+---
+
+## 🔧 Code Structure
+
+### `get_hist_ob.py` (🔒 Private)
+
+This script automates the download of historical ByBit Spot OrderBook data.  
+**It is private and intentionally excluded from version control (`.gitignore`)**  
+to prevent unnecessary load on ByBit’s infrastructure by disclosing scraping logic.
+
+> Please respect the data provider’s infrastructure and fair usage policy.
+
+---
+
+### `vis_dom.py` (🟢 Public)
+
+A GUI-based order book player that replays downloaded DOM stream snapshots and deltas —  
+mimicking real-time trading environments for visual inspection and debugging.
+
+---
+
+## 🚀 Final Goal
+
+Deliver a normalized, high-resolution dataset 
+for training RL and Transformer models capable of 
+predicting future market behavior from raw order book streams.
