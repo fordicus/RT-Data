@@ -22,7 +22,7 @@ to extract alpha signals from market microstructure dynamics.
 ## 📅 Latest Data Acquisition
 
 - **Date:** 2025-05-12  
-- **Range:** 2025-04-29 to 2025-05-09  
+- **Range:** 2025-04-29 to 2025-05-11  
 - **Symbols (45):**
 
 ['PEPEUSDT', 'UNIUSDT', 'ADAUSDT', 'AAVEUSDT', 'XRPUSDC', 'SHIBUSDT',
