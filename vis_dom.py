@@ -159,7 +159,7 @@ class OrderBookPlayer(QMainWindow):
 if __name__ == '__main__':
 	import sys
 	app = QApplication(sys.argv)
-	filename = "2025-05-09_BTCUSDT_ob200.data"
+	filename = "2025-05-03_EXAMPLE_ob200.data"
 	player = OrderBookPlayer(filename)
 	player.show()
 	sys.exit(app.exec_())
