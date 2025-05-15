@@ -1,13 +1,4 @@
 # ========================
-# 📂 Project-Specific Data & Output Folders
-# ========================
-datasets/
-data/
-downloads/
-outputs/
-unshared/
-
-# ========================
 # 🚫 Private or Local Files
 # ========================
 # Historical downloader (sensitive scraping logic)
@@ -16,6 +7,15 @@ get_hist_ob.py
 # Local launcher or utility
 push.py
 _Anaconda Prompt.lnk
+
+# ========================
+# 📂 Project-Specific Data & Output Folders
+# ========================
+datasets/
+data/
+downloads/
+outputs/
+unshared/
 
 # ========================
 # 🛠️  Build Artifacts
