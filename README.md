@@ -90,3 +90,13 @@ mimicking real-time trading environments for visual inspection and debugging.
 Deliver a normalized, high-resolution dataset 
 for training RL and Transformer models capable of 
 predicting future market behavior from raw order book streams.
+
+## 🛡️ License
+
+This project is licensed under the  
+✍️ [Creative Commons Attribution-NonCommercial 4.0 International License](https://creativecommons.org/licenses/by-nc/4.0/).  
+🚫💰 Commercial use is prohibited.  
+✨🛠️ Adaptation is permitted with attribution.  
+⚠️ No warranty is provided.
+
+[![License: CC BY-NC 4.0](https://licensebuttons.net/l/by-nc/4.0/88x31.png)](https://creativecommons.org/licenses/by-nc/4.0/)
