@@ -52,7 +52,7 @@ to extract alpha signals from market microstructure dynamics.
 | `data.seq` | Cross-sequence ID (lower = older). |
 | `data.u`   | Update ID (`u = 1` = snapshot after restart). |
 | `topic`    | Topic name (e.g., `orderbook.500.BTCUSDT`). |
-| `ts`       | Timestamp (ms). |
+| `ts`       | [UNIX Timestamp](https://en.wikipedia.org/wiki/Unix_time) (ms). |
 | `type`     | `"snapshot"` or `"delta"`. |
 
 See `bybit_orderbook_format.md` for further details.  
