@@ -33,14 +33,14 @@ id,timestamp,price,volume,side,rpi
 
 ## 📂 Field Definitions
 
-| Field       | Description                                                |
-| ----------- | ---------------------------------------------------------- |
-| `id`        | Unique trade identifier (within the file)                  |
-| `timestamp` | [UNIX Timestamp](https://en.wikipedia.org/wiki/Unix_time) in ms — shared with trade logs          |
-| `price`     | Execution price of the trade                               |
-| `volume`    | Trade size (quantity traded)                               |
-| `side`      | Taker side: `"buy"` or `"sell"`                            |
-| `rpi`       | RPI (Retail Price Improvement) flag. `1`: true, `0`: false |
+| Field       | Description                                                                             |
+| ----------- | ----------------------------------------------------------                              |
+| `id`        | Unique trade identifier (within the file)                                               |
+| `timestamp` | [UNIX Timestamp](https://en.wikipedia.org/wiki/Unix_time) in ms — shared with orderbook |
+| `price`     | Execution price of the trade                                                            |
+| `volume`    | Trade size (quantity traded)                                                            |
+| `side`      | Taker side: `"buy"` or `"sell"`                                                         |
+| `rpi`       | RPI (Retail Price Improvement) flag. `1`: true, `0`: false, BROKERAGE DEPENDENT INFO!   |
 
 ---
 

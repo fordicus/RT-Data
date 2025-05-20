@@ -62,22 +62,22 @@ YYYY-MM-DD_SYMBOL_ob200.data
 
 ## 📂 Field Definitions
 
-| Field     | Description                                                                        |
-| --------- | ---------------------------------------------------------------------------------- |
-| `topic`   | Topic name (e.g., `orderbook.200.UNIUSDC`)                                         |
-| `ts`      | [UNIX Timestamp](https://en.wikipedia.org/wiki/Unix_time) in ms — shared with trade logs                  |
-| `type`    | Type of message: `"snapshot"` or `"delta"`                                         |
-| `data`    | Object that contains the full order book content                                   |
-| └─ `s`    | Symbol name (e.g., `UNIUSDC`)                                                      |
-| └─ `b`    | Bids. In snapshots, sorted by price descending                                     |
-| └─ `b[0]` | Bid price                                                                          |
-| └─ `b[1]` | Bid size. In deltas, size = `0` means full fill or cancel                          |
-| └─ `a`    | Asks. In snapshots, sorted by price ascending                                      |
-| └─ `a[0]` | Ask price                                                                          |
-| └─ `a[1]` | Ask size. In deltas, size = `0` means full fill or cancel                          |
-| └─ `u`    | Update ID. Sequential counter. `"u": 1` indicates full snapshot after system reset |
-| └─ `seq`  | Cross-sequence number. Lower `seq` indicates older data                            |
-| `cts`     | Client-side timestamp when data was received                                       |
+| Field     | Description                                                                             |
+| --------- | ----------------------------------------------------------------------------------      |
+| `topic`   | Topic name (e.g., `orderbook.200.UNIUSDC`)                                              |
+| `ts`      | [UNIX Timestamp](https://en.wikipedia.org/wiki/Unix_time) in ms — shared with execution |
+| `type`    | Type of message: `"snapshot"` or `"delta"`                                              |
+| `data`    | Object that contains the full order book content                                        |
+| └─ `s`    | Symbol name (e.g., `UNIUSDC`)                                                           |
+| └─ `b`    | Bids. In snapshots, sorted by price descending                                          |
+| └─ `b[0]` | Bid price                                                                               |
+| └─ `b[1]` | Bid size. In deltas, size = `0` means full fill or cancel                               |
+| └─ `a`    | Asks. In snapshots, sorted by price ascending                                           |
+| └─ `a[0]` | Ask price                                                                               |
+| └─ `a[1]` | Ask size. In deltas, size = `0` means full fill or cancel                               |
+| └─ `u`    | Update ID. Sequential counter. `"u": 1` indicates full snapshot after system reset      |
+| └─ `seq`  | Cross-sequence number. Lower `seq` indicates older data                                 |
+| `cts`     | Client-side timestamp when data was received                                            |
 
 ---
 
