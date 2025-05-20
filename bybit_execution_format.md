@@ -40,7 +40,7 @@ id,timestamp,price,volume,side,rpi
 | `price`     | Execution price of the trade                                                            |
 | `volume`    | Trade size (quantity traded)                                                            |
 | `side`      | Taker side: `"buy"` or `"sell"`                                                         |
-| `rpi`       | RPI (Retail Price Improvement) flag. `1`: true, `0`: false, BROKERAGE DEPENDENT INFO!   |
+| `rpi`       | RPI (Retail Price Improvement) flag. WARNING: BROKERAGE DEPENDENT INFO!                 |
 
 ---
 
