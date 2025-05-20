@@ -57,6 +57,8 @@ YYYY-MM-DD_SYMBOL_ob200.data
   "cts": 1747440004299
 }
 ```
+Delta messages define how to update the DOM — they act as precise instructions to insert, modify, or remove price levels.
+
 
 ---
 
