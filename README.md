@@ -37,25 +37,14 @@ to extract alpha signals from market microstructure dynamics.
 
 ---
 
-## 📊 OrderBook Field Structure
+## 📚 Data Format Reference
 
-| Field      | Description |
-|------------|-------------|
-| `data`     | Root object with order book info. |
-| `data.a`   | Asks (ascending price). |
-| `data.a[0]`| Ask price. |
-| `data.a[1]`| Ask size (0 = removed in delta). |
-| `data.b`   | Bids (descending price). |
-| `data.b[0]`| Bid price. |
-| `data.b[1]`| Bid size (0 = removed in delta). |
-| `data.s`   | Symbol (e.g., `BTCUSDT`). |
-| `data.seq` | Cross-sequence ID (lower = older). |
-| `data.u`   | Update ID (`u = 1` = snapshot after restart). |
-| `topic`    | Topic name (e.g., `orderbook.500.BTCUSDT`). |
-| `ts`       | [UNIX Timestamp](https://en.wikipedia.org/wiki/Unix_time) (ms). |
-| `type`     | `"snapshot"` or `"delta"`. |
+- 📘 [OrderBook Format](bybit_orderbook_format.md)  
+  (Tick-level DOM snapshots and deltas — `.data` files)
 
-See `bybit_orderbook_format.md` for further details.  
+- 📙 [Execution Format](bybit_execution_format.md)  
+  (Trade history CSV with RPI flags — `.csv` files)
+
 See also 🔗 [ByBit Data Explanation](https://bybit-exchange.github.io/docs/tax/explain?utm_source=chatgpt.com).
 
 ---

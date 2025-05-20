@@ -65,7 +65,7 @@ YYYY-MM-DD_SYMBOL_ob200.data
 | Field     | Description                                                                        |
 | --------- | ---------------------------------------------------------------------------------- |
 | `topic`   | Topic name (e.g., `orderbook.200.UNIUSDC`)                                         |
-| `ts`      | [UNIX Timestamp](https://en.wikipedia.org/wiki/Unix_time) (in ms)                  |
+| `ts`      | [UNIX Timestamp](https://en.wikipedia.org/wiki/Unix_time) in ms — shared with trade logs                  |
 | `type`    | Type of message: `"snapshot"` or `"delta"`                                         |
 | `data`    | Object that contains the full order book content                                   |
 | └─ `s`    | Symbol name (e.g., `UNIUSDC`)                                                      |
