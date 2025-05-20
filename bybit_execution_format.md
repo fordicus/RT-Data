@@ -36,7 +36,7 @@ id,timestamp,price,volume,side,rpi
 | Field       | Description                                                                             |
 | ----------- | ----------------------------------------------------------                              |
 | `id`        | Unique trade identifier (within the file)                                               |
-| `timestamp` | [UNIX Timestamp](https://en.wikipedia.org/wiki/Unix_time) in ms — shared with orderbook |
+| `timestamp` | [UNIX Timestamp](https://en.wikipedia.org/wiki/Unix_time) in ms — `ts` in orderbook     |
 | `price`     | Execution price of the trade                                                            |
 | `volume`    | Trade size (quantity traded)                                                            |
 | `side`      | Taker side: `"buy"` or `"sell"`                                                         |
