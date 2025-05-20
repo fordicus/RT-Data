@@ -55,7 +55,8 @@ to extract alpha signals from market microstructure dynamics.
 | `ts`       | Timestamp (ms). |
 | `type`     | `"snapshot"` or `"delta"`. |
 
-See `bybit_orderbook_format.md` for further details.
+See `bybit_orderbook_format.md` for further details.  
+See also 🔗 [ByBit Data Explanation](https://bybit-exchange.github.io/docs/tax/explain?utm_source=chatgpt.com)
 
 ---
 

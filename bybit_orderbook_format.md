@@ -86,4 +86,6 @@ YYYY-MM-DD_SYMBOL_ob200.data
 Field semantics adapted from
 🔗 [ByBit Derivatives Data - History Download Documentation](https://www.bybit.com/derivatives/en/history-data)
 
+See also 🔗 [ByBit Data Explanation](https://bybit-exchange.github.io/docs/tax/explain?utm_source=chatgpt.com)
+
 ---
