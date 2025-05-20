@@ -87,5 +87,3 @@ Field semantics adapted from
 🔗 [ByBit Derivatives Data - History Download Documentation](https://www.bybit.com/derivatives/en/history-data)
 
 ---
-
-Let me know if you'd like a LaTeX or `.md` version of this for integration into formal documentation.
