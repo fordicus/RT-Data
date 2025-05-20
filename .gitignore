@@ -6,14 +6,15 @@ get_hist_ob.py
 
 # Local
 *.data
+*.csv
 push.py
 _Anaconda Prompt.lnk
 
 # ========================
 # 📂 Project-Specific Data & Output Folders
 # ========================
-datasets/
 data/
+datasets/
 downloads/
 outputs/
 unshared/
