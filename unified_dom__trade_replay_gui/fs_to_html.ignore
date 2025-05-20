@@ -1,0 +1,6 @@
+.git/
+__pycache__/
+*.zip
+desktop.ini
+.gitignore
+push.py
