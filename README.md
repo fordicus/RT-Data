@@ -21,8 +21,8 @@ to extract alpha signals from market microstructure dynamics.
 
 ## 📅 Latest Data Acquisition
 
-- **Date:** 2025-05-12  
-- **Range:** 2025-04-29 to 2025-05-11  
+- **Date:**  2025-05-20  
+- **Range:** 2025-05-07 to 2025-05-19  
 - **Symbols (45):**
 
 ['PEPEUSDT', 'UNIUSDT', 'ADAUSDT', 'AAVEUSDT', 'XRPUSDC', 'SHIBUSDT',
@@ -54,6 +54,8 @@ to extract alpha signals from market microstructure dynamics.
 | `topic`    | Topic name (e.g., `orderbook.500.BTCUSDT`). |
 | `ts`       | Timestamp (ms). |
 | `type`     | `"snapshot"` or `"delta"`. |
+
+See `bybit_orderbook_format.md` for further details.
 
 ---
 

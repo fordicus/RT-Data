@@ -4,7 +4,8 @@
 # Historical downloader (sensitive scraping logic)
 get_hist_ob.py
 
-# Local launcher or utility
+# Local
+*.data
 push.py
 _Anaconda Prompt.lnk
 
