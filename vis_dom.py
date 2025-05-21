@@ -5,7 +5,7 @@ How to Use:
 	python vis_dom.py [optional_path_to_data_file]
 
 	If no argument is provided, a fallback file
-	e.g., "2025-05-09_BTCUSDT_ob200.data" can be used.
+	e.g., "2025-05-17_UNIUSDC_ob200.data" can be used.
 
 	The script launches a GUI that replays DOM snapshots and deltas
 	from the given data file, mimicking a live trading environment.
@@ -207,7 +207,7 @@ if __name__ == '__main__':
 	if len(sys.argv) >= 2:
 		filename = sys.argv[1]  # use CLI argument
 	else:
-		filename = "2025-05-07_AVAXUSDT_ob200.data"  # fallback file
+		filename = "2025-05-17_UNIUSDC_ob200.data"  # fallback file
 	player = OrderBookPlayer(filename)
 	player.show()
 	sys.exit(app.exec_())

@@ -27,7 +27,8 @@ npm install lightweight-charts@4.1.1 --save
 Currently tested only with a specific file:
 `UNIUSDC_2025-05-17.csv`
 
-→ Generalize the pipeline to support **arbitrary tick data files** (passed as arguments).
+→ Generalize the pipeline to support **arbitrary tick data files**
+(passed as arguments).
 
 ---
 
@@ -48,7 +49,6 @@ uvicorn backend.app:app --reload
 Verify in browser or via curl:
 
 [`http://localhost:8000/api/tick?symbol=UNIUSDC&date=2025-05-17`](http://localhost:8000/api/tick?symbol=UNIUSDC&date=2025-05-17)
-
 
 ---
 
@@ -90,46 +90,81 @@ cd frontend && npm run dev
 
 ## ⚠️ Caution
 
-- **Timestamp Handling** (`backend/loader.py`):  
-  Convert raw CSV `timestamp` values from milliseconds to seconds via:  
-  `df["time"] = df["time"] / 1000`  
-  This preserves millisecond-level precision in `float` format,  
-  as required by Lightweight Charts™.  
-  Note that **no timezone or localtime conversion** occurs in the backend.  
-  All `time` values are passed as raw UNIX timestamps in seconds.  
+* **Timestamp Handling** (`backend/loader.py`):
+  Convert raw CSV `timestamp` values from milliseconds to seconds via:
+  `df["time"] = df["time"] / 1000`
+  This preserves millisecond-level precision in `float` format,
+  as required by Lightweight Charts™.
+  Note that **no timezone or localtime conversion** occurs in the backend.
   The frontend--via `Date(time * 1000)`--handles local-time conversion for rendering.
 
-
-- **Duplicate timestamps (ms)** (`backend/loader.py`):  
-  If multiple entries share the same timestamp,  
-  aggregate buy and sell volumes separately, then subtract:  
-  `volume = abs(buy - sell)`, `side = direction of the net flow`.  
+* **Duplicate timestamps (ms)** (`backend/loader.py`):
+  If multiple entries share the same timestamp,
+  aggregate buy and sell volumes separately, then subtract:
+  `volume = abs(buy - sell)`, `side = direction of the net flow`.
   This filters out zero-sum scenarios and emphasizes net price actions.
 
+---
+
+## ✅ Stage 2‑C: Enhanced Chart UX (2025-05-21)
+
+Today’s enhancements complete the local-time rendering overhaul and introduce
+interactive features for better price navigation:
+
+### ✅ Completed:
+
+* All timestamps are now rendered in **local time (browser-based)**.
+
+* **tickMarkFormatter** on x-axis dynamically switches between:
+
+  * `"YYYY-MM-DD"` at daybreak
+  * `"hh:mm:ss"` otherwise
+
+* Implemented **hover tooltip** with:
+
+  * Local timestamp (`YYYY-MM-DD hh:mm:ss.fff`)
+  * price, volume, side
+
+* Implemented **click-to-lock time\_cursor**:
+
+  * Clicking the chart sets `time_cursor` at the selected tick
+  * `time_cursor` shows:
+
+    * a **fixed-position tooltip** (same format as hover)
+    * a **red circle marker** on the line chart
 
 ---
 
-Last updated: 2025-05-20
+## 🧭 TODO (2025-05-21): Dual Chart-Based DOM Visualization Plan
+
+Dual chart-based one-way time-synchronized order book rendering will be 
+implemented by independently creating two `createChart()` instances: 
+the left for the time-series trade chart, and the right for the order book 
+depth chart. These two charts will be arranged side-by-side using CSS Flexbox.
+
+Mouse interaction will be handled exclusively by the left chart. The event 
+`subscribeCrosshairMove()` will be used to obtain `param.time` and 
+`param.point.x`, which are then used to one-way synchronize the right chart by 
+calling `timeScale().setVisibleLogicalRange(...)` and 
+`chart.setCrosshairPosition(...)`. Simultaneously, the frontend will request 
+a DOM snapshot via `/api/orderbook?time=...`, and the response will be 
+converted into a depth visualization using `HistogramSeries` or 
+`LineSeries` with `setData()`.
+
+Both charts must share identical options such as `timeVisible: true` and 
+`timeZone: 'local'` to maintain visual consistency. To minimize latency, 
+the order book responses should be cached on the client side to avoid 
+redundant API fetches for already visited timestamps.
+
+This architecture is fully feasible under Lightweight Charts v4.1.1. 
+The implementation approach aligns closely with the official tutorial 
+["Set crosshair position"](https://tradingview.github.io/lightweight-charts/tutorials/how_to/set-crosshair-position), 
+which serves as the most reliable reference for this feature.
+
+---
+
+
+Last updated: 2025-05-21
 Prepared in alignment with `Plan01.md` and folder structure `REPO_STRUCT.html`
-
-
----
-
-Ongoing Progress: 2025-05-21
-
-현재 우리는 **호버 시에만 로컬 타임존이 적용된 `YYYY-MM-DD hh:mm:ss.fff` 형식의 타임스탬프**를 렌더링하고 있습니다. 하지만 **차트 하단(x축)에 표시되는 시각은 다음 두 가지 문제가 있습니다**:
-
-1. 로컬 타임존으로 변환되지 않았고,
-2. `"YYYY-MM-DD hh:mm:ss.fff"` 형식의 출력 규칙을 따르지 않고 있습니다.
-
-* 차트 하단의 시각 표시를 **"YYYY-MM-DD hh\:mm\:ss.fff" 전체 포맷으로 출력**하고
-* 수직 방향(vertical orientation)으로 렌더링되도록 하고 싶습니다.
-
-해당 작업은 프론트엔드의 책임이므로, 다음 파일에 적용하는 것이 적절합니다:
-
-```
-RT-Data\unified_dom__trade_replay_gui\frontend\src\main.ts
-```
-(lightweight-charts\@4.1.1의 공식 문서를 기준으로 검토 바랍니다)
 
 ---
