@@ -7,7 +7,6 @@ get_hist_ob.py
 # Local
 *.data
 *.csv
-push.py
 _Anaconda Prompt.lnk
 
 # ========================
