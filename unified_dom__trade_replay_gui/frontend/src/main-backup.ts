@@ -1,70 +1,19 @@
-/**................................................................................
-
-How to Use:
-
-	Start backend (in project root):
-
-		uvicorn backend.app:app --reload
-
-	→ FastAPI runs at:
-		http://localhost:8000/api/tick?symbol=UNIUSDC&date=2025-05-17
-
-	Start frontend (in ./frontend):
-
-		cd frontend && npm run dev
-
-	→ Frontend runs at:
-		http://localhost:5173
-
-	→ Then open your browser at:
-		http://localhost:5173
-
-................................................................................
-
-Dependency:
-
-	npm install lightweight-charts@4.1.1
-
-................................................................................
-
-Functionality:
-
-	- Renders tick-level trade price chart with local time formatting.
-	- Chart x-axis shows day/time with adaptive formatting:
-		* At day start: YYYY-MM-DD
-		* Otherwise  : hh:mm:ss
-	- Hover tooltip shows localtime with ms precision and:
-		* price
-		* volume
-		* side
-	- Backend-provided tick data is cached and reused without further fetch.
-
-................................................................................
-
-IO Structure:
-
-	Input:
-		GET http://localhost:8000/api/tick?symbol=...&date=...
-
-	Output:
-		Line chart rendered with Lightweight Charts.
-		Timestamps and tooltips reflect user's local time.
-
-................................................................................*/
-
 import {
 	createChart,
 	CrosshairMode,
 } from 'lightweight-charts'
 
-const pad = (n: number, w = 2) => String(n).padStart(w, '0')
+/** Utility: Pad number to fixed width */
+const pad = (n: number, width = 2) => String(n).padStart(width, '0')
 
+/** Utility: Format UNIX timestamp (seconds) to local Date */
 const toLocalDate = (ts: number): Date => new Date(ts * 1000)
 
+/** Utility: Format time for tooltip title */
 const formatFullTimestamp = (d: Date): string => {
 	const tzOffset = -d.getTimezoneOffset() / 60
-	const sign     = tzOffset >= 0 ? '+' : '-'
-	const tz       = `UTC ${sign}${Math.abs(tzOffset)}`
+	const sign = tzOffset >= 0 ? '+' : '-'
+	const tz = `UTC ${sign}${Math.abs(tzOffset)}`
 	return (
 		`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
 		`${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.` +
@@ -72,6 +21,7 @@ const formatFullTimestamp = (d: Date): string => {
 	)
 }
 
+/** Utility: Format for tick label */
 const formatTickLabel = (d: Date): string => {
 	if (d.getHours() === 0 && d.getMinutes() === 0 && d.getSeconds() === 0) {
 		return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
@@ -79,6 +29,7 @@ const formatTickLabel = (d: Date): string => {
 	return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
 }
 
+// Prepare chart container
 const chartContainer = document.getElementById('chart') as HTMLElement
 
 const chart = createChart(chartContainer, {
@@ -96,15 +47,17 @@ const chart = createChart(chartContainer, {
 		mode: CrosshairMode.Normal
 	},
 	timeScale   : {
-		timeVisible        : true,
-		secondsVisible     : true,
-		tickMarkFormatter  : () => ''	// placeholder; replaced after load
+		timeVisible    : true,
+		secondsVisible : true,
+
+		// Placeholder – will be overwritten after preprocessed data ready
+		tickMarkFormatter: () => ''
 	}
 })
 
 const series = chart.addLineSeries()
 
-// Tooltip container styling
+// Prepare tooltip
 const tooltip = document.createElement('div')
 tooltip.className = 'custom-tooltip'
 tooltip.style = `
@@ -122,20 +75,21 @@ tooltip.style = `
 `
 document.body.appendChild(tooltip)
 
-// Local cache for tooltip lookup
+// Global cache for tooltip access
 const tooltipCache = new Map<number, any>()
 
 fetch('http://localhost:8000/api/tick?symbol=UNIUSDC&date=2025-05-17')
 	.then(res => res.json())
 	.then(data => {
+		// Preprocess: sort, cache, and prepare for chart
 		const points = data.map((pt: any) => {
-			const local = toLocalDate(pt.time)
+			const localDate = toLocalDate(pt.time)
 
 			tooltipCache.set(pt.time, {
-				timeObj: local,
-				value  : pt.value,
-				volume : pt.volume,
-				side   : pt.side
+				timeObj  : localDate,
+				value    : pt.value,
+				volume   : pt.volume,
+				side     : pt.side
 			})
 
 			return {
@@ -146,6 +100,7 @@ fetch('http://localhost:8000/api/tick?symbol=UNIUSDC&date=2025-05-17')
 
 		points.sort((a, b) => a.time - b.time)
 
+		// Override tickMarkFormatter using preprocessed local times
 		chart.applyOptions({
 			timeScale: {
 				tickMarkFormatter: (ts: number) =>
@@ -160,13 +115,14 @@ fetch('http://localhost:8000/api/tick?symbol=UNIUSDC&date=2025-05-17')
 		console.error('Failed to fetch tick data:', err)
 	})
 
+// Tooltip logic
 chart.subscribeCrosshairMove(param => {
 	if (!param.time || !param.seriesData.has(series)) {
 		tooltip.style.display = 'none'
 		return
 	}
 
-	const ts      = param.time as number
+	const ts = param.time as number
 	const nearest = tooltipCache.get(ts)
 
 	if (!nearest || !param.point) {
@@ -175,7 +131,6 @@ chart.subscribeCrosshairMove(param => {
 	}
 
 	const d = nearest.timeObj
-
 	tooltip.innerText =
 		`${formatFullTimestamp(d)}\n` +
 		`price:   ${nearest.value}\n` +
@@ -183,7 +138,7 @@ chart.subscribeCrosshairMove(param => {
 		`side:    ${nearest.side}`
 
 	const chartRect = chartContainer.getBoundingClientRect()
-	tooltip.style.left    = `${chartRect.left + param.point.x + 10}px`
-	tooltip.style.top     = `${chartRect.top  + param.point.y + 10}px`
+	tooltip.style.left = `${chartRect.left + param.point.x + 10}px`
+	tooltip.style.top  = `${chartRect.top  + param.point.y + 10}px`
 	tooltip.style.display = 'block'
 })

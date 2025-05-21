@@ -71,7 +71,7 @@ npm install lightweight-charts@4.1.1 --save
 * Start backend:
 
 ```bash
-./uvicorn backend.app:app --reload
+uvicorn backend.app:app --reload
 ```
 
 → FastAPI runs at:
@@ -80,7 +80,7 @@ npm install lightweight-charts@4.1.1 --save
 * Start frontend:
 
 ```bash
-./frontend/npm run dev
+cd frontend && npm run dev
 ```
 
 → Frontend runs at:
@@ -112,5 +112,24 @@ npm install lightweight-charts@4.1.1 --save
 Last updated: 2025-05-20
 Prepared in alignment with `Plan01.md` and folder structure `REPO_STRUCT.html`
 
+
+---
+
+Ongoing Progress: 2025-05-21
+
+현재 우리는 **호버 시에만 로컬 타임존이 적용된 `YYYY-MM-DD hh:mm:ss.fff` 형식의 타임스탬프**를 렌더링하고 있습니다. 하지만 **차트 하단(x축)에 표시되는 시각은 다음 두 가지 문제가 있습니다**:
+
+1. 로컬 타임존으로 변환되지 않았고,
+2. `"YYYY-MM-DD hh:mm:ss.fff"` 형식의 출력 규칙을 따르지 않고 있습니다.
+
+* 차트 하단의 시각 표시를 **"YYYY-MM-DD hh\:mm\:ss.fff" 전체 포맷으로 출력**하고
+* 수직 방향(vertical orientation)으로 렌더링되도록 하고 싶습니다.
+
+해당 작업은 프론트엔드의 책임이므로, 다음 파일에 적용하는 것이 적절합니다:
+
+```
+RT-Data\unified_dom__trade_replay_gui\frontend\src\main.ts
+```
+(lightweight-charts\@4.1.1의 공식 문서를 기준으로 검토 바랍니다)
 
 ---
