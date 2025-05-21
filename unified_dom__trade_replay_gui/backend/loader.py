@@ -38,6 +38,23 @@ IO Structure:
 		  determines both volume and price.
 		- No timezone or local-time conversion is done here; this is
 		  handled entirely by the frontend.
+		  
+................................................................................
+
+TODO:
+
+    The aggregation logic in the load_trades() method requires
+    refinement—particularly in how the following fields are aggregated
+    for ticks sharing the same UNIX timestamp:
+        - time,
+        - price (originally, value),
+        - volume, and
+        - side.
+        
+    For example, negative `volume` caused by stronger sell pressure
+    can be misleading. Moreover, when multiple executions occur within
+    the same UNIX timestamp, there must be a clear and consistent rule
+    for selecting the representative `price`.
 
 ................................................................................"""
 

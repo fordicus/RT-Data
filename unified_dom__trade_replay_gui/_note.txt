@@ -136,8 +136,9 @@ docstring에 오해의 소지 없이 표현해주길 바랍니다.
 
 ---
 
-TODO:  차트 시야 범위 (viewport)에 따라 tooltip data 제한
-문제점: volume이 마이너스 표기됨.
+unified_dom__trade_replay_gui\frontend\src\main.ts
+unified_dom__trade_replay_gui\backend\app.py
+unified_dom__trade_replay_gui\backend\loader.py
 
 ---
 

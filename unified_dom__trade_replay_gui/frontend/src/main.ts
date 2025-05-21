@@ -50,6 +50,12 @@ IO Structure:
 		Line chart rendered with Lightweight Charts.
 		Timestamps and tooltips reflect user's local time.
 
+................................................................................
+
+TODO:
+
+	Dynamic caching for the tooltip data according to the current viewport.
+
 ................................................................................*/
 
 import {
