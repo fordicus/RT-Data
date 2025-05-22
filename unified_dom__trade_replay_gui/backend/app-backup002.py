@@ -47,7 +47,7 @@ IO Structure:
 
 		/api/orderbook → JSON object:
 			{ "time": float, "DOM": "N/A" | { "a": [...], "b": [...] } }
-
+		
 ................................................................................
 
 Local Test (DO NOT DELETE, ChatGPT):
@@ -61,7 +61,7 @@ Local Test (DO NOT DELETE, ChatGPT):
 
 ................................................................................"""
 
-from fastapi import FastAPI, Query, HTTPException
+from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.loader import (
@@ -83,35 +83,6 @@ app.add_middleware(
 )
 
 
-# Global caches for tick, orderbook, and alignment (by symbol)
-tick_cache      = {}
-orderbook_cache = {}
-aligned_cache   = {}
-
-
-@app.on_event("startup")
-def preload_data():
-	"""
-	Preload .csv and .data files into memory at server startup.
-	Only for symbol="UNIUSDC" and date="2025-05-17"
-	"""
-	symbol = "UNIUSDC"
-	date   = "2025-05-17"
-
-	tick_path = f"data/{symbol}_{date}.csv"
-	dom_path  = f"data/{date}_{symbol}_ob200.data"
-
-	# Load and cache CSV + DOM data
-	tick_cache[symbol]      = load_trades(tick_path)
-	orderbook_cache[symbol] = load_orderbook(dom_path)
-
-	# Align once, cache result
-	aligned_cache[symbol] = align_orderbook_to_ticks(
-		tick_cache[symbol],
-		orderbook_cache[symbol]
-	)
-
-
 @app.get("/api/tick")
 def get_tick_data(
 	symbol: str = "UNIUSDC",
@@ -120,11 +91,12 @@ def get_tick_data(
 	"""
 	Serve tick-level trade data from CSV as JSON records.
 	"""
-	df = tick_cache.get(symbol)
+	file_path = f"data/{symbol}_{date}.csv"
 
-	if df is None:
-		raise HTTPException(500, "Tick data not preloaded")
+	# Load execution data from CSV
+	df = load_trades(file_path)
 
+	# Return as list of dicts
 	return df.to_dict(orient="records")
 
 
@@ -141,11 +113,15 @@ def get_orderbook_snapshot(
 		- DOM snapshot at closest past ts ≤ given time
 		- or "N/A" if no such snapshot exists
 	"""
-	aligned = aligned_cache.get(symbol)
+	# Load execution and DOM data
+	tick_path = f"data/{symbol}_{date}.csv"
+	dom_path  = f"data/{date}_{symbol}_ob200.data"
 
-	if aligned is None:
-		raise HTTPException(500, "Orderbook not preloaded")
+	df_ticks = load_trades(tick_path)
+	dom_dict = load_orderbook(dom_path)
 
+	# Align and lookup requested time
+	aligned  = align_orderbook_to_ticks(df_ticks, dom_dict)
 	dom_snap = aligned.get(time, "N/A")
 
 	return {

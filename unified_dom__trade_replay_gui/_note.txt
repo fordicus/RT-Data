@@ -342,13 +342,42 @@ lightweight-charts@4.1.1,
 
 ---
 
+그럼 첨부한 최신의 플랜과 룰셋에 따라 다음으로 필요한 작업을 해주고,
+나에게 컨펌받을 것이 무엇인지 명확하게 해줘.
+목적에 맞게 정정된 loader.py를 채팅창에 출력하는 것이 첫번째구나.
+원본을 최대한 보존하고, RULESET.md을 엄격하게 따르고,
+필요한 최소한의 수정 혹은 확장을 부탁한다.
+
 첨부파일 및 참조링크:
+- Plan02 – Order Book Normalization and Backend API Integration.md
+- RULESET.md
+- loader.py (the lateset version)
+- app.py (the lateset version)
+
+---
+
+수정된 app.py를 채팅창에 출력바란다.
+기존 코드의 기능을 손상시키지 말고,
+RULESET.md의 가이드라인을 엄격히 따를 것.
+
+첨부파일 및 참조링크:
+- Plan02 – Order Book Normalization and Backend API Integration.md
+- RULESET.md
+- loader.py (the lateset version)
+- app.py (the lateset version)
+
+---
+
+첨부파일 및 참조링크:
+- Plan02 – Order Book Normalization and Backend API Integration.md
+- RULESET.md
+- REPO_STRUCT.html
+- dev_log.md
 - app.py
 - loader.py
 - main.ts
 - vis_dom.py
-- UNIUSDC_2025-05-17.csv
-- 2025-05-17_UNIUSDC_ob200.data
+- https://github.com/fordicus/RT-Data/blob/main/bybit_execution_format.md
 - https://github.com/fordicus/RT-Data/blob/main/bybit_orderbook_format.md
 
 ---

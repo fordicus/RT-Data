@@ -1,136 +1,151 @@
+
 # Plan02 – Order Book Normalization and Backend API Integration
 
 ---
 
 ## ✅ Goal: Normalize Order Book Snapshots for Tick-Based Rendering
 
-To enable synchronized rendering between tick-based execution charts and order book (DOM) snapshots, we adopt a normalization strategy in which each trade tick timestamp is matched to the **most recent past order book snapshot**. This ensures a stable one-to-one time alignment, even though executions and order book updates are independently triggered and not necessarily sorted. The resulting structure enables fast API-based retrieval and seamless frontend rendering without requiring on-demand search or interpolation.
+To enable synchronized rendering between tick-based execution charts and order
+book (DOM) snapshots, we adopt a normalization strategy in which each trade
+tick timestamp is matched to the **most recent past order book snapshot**.
 
-If no suitable past snapshot exists for a given tick timestamp, the system falls back to a placeholder format such as:
+This ensures a stable one-to-one time alignment, even though executions and
+order book updates are independently triggered. If no suitable DOM snapshot
+exists for a tick timestamp, the system returns a placeholder:
 
 ```json
 { "time": <tick_ts>, "DOM": "N/A" }
-```
-
-This preserves downstream consistency and enables pipeline-level filtering or placeholder logic in both frontend and model consumption layers.
+````
 
 ---
 
-## 📁 File Context
+## 🗂️ File Context
 
-* `unified_dom__trade_replay_gui/backend/loader.py` – to be extended with `load_orderbook()` and `align_orderbook_to_ticks()`
-* `unified_dom__trade_replay_gui/backend/app.py` – to expose `/api/orderbook?time=...` endpoint
-* Input source:
+* `backend/loader.py`
 
-  * `data/2025-05-17_UNIUSDC_ob200.data` (NDJSON DOM log)
-  * `data/UNIUSDC_2025-05-17.csv` (execution log, already handled)
+  * `load_orderbook()`: parse .data into timestamp → DOM snapshot
+  * `align_orderbook_to_ticks()`: map tick timestamp to snapshot
+* `backend/app.py`
 
-Reference formats:
+  * `/api/orderbook`: serve DOM aligned to tick time
+  * `/api/tick`: serve trade tick stream
+* Input data:
 
-* [bybit\_orderbook\_format.md](https://github.com/fordicus/RT-Data/blob/main/bybit_orderbook_format.md)
+  * `data/UNIUSDC_2025-05-17.csv` – trade tick file
+  * `data/2025-05-17_UNIUSDC_ob200.data` – NDJSON DOM log
+
+Format references:
+
 * [bybit\_execution\_format.md](https://github.com/fordicus/RT-Data/blob/main/bybit_execution_format.md)
+* [bybit\_orderbook\_format.md](https://github.com/fordicus/RT-Data/blob/main/bybit_orderbook_format.md)
 
 ---
 
-## 🚀 Implementation Steps
+## 🚀 Implementation Summary
 
-1. **In `loader.py`:**
+### `loader.py`
 
-   * Add `load_orderbook(path: str) -> dict[float, dict]`:
+* ✅ `load_orderbook(path: str) -> dict[float, dict]`
 
-     * Parses NDJSON order book `.data` file.
-     * Handles both `"snapshot"` and `"delta"` events.
-     * Reconstructs `DOM[ts] = {"a": [...], "b": [...]}` state per snapshot point.
+  * Parses NDJSON `.data` file
+  * Supports both `"snapshot"` and `"delta"`
+  * Reconstructs full state `DOM[ts] = { a: [...], b: [...] }`
+* ✅ `align_orderbook_to_ticks(tick_df, ob_dict) -> dict`
 
-   * Add `align_orderbook_to_ticks(tick_df, ob_dict)`:
+  * For each `tick_ts`, finds closest past `DOM_ts`
+  * Fallbacks to `"N/A"` if no match
 
-     * For each tick timestamp, find the closest past `ts` in `ob_dict`.
-     * If none found, assign `"DOM": "N/A"`; otherwise, attach the latest DOM snapshot.
-     * Returns a mapping: `tick_ts → DOM`.
+### `app.py`
 
-2. **In `app.py`:**
+* ✅ `/api/tick?symbol=...&date=...`
 
-   * Add a new endpoint:
+  * Loads tick data from cache
+  * Returns JSON list of ticks
 
-     ```python
-     @app.get("/api/orderbook")
-     def get_orderbook(time: float):
-         ...
-     ```
+* ✅ `/api/orderbook?symbol=...&date=...&time=...`
 
-   * The handler:
+  * On startup, caches:
 
-     * Accepts `time` (float in seconds).
-     * Uses in-memory dict or on-demand query from preloaded normalized snapshot data.
-     * Returns JSON:
+    * trades → `tick_cache`
+    * DOM → `orderbook_cache`
+    * aligned snapshots → `aligned_cache`
+  * Lookup is constant time (precomputed)
+  * Returns:
 
-       ```json
-       { "time": ..., "DOM": { "a": [...], "b": [...] } }
-       ```
+    ```json
+    { "time": 1747442146.179, "DOM": { "a": [...], "b": [...] } }
+    ```
 
-       or
-
-       ```json
-       { "time": ..., "DOM": "N/A" }
-       ```
+    or `"N/A"`
 
 ---
 
-## 🧪 Backend-Only Test Strategy
+## 🧪 Backend Test Strategy
 
-Since frontend is not involved at this stage, we ensure correctness entirely via backend tooling:
-
-### 1. Unit Test Coverage (suggested in `tests/test_loader.py`)
-
-* `test_load_orderbook()`:
-
-  * Validates parsing and reconstruction logic for `.data` file
-  * Ensures `"snapshot"` resets and `"delta"` applies correctly
-
-* `test_align_orderbook_to_ticks()`:
-
-  * Confirms that for each tick, the correct (≤ ts) DOM snapshot is used
-  * Verifies fallback `"N/A"` behavior when no past snapshot exists
-
-### 2. Manual FastAPI curl test
-
-After `uvicorn backend.app:app --reload`, test:
+### Manual test via curl
 
 ```bash
-curl 'http://localhost:8000/api/orderbook?time=1715883422'
+# Dump all tick data
+curl "http://localhost:8000/api/tick?symbol=UNIUSDC&date=2025-05-17" -o dump_tick.json
+
+# Fetch DOM aligned to specific timestamp
+curl "http://localhost:8000/api/orderbook?symbol=UNIUSDC&date=2025-05-17&time=1747442146.179" -o dump_dom.json
 ```
 
-Expected responses:
+### ✅ Expected Output
 
-🟢 If DOM is available:
+1. Tick dump:
+
+```json
+[
+  {
+    "time": 1747442146.179,
+    "value": 6.0024,
+    "side": "sell",
+    "volume": -5.05
+  },
+  ...
+]
+```
+
+2. DOM snapshot:
 
 ```json
 {
-  "time": 1715883422,
+  "time": 1747442146.179,
   "DOM": {
-    "b": [["5.09", "720.0"], ...],
-    "a": [["5.10", "530.0"], ...]
+    "a": [["5.10", "300.0"], ...],
+    "b": [["5.09", "500.0"], ...]
   }
 }
 ```
 
-⚠️ If no past DOM exists:
+or:
 
 ```json
 {
-  "time": 1715883422,
+  "time": 1747442146.179,
   "DOM": "N/A"
 }
 ```
 
 ---
 
-## 🔄 Design Considerations
+## ⏱ Performance Result
 
-* **Backend-only focus** enables tight feedback on parsing and normalization logic
-* **Frontend delay** is avoided by delivering DOM snapshots via pre-aligned mappings
-* **Data structure predictability** supports both realtime rendering and future ML replay
+| Endpoint         | Response Time (Before) | After Optimization |
+| ---------------- | ---------------------- | ------------------ |
+| `/api/tick`      | < 1s                   | ✅ < 1s             |
+| `/api/orderbook` | 3.5\~4.0s              | ✅ < 1s      |
 
 ---
 
-✅ This plan finalizes all backend responsibilities for DOM integration and ensures complete testability **without frontend**, paving the way for Plan03 (frontend rendering integration).
+## 🔚 Conclusion
+
+Plan02 is now complete with:
+
+* 🧠 Efficient memory-cached preprocessing at server startup
+* 🧪 Reproducible backend testing without frontend involvement
+* 📉 Subsecond DOM delivery at arbitrary tick-aligned timestamps
+
+→ Ready to proceed to **Plan03: Dual Chart Rendering and Frontend Sync**.

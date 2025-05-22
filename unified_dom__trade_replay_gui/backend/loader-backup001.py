@@ -2,9 +2,7 @@ r"""............................................................................
 
 How to Use:
 
-	Called internally via `app.py` endpoints:
-		- GET /api/tick
-		- GET /api/orderbook
+	Called internally via `app.py` endpoint: GET /api/tick
 
 ................................................................................
 
@@ -16,30 +14,34 @@ Dependency:
 
 Functionality:
 
-	Provides:
-		- load_trades(): preprocesses execution (CSV) data
-		- load_orderbook(): parses NDJSON order book data
-		- align_orderbook_to_ticks(): matches DOM state to each tick
-
-	Timestamp alignment: each tick is assigned the closest
-	≤ ts order book snapshot, or "N/A" if none exists.
+	Loads raw ByBit tick-level trade CSV into a cleaned and aggregated
+	DataFrame. Timestamps are converted to seconds with millisecond
+	precision. Per timestamp, buy/sell actions are grouped separately,
+	aggregated, and net volume/side/price is computed based on dominance.
 
 ................................................................................
 
 IO Structure:
 
 	Input:
-		- CSV file: ['timestamp', 'price', 'side', 'volume']
-		- .data file: NDJSON with {'type', 'ts', 'data': {'a': [], 'b': []}}
-
+		CSV with columns: ['timestamp', 'price', 'side', 'volume']
 	Output:
-		- load_trades(): pd.DataFrame with [time, value, side, volume]
-		- load_orderbook(): dict[ts: float] → snapshot
-		- align_orderbook_to_ticks(): dict[tick_ts: float] → DOM
+		pd.DataFrame with:
+			- 'time'   : float (UNIX timestamp in seconds, ms-preserved)
+			- 'value'  : float (price from dominant side)
+			- 'side'   : str ('buy' or 'sell')
+			- 'volume' : float (net volume = buy - sell)
 
+	NOTE:
+		- Raw timestamps in milliseconds are converted to seconds.
+		- Duplicate timestamps are aggregated by side, and net dominance
+		  determines both volume and price.
+		- No timezone or local-time conversion is done here; this is
+		  handled entirely by the frontend.
+		  
 ................................................................................
 
-TODO (DO NOT DELETE, ChatGPT):
+TODO:
 
     The aggregation logic in the load_trades() method requires
     refinement—particularly in how the following fields are aggregated
@@ -57,8 +59,6 @@ TODO (DO NOT DELETE, ChatGPT):
 ................................................................................"""
 
 import pandas as pd
-import json
-import bisect
 
 
 def load_trades(path: str) -> pd.DataFrame:
@@ -143,72 +143,3 @@ def load_trades(path: str) -> pd.DataFrame:
 	result = result.sort_values("time").reset_index(drop=True)
 
 	return result
-
-def load_orderbook(path: str) -> dict:
-	"""
-	Load ByBit DOM NDJSON and reconstruct time-indexed snapshots.
-
-	Returns:
-		dict[ts: float] → {"a": [...], "b": [...]}
-	"""
-	dom_dict = {}
-	current  = {"a": [], "b": []}
-
-	with open(path, "r") as f:
-		for line in f:
-			entry = json.loads(line)
-
-			ts    = entry.get("ts") / 1000  # convert ms to float seconds
-			etype = entry.get("type")
-			data  = entry.get("data", {})
-
-			if etype == "snapshot":
-				current = {
-					"a": data.get("a", []),
-					"b": data.get("b", [])
-				}
-			elif etype == "delta":
-				for side in ("a", "b"):
-					levels = {price: size for price, size in current[side]}
-					for price, size in data.get(side, []):
-						if float(size) == 0:
-							levels.pop(price, None)
-						else:
-							levels[price] = size
-					current[side] = sorted(
-						[(p, s) for p, s in levels.items()],
-						key=lambda x: float(x[0]),
-						reverse=(side == "b")
-					)
-
-			dom_dict[ts] = {
-				"a": current["a"].copy(),
-				"b": current["b"].copy()
-			}
-
-	return dom_dict
-
-
-def align_orderbook_to_ticks(
-	tick_df: pd.DataFrame,
-	ob_dict: dict[float, dict]
-) -> dict:
-	"""
-	Map each tick timestamp to the closest past DOM snapshot (≤ ts).
-
-	Returns:
-		dict[tick_ts] → DOM snapshot or "N/A"
-	"""
-	snap_times = sorted(ob_dict.keys())  # ascending float timestamps
-	snap_map   = {}
-
-	for tick_ts in tick_df["time"]:
-		idx = bisect.bisect_right(snap_times, tick_ts)
-
-		if idx == 0:
-			snap_map[tick_ts] = "N/A"
-		else:
-			nearest_ts = snap_times[idx - 1]
-			snap_map[tick_ts] = ob_dict[nearest_ts]
-
-	return snap_map
