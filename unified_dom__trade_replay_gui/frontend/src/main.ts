@@ -69,6 +69,23 @@ Project Structure & Build Tool:
 
 ................................................................................
 
+Limitation:
+
+	2025-05-22:
+		There are four sources of time information displayed in the charts:
+		[1]. The x-axis' time labels.
+		[2]. The custom crosshair hover tooltip (on the left pane).
+		[3]. The mirrored text of the custom hover tooltip (on the right pane).
+		[4]. The default tooltip on the bottom of the left pane's crosshair.
+
+		While sources [1-3] correctly apply the local timezone,
+		source [4] consistently displays the original UNIX Timestamp,
+		which is UTC+0. This specific behavior for the default crosshair
+		tooltip [4] could not be modified or overridden within
+		lightweight-charts@4.1.1.
+		
+................................................................................
+
 TODO (DO NOT DELETE, ChatGPT):
 
 	Dynamic caching for the tooltip data according to the current viewport.
@@ -80,6 +97,9 @@ import {
 	createChart,
 	CrosshairMode,
 } from 'lightweight-charts'
+
+const localTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+console.log('Detected Local TimeZone ID:', localTimeZone); 
 
 /**
  * Helper: zero-pads number to at least `w` width (default: 2)
@@ -142,7 +162,8 @@ const leftChart = createChart(leftEl, {
 		timeVisible       : true,
 		secondsVisible    : true,
 		tickMarkFormatter : () => ''
-	}
+	},
+	timeZone: localTimeZone
 })
 
 /**
@@ -165,7 +186,8 @@ const rightChart = createChart(rightEl, {
 	timeScale   : {
 		timeVisible    : true,
 		secondsVisible : true
-	}
+	},
+	timeZone: localTimeZone
 })
 
 const leftSeries = leftChart.addLineSeries()
@@ -317,7 +339,7 @@ document.body.appendChild(fixedTooltip)
  * Right chart mirror text box for debugging (absolute positioned)
  * DO NOT DELETE THIS BLOCK: USEFUL for DEBUGGING
  */
-/* const rightText = document.createElement('div')
+const rightText = document.createElement('div')
 rightText.className = 'mirrored-tooltip'
 rightText.style = `
 	position        : absolute;
@@ -331,7 +353,7 @@ rightText.style = `
 	white-space     : pre;
 	pointer-events  : none;
 `
-document.body.appendChild(rightText) */
+document.body.appendChild(rightText)
 
 const tooltipCache = new Map<number, any>()
 let time_cursor: number | null = null
@@ -365,7 +387,8 @@ fetch('http://localhost:8000/api/tick?symbol=UNIUSDC&date=2025-05-17')
 			timeScale: {
 				tickMarkFormatter: (ts: number) =>
 					formatTickLabel(toLocalDate(ts))
-			}
+			},
+			timeZone: localTimeZone
 		})
 
 		leftSeries.setData(points)
@@ -431,7 +454,7 @@ leftChart.subscribeCrosshairMove(param => {
 	if (!param.time || !param.seriesData.has(leftSeries)) {
 		tooltip.style.display   = 'none'
 		// DO NOT DELETE (DEBUGGING PURPOSE)
-		// rightText.textContent   = ''
+		rightText.textContent   = ''
 		return
 	}
 
@@ -453,7 +476,7 @@ leftChart.subscribeCrosshairMove(param => {
 	rightChart.setCrosshairPosition(param.point)
 	
 	// DO NOT DELETE (DEBUGGING PURPOSE)
-	// rightText.textContent = tooltip.innerText
+	rightText.textContent = tooltip.innerText
 
 	/**
 	 * 🧠 DOM snapshot fetch (Plan03-P1 final)
