@@ -53,7 +53,7 @@ IO Structure:
 Local Test (DO NOT DELETE, ChatGPT):
 			
 	curl "http://localhost:8000/api/tick?symbol=UNIUSDC&date=2025-05-17" -o dump_tick.json
-	curl "http://localhost:8000/api/orderbook?symbol=UNIUSDC&date=2025-05-17&time=1747442146.179" -o dump_dom.json
+	curl "http://localhost:8000/api/orderbook?symbol=UNIUSDC&date=2025-05-17&time=1747525846.066" -o dump_dom.json
 	
 	Location of execution and DOM data
 		tick_path = f"data/{symbol}_{date}.csv"
