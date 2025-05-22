@@ -382,6 +382,65 @@ RULESET.md의 가이드라인을 엄격히 따를 것.
 
 ---
 
+첨부파일:
+- Chrome F12 Visual Snippet.png
+- Chrome F12 One-snapshot as Object.txt
+- vite.config.ts
+- main.ts
+- RULESET.md
+
+호버시에 FastAPI에서 넘어오는 데이터는
+첨부파일을 확인하여 타당성을 치밀하게 검토해줘.
+
+하지만, 클릭시에도 FastAPI에서 브라우저로
+데이터가 넘어오고 있어. 물론 렌더링에서 호버 vs 클릭
+액션분기점을 설정할 수 있지만,
+frontend에서 default (호버 기준)일 때
+클릭 이벤트에는 아예 FastAPI에 데이터요청을 하지 않도록
+할 수 있니?
+즉, frontend에 호버vs클릭 거동을 컨트롤하는
+전역변수를 declare한 뒤, default를 호버로하고,
+호버이벤트 발생시에는 FastAPI로 데이터 요청을하지만,
+클릭이벤트 시에는 FastAPI에 요청조차 하지 않는거야.
+이 부분에 집중해보자.
+frontend의 main.ts 코드를 어떻게 변경해야하는 건지
+토론 및 계획수립을 먼저해봐. 컨펌 뒤 코드수정하자.
+
+
+
+
+
+
+---
+
+첨부파일 및 참조링크:
+
+	AI-RnD-Kit\
+		RULESET.md
+		
+	unified_dom__trade_replay_gui\
+		dev_log.md
+		REPO_STRUCT.html
+		plan\Plan02 – Order Book Normalization and Backend API Integration.md
+		plan\Plan03 – Dual Chart Frontend with Synchronized DOM Snapshot.md
+		backend\
+			app.py
+			loader.py
+		frontend\
+			index.html
+			tsconfig.json
+			vite.config.ts
+			src\
+				main.ts
+		data\
+			UNIUSDC_2025-05-17.csv
+			2025-05-17_UNIUSDC_ob200.data
+
+	https://github.com/fordicus/RT-Data/blob/main/bybit_execution_format.md
+	https://github.com/fordicus/RT-Data/blob/main/bybit_orderbook_format.md
+
+---
+
 버전도큐를 확인해 우측에 페인 생성.
 이 페인은 오더북을 렌더링하기 위함.
 단순호버시에 틱의 시간포함 가장 가까운 과거의 오더북을 우측페인에 렌더링.

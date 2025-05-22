@@ -38,9 +38,34 @@ IO Structure:
 
 	Input:
 		GET http://localhost:8000/api/tick?symbol=...&date=...
+		GET http://localhost:8000/api/orderbook?symbol=...&date=...&time=...
 
 	Output:
-		Dual-chart GUI with event-synced depth chart placeholder
+		Dual-chart GUI with synchronized event-linked rendering
+
+................................................................................
+
+Project Structure & Build Tool:
+
+	This file:
+		frontend/src/main.ts
+
+	Related files:
+		frontend/vite.config.ts
+		frontend/index.html
+
+	Vite configuration is essential for:
+		- Module aliasing (e.g., "@/utils/...")
+		- TypeScript support
+		- Hot Module Replacement during `npm run dev`
+
+	NOTE: Without vite.config.ts, dev server will fail to resolve
+	      module paths correctly, especially when importing from ./src.
+
+	IMPORTANT:
+		Vite must be run from the `frontend/` directory for alias paths
+		and entry resolution to work as expected. Ensure consistency with
+		REPO_STRUCT.html and fast refresh pipeline.
 
 ................................................................................
 
@@ -251,6 +276,50 @@ fetch('http://localhost:8000/api/tick?symbol=UNIUSDC&date=2025-05-17')
 	})
 
 /**
+ * Global flag for DOM fetch interaction mode
+ *
+ * default = 'hover' → DOM snapshots are fetched only during hover
+ * other mode (to be used in Plan03-P6) = 'click'
+ */
+let domFetchMode: 'hover' | 'click' = 'hover'
+
+/**
+ * Flag for suppressing fetch caused by click-induced crosshair moves.
+ *
+ * Activated on mousedown (capture phase),
+ * cleared on mouseup (next tick), covers entire click lifecycle.
+ */
+let isClickSuppressed = false
+
+/**
+ * Activate fetch suppression for full click duration.
+ *
+ * Capture phase ensures we suppress before crosshairMove triggers.
+ */
+leftEl.addEventListener(
+	'mousedown',
+	() => {
+		isClickSuppressed = true
+	},
+	true  // capture phase
+)
+
+/**
+ * Clear suppression after full click-release finishes.
+ *
+ * Use next tick to ensure clean separation of event phases.
+ */
+leftEl.addEventListener(
+	'mouseup',
+	() => {
+		setTimeout(() => {
+			isClickSuppressed = false
+		}, 0)
+	},
+	true
+)
+
+/**
  * Hover handler → update floating tooltip + mirror to right chart
  */
 leftChart.subscribeCrosshairMove(param => {
@@ -277,6 +346,27 @@ leftChart.subscribeCrosshairMove(param => {
 	// Sync crosshair and display text in right chart
 	rightChart.setCrosshairPosition(param.point)
 	rightText.textContent = tooltip.innerText
+
+	/**
+	 * 🧠 DOM snapshot fetch (Plan03-P1 final)
+	 *
+	 * Only fetch if:
+	 * - in 'hover' mode
+	 * - NOT during click (mousedown ~ mouseup)
+	 */
+	if (domFetchMode === 'hover' && !isClickSuppressed) {
+		const url =
+			`/api/orderbook?symbol=UNIUSDC&date=2025-05-17&time=${ts}`
+
+		fetch(url)
+			.then(res => res.json())
+			.then(data => {
+				console.log("DOM Snapshot", data.DOM)
+			})
+			.catch(err => {
+				console.error("DOM fetch error:", err)
+			})
+	}
 })
 
 /**

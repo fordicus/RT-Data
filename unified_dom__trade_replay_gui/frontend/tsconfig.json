@@ -1,25 +1,36 @@
 {
-  "compilerOptions": {
-    "target": "ES2020",
-    "useDefineForClassFields": true,
-    "module": "ESNext",
-    "lib": ["ES2020", "DOM", "DOM.Iterable"],
-    "skipLibCheck": true,
+	// tsconfig.json — TypeScript configuration for Vite + Modern Browser Frontend
 
-    /* Bundler mode */
-    "moduleResolution": "bundler",
-    "allowImportingTsExtensions": true,
-    "verbatimModuleSyntax": true,
-    "moduleDetection": "force",
-    "noEmit": true,
+	"compilerOptions": {
+		// ⚙️ Target and module system for modern JS and bundlers
+		"target": "ES2020",               // Enables optional chaining, nullish coalescing, etc.
+		"module": "ESNext",               // Keeps modules in native ESM form for Vite
+		"moduleResolution": "bundler",   // Use Vite-style resolution for bare imports
+		"useDefineForClassFields": true, // TS class fields behave like native JS
 
-    /* Linting */
-    "strict": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "erasableSyntaxOnly": true,
-    "noFallthroughCasesInSwitch": true,
-    "noUncheckedSideEffectImports": true
-  },
-  "include": ["src"]
+		// 📚 Built-in library support (DOM APIs + modern JS)
+		"lib": ["ES2020", "DOM", "DOM.Iterable"],
+
+		// 🚫 Disable JS file emission — Vite handles bundling
+		"noEmit": true,
+
+		// 🧠 Experimental flags (used in backup config, retained here for compatibility)
+		"allowImportingTsExtensions": true,   // Allows imports like './a.ts'
+		"verbatimModuleSyntax": true,         // Keeps import/export syntax as-is
+		"moduleDetection": "force",           // Treat all files as modules (even without import/export)
+		"erasableSyntaxOnly": true,           // Rarely used; specific to some transformers
+		"noUncheckedSideEffectImports": true, // Disallow non-module imports unless explicitly marked
+
+		// 🔍 Lint-like strictness for code hygiene
+		"strict": true,                       // Enable all strict checks
+		"noUnusedLocals": true,               // Warn for unused variables
+		"noUnusedParameters": true,           // Warn for unused function args
+		"noFallthroughCasesInSwitch": true,   // Prevent unintentional fallthrough
+
+		// ⚠️ Optional: Disable type checks for node_modules (speeds up dev)
+		"skipLibCheck": true
+	},
+
+	// 📁 Source includes: restricts to frontend src/
+	"include": ["src"]
 }

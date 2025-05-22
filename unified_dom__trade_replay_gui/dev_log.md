@@ -1,5 +1,40 @@
-# Development Log (Backend + Frontend Replay Stack)
+# 📜 Developer Log – RT-Data Frontend/Backend Sync Project
 
+## 📁 Attached Files & Reference Links
+
+```text
+AI-RnD-Kit/
+└── RULESET.md
+
+unified_dom__trade_replay_gui/
+├── dev_log.md
+├── REPO_STRUCT.html
+├── dump_tick.json
+├── dump_dom.json
+├── plan/
+│   ├── Plan02 – Order Book Normalization and Backend API Integration.md
+│   └── Plan03 – Dual Chart Frontend with Synchronized DOM Snapshot.md
+├── backend/
+│   ├── app.py
+│   └── loader.py
+├── frontend/
+│   ├── index.html
+│   ├── tsconfig.json
+│   ├── vite.config.ts
+│   └── src/
+│       └── main.ts
+└── data/
+    ├── UNIUSDC_2025-05-17.csv
+    └── 2025-05-17_UNIUSDC_ob200.data
+````
+
+🔗 References:
+
+* [`dev_log.md`](https://github.com/fordicus/RT-Data/blob/main/unified_dom__trade_replay_gui/dev_log.md)
+* [`bybit_execution_format.md`](https://github.com/fordicus/RT-Data/blob/main/bybit_execution_format.md)
+* [`bybit_orderbook_format.md`](https://github.com/fordicus/RT-Data/blob/main/bybit_orderbook_format.md)
+
+---
 ## 🐍 Python (Backend)
 
 ```bash
@@ -27,43 +62,11 @@ npm install lightweight-charts@4.1.1 --save
 Currently tested only with a specific file:
 `UNIUSDC_2025-05-17.csv`
 
-→ Generalize the pipeline to support **arbitrary tick data files**
-(passed as arguments).
+→ Generalize the pipeline to support **arbitrary tick data files** (passed as arguments).
 
 ---
 
-## ✅ Stage 1‑A: Backend Loader Unit Test
-
-```bash
-pytest backend/tests/test_loader.py
-```
-
----
-
-## ✅ Stage 1‑B: FastAPI Live Test
-
-```bash
-uvicorn backend.app:app --reload
-```
-
-Verify in browser or via curl:
-
-[`http://localhost:8000/api/tick?symbol=UNIUSDC&date=2025-05-17`](http://localhost:8000/api/tick?symbol=UNIUSDC&date=2025-05-17)
-
----
-
-## ✅ Stage 2‑A: Frontend Scaffolding
-
-```bash
-npm create vite@latest frontend -- --template vanilla-ts
-cd frontend
-npm install
-npm install lightweight-charts@4.1.1 --save
-```
-
----
-
-## ✅ Stage 2‑B: Connect Chart to API
+## ✅ Connect Chart to API
 
 * Overwrite:
   `frontend/index.html` and `frontend/src/main.ts`
@@ -96,7 +99,7 @@ cd frontend && npm run dev
   This preserves millisecond-level precision in `float` format,
   as required by Lightweight Charts™.
   Note that **no timezone or localtime conversion** occurs in the backend.
-  The frontend--via `Date(time * 1000)`--handles local-time conversion for rendering.
+  The frontend--via `Date(ts * 1000)`--handles local-time conversion for rendering.
 
 * **Duplicate timestamps (ms)** (`backend/loader.py`):
   If multiple entries share the same timestamp,
@@ -106,153 +109,82 @@ cd frontend && npm run dev
 
 ---
 
-## ✅ Stage 2‑C: Enhanced Chart UX (2025-05-21)
+## 🧠 Current Phase: Plan03
 
-Today’s enhancements complete the local-time rendering overhaul and introduce
-interactive features for better price navigation:
+Plan03 focuses on frontend expansion: a dual-chart system where the right pane visualizes DOM (order book) data in sync with the left-side execution chart.
 
-### ✅ Completed:
+### ✅ So far completed (2025-05-22 기준):
 
-* All timestamps are now rendered in **local time (browser-based)**.
-
-* **tickMarkFormatter** on x-axis dynamically switches between:
-
-  * `"YYYY-MM-DD"` at daybreak
-  * `"hh:mm:ss"` otherwise
-
-* Implemented **hover tooltip** with:
-
-  * Local timestamp (`YYYY-MM-DD hh:mm:ss.fff`)
-  * price, volume, side
-
-* Implemented **click-to-lock time\_cursor**:
-
-  * Clicking the chart sets `time_cursor` at the selected tick
-  * `time_cursor` shows:
-
-    * a **fixed-position tooltip** (same format as hover)
-    * a **red circle marker** on the line chart
+* Hover-based DOM fetching is implemented using `subscribeCrosshairMove()`
+* DOM fetch is suppressed on click (via `isClickSuppressed` mechanism)
+* Right-side pane correctly mirrors DOM tooltips on hover
+* DOM snapshot fetches only on hover (not click), following Plan03 policy
+* `vite.config.ts` and `tsconfig.json` are now minimal but correctly functional
+* Sub-1s API response confirmed for both `/api/tick` and `/api/orderbook`
 
 ---
 
-## 🧭 TODO (2025-05-21): Dual Chart-Based DOM Visualization Plan
+## 🧱 Plan03 Breakdown & Status
 
-Dual chart-based one-way time-synchronized order book rendering will be 
-implemented by independently creating two `createChart()` instances: 
-the left for the time-series trade chart, and the right for the order book 
-depth chart. These two charts will be arranged side-by-side using CSS Flexbox.
-
-Mouse interaction will be handled exclusively by the left chart. The event 
-`subscribeCrosshairMove()` will be used to obtain `param.time` and 
-`param.point.x`, which are then used to one-way synchronize the right chart by 
-calling `timeScale().setVisibleLogicalRange(...)` and 
-`chart.setCrosshairPosition(...)`. Simultaneously, the frontend will request 
-a DOM snapshot via `/api/orderbook?time=...`, and the response will be 
-converted into a depth visualization using `HistogramSeries` or 
-`LineSeries` with `setData()`.
-
-Both charts must share identical options such as `timeVisible: true` and 
-`timeZone: 'local'` to maintain visual consistency. To minimize latency, 
-the order book responses should be cached on the client side to avoid 
-redundant API fetches for already visited timestamps.
-
-This architecture is fully feasible under Lightweight Charts v4.1.1. 
-The implementation approach aligns closely with the official tutorial 
-["Set crosshair position"](https://tradingview.github.io/lightweight-charts/tutorials/how_to/set-crosshair-position), 
-which serves as the most reliable reference for this feature.
+| Phase | Component                                  | Goal                              | Status  |
+| ----- | ------------------------------------------ | --------------------------------- | ------- |
+| P1    | Hover-based DOM fetch                      | DOM loads via hover event         | ✅ Done  |
+| P2    | Tooltip duplication on right pane          | Textual DOM info shown right      | ✅ Done  |
+| P3    | DOM depth chart rendering                  | Histogram or LineSeries           | 🟨 TODO |
+| P4    | Time axis alignment                        | Dual chart `timeZone + crosshair` | 🟨 TODO |
+| P5    | `"N/A"` handling                           | Show graceful empty state         | 🟨 TODO |
+| P6    | Optional toggle UI (hover ↔ click control) | Checkbox state modifies behavior  | 🟨 TODO |
+| P7    | RULESET cleanup + modularization           | Final polish                      | 🟨 TODO |
 
 ---
 
-* `Plan02 – Order Book Normalization and Backend API Integration.md` 완료 상태
-* 모든 API 테스트 및 캐시 최적화 결과
-* RULESET.md 형식 엄수
-* frontend 미개입 상태에서 backend만으로 검증 완료
+## 🚧 Next Task: Plan03-P3 (Depth Chart Visualization)
+
+1. Define how the DOM data structure (`{ a: [...], b: [...] }`) maps to visual series:
+
+   * `a` (asks) → Red histogram
+   * `b` (bids) → Green histogram or mirror series
+2. Ensure rendering occurs only on `hover` if in `hover mode`
+3. Optimize layout constraints in `index.html` and `main.ts`
+4. Gracefully handle `"DOM": "N/A"` snapshot values
 
 ---
 
-````markdown
-# 🧾 Development Log (dev_log.md)
+## 📆 Previous Milestones Summary
 
-This development log tracks backend and frontend progress across distinct milestones.
-All log entries follow a structured format, respecting RULESET.md conventions.
+### 🧩 Plan02 Completion Recap
 
----
+* `loader.py` loads both tick and DOM NDJSON
+* DOM is normalized per tick using most recent snapshot ≤ tick timestamp
+* Preloading with `aligned_cache` ensures fast lookup in FastAPI
+* Backend `/api/orderbook` returns subsecond results
 
-## ✅ DONE (2025-05-21): Tick API Integration and Tooltip Sync
+### 🔬 Verified Behavior (2025-05-20\~21)
 
-- Implemented FastAPI endpoint `/api/tick` serving MS-precision trade ticks.
-- Frontend `main.ts` renders price–volume–side per tick with:
-  - Hover tooltip (time-localized)
-  - Click marker (`time_cursor`)
-  - Cached label formatting (sub-ms rendering)
-- Local test:
+* `curl` confirms JSON dump consistency and response time, as also mentioned in the docstring of `unified_dom__trade_replay_gui\backend\app.py`:
 
 ```bash
 curl "http://localhost:8000/api/tick?symbol=UNIUSDC&date=2025-05-17" -o dump_tick.json
-````
-
----
-
-## ✅ DONE (2025-05-22): Dual Chart Creation (No DOM yet)
-
-* Initialized two horizontally aligned charts using Lightweight Charts v4.1.1.
-
-  * Left: execution (tick) chart with full interactivity
-  * Right: empty placeholder chart for future DOM depth
-* Crosshair sync implemented (left → right only).
-* Debug tooltip contents mirrored on right chart (dev inspection).
-
----
-
-## ✅ DONE (2025-05-23): Plan02 – Backend DOM Normalization
-
-### Loader-level Features
-
-* `load_orderbook(path)`: parsed NDJSON order book log into `dict[ts] → DOM`
-* `align_orderbook_to_ticks(ticks, dom_dict)`: for each tick timestamp,
-  finds the closest past DOM timestamp or assigns `"N/A"`.
-
-### API Features
-
-* `/api/orderbook?symbol=...&date=...&time=...` returns:
-
-  * `{ "time": <tick_ts>, "DOM": { a: [...], b: [...] } }`
-  * or fallback `{ "time": ..., "DOM": "N/A" }`
-* Caches:
-
-  * `tick_cache`, `orderbook_cache`, `aligned_cache` (at startup)
-  * Entire alignment done once (O(n log m)).
-
-### Local Test:
-
-```bash
 curl "http://localhost:8000/api/orderbook?symbol=UNIUSDC&date=2025-05-17&time=1747442146.179" -o dump_dom.json
-```
-
-### Performance:
-
-| API              | Response Time |
-| ---------------- | ------------- |
-| `/api/tick`      | < 1s          |
-| `/api/orderbook` | \~4s → ✅ < 1s |
+  ```
+* `"N/A"` fallback returns as expected for unmatched tick timestamps
 
 ---
 
-## 🟨 TODO (2025-05-21)
+## 🛠 Notes on Tooling
 
-Dynamic caching for the tooltip data according to the current viewport.
+* `vite.config.ts`: explicitly resolves `/src/` and ensures live reload
+* `tsconfig.json`: strictly scoped to `frontend/src`, stripped to minimum
+* All frontend logic lives in `main.ts`, loaded via `index.html`
+* FastAPI and Vite dev servers must be launched in parallel for full stack
 
 ---
 
-## 🟨 TODO (2025-05-22): Plan03 – Dual Chart Rendering w/ DOM Snapshot
+## 🔚 Summary
 
-* Frontend to render DOM snapshot on right chart using `/api/orderbook` response.
-* Visual update synchronized with crosshair move or time\_cursor click on left chart.
-* Targeting:
+Plan03 is progressing with stable hover-based snapshot syncing.
+Next step is depth visualization on the right pane.
 
-  * DOM histogram / line depth rendering
-  * Tooltip alignment for DOM side
-* Lightweight Chart v4.1.1 compatible (confirmed).
-* API is ready. Next: DOM rendering logic (frontend only).
+→ *DO NOT proceed to depth rendering without testing Plan03-P3 in isolation.*
 
 ---
