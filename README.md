@@ -70,13 +70,6 @@ to protect the data collection mechanism from overexposure.
 
 ---
 
-### `vis_dom.py` (🟢 Public)
-
-A GUI-based order book player that replays downloaded DOM stream snapshots and deltas —  
-mimicking real-time trading environments for visual inspection and debugging.
-
----
-
 ## 🚀 Final Goal
 
 Deliver a normalized, high-resolution dataset 
