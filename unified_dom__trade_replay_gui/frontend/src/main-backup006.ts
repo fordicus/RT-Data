@@ -1,5 +1,5 @@
 /**
- * ................................................................................
+ * ============================================================================
  * Project Overview:
  *
  *   Dual-panel GUI for tick-level replay and DOM snapshot visualization.
@@ -7,7 +7,7 @@
  *   Left chart: price line, crosshair, floating & fixed tooltips.
  *   Right chart: canvas overlay for DOM bars and mirrored text debug.
  *
- * ................................................................................
+ * ============================================================================
  * Frontend Technology:
  *
  *   ▸ Language         :   TypeScript 5.8.3 (compiled via Vite/ESBuild)
@@ -25,11 +25,11 @@
  *       • vite.config.ts  → dev server config, module aliasing
  *       • index.html      → root layout, chart container anchors
  *
- * ................................................................................
+ * ============================================================================
  *
  * Backend Integration:
  *
- *   - Language     : Python 3.9.19 (FastAPI 0.115.12 + pandas 2.2.2)
+ *   - Language     : Python 3.11 (FastAPI + pandas)
  *   - Components   : 
  *       • app.py       → FastAPI endpoints
  *       • loader.py    → tick and DOM file parser
@@ -42,7 +42,7 @@
  *       curl "http://localhost:8000/api/orderbook?symbol=UNIUSDC&date=2025-05-17\
  *            &time=1747525846.066" -o dump_dom.json
  *
- * ................................................................................
+ * ============================================================================
  * How to Run (Dev Only):
  *
  *   # Start backend server
@@ -63,7 +63,7 @@
  *     • local_frontend.url – shortcut that opens frontend in browser
  *     • test_cmd.bat        – unified launcher for backend + frontend
  *
- * ................................................................................
+ * ============================================================================
  * Limitation:
  *
  *   2025-05-22:
@@ -79,12 +79,12 @@
  *     tooltip [4] could not be modified or overridden within
  *     lightweight-charts@4.1.1.
  *
- * ................................................................................
+ * ============================================================================
  * TODO (DO NOT DELETE, ChatGPT):
  *
  *   Dynamic caching for the tooltip data according to the current viewport.
  *
- * ................................................................................
+ * ============================================================================
  */
 
 import {
@@ -501,21 +501,7 @@ fetch('http://localhost:8000/api/tick?symbol=UNIUSDC&date=2025-05-17')
 				value: pt.value
 			}
 		})
-		
-		/* -----------------------------------------------------------
-		   🧠 Stable Sorting of Timestamps
 
-		   Tick data is strictly ordered by timestamp (UNIX epoch).
-		   Since multiple ticks can occur at the same second,
-		   this sort operation ensures chronological stability.
-
-		   JavaScript's `.sort()` is stable (since ECMAScript 2019),
-		   so insertion order among equal timestamps is preserved.
-		   This guarantees reliable indexing and visual consistency
-		   when hovering or searching the `tooltipCache`.
-
-		   Reference: ECMA-262, §22.1.3.27, Array.prototype.sort
-		----------------------------------------------------------- */
 		points.sort((a, b) => a.time - b.time)
 
 		/* -----------------------------------------------------------
@@ -682,18 +668,7 @@ leftChart.subscribeCrosshairMove(param => {
 	const ts = param.time as number
 	const d  = tooltipCache.get(ts)
 	if (!d || !param.point) return
-	
-	/* -----------------------------------------------------------
-	   🧠 Timestamp Matching Efficiency
 
-	   TooltipCache uses `Map<number, ...>` for O(1) lookup
-	   by UNIX epoch seconds. This design ensures instant access
-	   to tooltip metadata (price, volume, side) during hover,
-	   without requiring binary search over tick series.
-
-	   All keys in `tooltipCache` are precomputed during data load,
-	   so no dynamic timestamp resolution is needed at runtime.
-	----------------------------------------------------------- */
 	const text = formatTooltipText(ts, d)
 
 	const r = leftEl.getBoundingClientRect()

@@ -53,5 +53,9 @@ STEP 12: uvicorn version
 Name: uvicorn
 Version: 0.34.2
 STEP 12 OK
+STEP 13: Built-in Python modules used:
+  - json     (for NDJSON line-by-line DOM parsing)
+  - bisect   (for fast binary search alignment in tick→DOM matching)
+STEP 13 OK
 
 ✅ All dependency checks completed successfully.

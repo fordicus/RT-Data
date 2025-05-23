@@ -1,63 +1,96 @@
 r"""................................................................................
+MODULE OVERVIEW:
 
-How to Use:
-
-	uvicorn backend.app:app --reload
-
-................................................................................
-
-Dependency:
-
-	pip install fastapi==0.115.12
-	pip install "uvicorn[standard]==0.34.2"
-	pip install pandas==2.2.2
+	This module launches a FastAPI-based backend serving historical ByBit
+	market data for interactive DOM replay. Data is accessed from local files
+	and served to the frontend via REST API.
 
 ................................................................................
+ARCHITECTURE:
 
-Functionality:
+	↪ app.py (this file)
+		- Exposes two endpoints:
+			• /api/tick       → tick data (from .csv)
+			• /api/orderbook  → DOM snapshot (from .data)
 
-	Provides a FastAPI backend endpoint for serving tick-level trade data
-	loaded from CSV files in response to frontend queries.
+	↪ backend/loader.py
+		- Loads and aligns tick + DOM data at startup
+		- Populates in-memory caches (tick_cache, orderbook_cache, aligned_cache)
 
-	Provides a second endpoint that serves order book snapshots aligned
-	to tick timestamps, using pre-normalized DOM data parsed from NDJSON.
-
-	Handles CORS to enable cross-origin requests from a web-based frontend.
-
-................................................................................
-
-IO Structure:
-
-	Input:
-		GET /api/tick?symbol=UNIUSDC&date=2025-05-17
-			- symbol: asset symbol (default: UNIUSDC)
-			- date: ISO-style date string (default: 2025-05-17)
-
-		GET /api/orderbook?symbol=UNIUSDC&date=2025-05-17&time=1715883422.0
-			- symbol: asset symbol (default: UNIUSDC)
-			- date: ISO-style date string (default: 2025-05-17)
-			- time: float UNIX timestamp in seconds
-
-	Output:
-		/api/tick → JSON array of ticks:
-			[
-				{ "time": float, "value": float, "side": str, "volume": float },
-				...
-			]
-
-		/api/orderbook → JSON object:
-			{ "time": float, "DOM": "N/A" | { "a": [...], "b": [...] } }
+	↪ frontend/main.ts
+		- Requests data using REST endpoints
+		- Renders:
+			• tick chart (left pane)
+			• DOM canvas + mirrored tooltip (right pane)
 
 ................................................................................
+RUNTIME & DEV SETUP:
 
-Local Test (DO NOT DELETE, ChatGPT):
-			
-	curl "http://localhost:8000/api/tick?symbol=UNIUSDC&date=2025-05-17" -o dump_tick.json
-	curl "http://localhost:8000/api/orderbook?symbol=UNIUSDC&date=2025-05-17&time=1747525846.066" -o dump_dom.json
-	
-	Location of execution and DOM data
-		tick_path = f"data/{symbol}_{date}.csv"
-		dom_path  = f"data/{date}_{symbol}_ob200.data"
+	1. Dependencies:
+		Python 3.9.19
+		pip install fastapi==0.115.12
+		pip install pandas==2.2.2
+		pip install "uvicorn[standard]==0.34.2"
+
+	2. Launch backend:
+		uvicorn backend.app:app --reload
+
+	3. Launch frontend:
+		cd frontend && npm run dev
+
+................................................................................
+RUNTIME URLS:
+
+	• FastAPI tick data:
+	    http://localhost:8000/api/tick?symbol=UNIUSDC&date=2025-05-17
+
+	• FastAPI order book:
+	    http://localhost:8000/api/orderbook?symbol=UNIUSDC&date=2025-05-17
+	                                             &time=1747524319.016
+
+	• Frontend (Vite dev server):
+	    http://localhost:5173
+
+	• Utility Files (in project root):
+	    • local_frontend.url – opens frontend in browser
+	    • test_cmd.bat        – unified launcher for both backend + frontend
+
+................................................................................
+DATA FLOW & STORAGE:
+
+	Hardcoded test case:
+		symbol = "UNIUSDC"
+		date   = "2025-05-17"
+
+	Input files:
+		• data/UNIUSDC_2025-05-17.csv
+		• data/2025-05-17_UNIUSDC_ob200.data
+
+	Parsed using:
+		- load_trades(), load_orderbook()
+	Aligned using:
+		- align_orderbook_to_ticks()
+
+................................................................................
+SAMPLE API CALLS:
+
+	curl "http://localhost:8000/api/tick?symbol=UNIUSDC&date=2025-05-17" \
+	     -o dump_tick.json
+
+	curl "http://localhost:8000/api/orderbook?symbol=UNIUSDC&date=2025-05-17\
+	     &time=1747525846.066" -o dump_dom.json
+
+................................................................................
+📚 DATA FORMAT REFERENCE:
+
+	- 📘 OrderBook Format (bybit_orderbook_format.md)
+	    → Tick-level DOM snapshots and deltas (.data)
+
+	- 📙 Execution Format (bybit_execution_format.md)
+	    → Trade history with RPI flags (.csv)
+
+	- 🔗 ByBit Official Explanation:
+	    https://bybit-exchange.github.io/docs/tax/explain
 
 ................................................................................"""
 
