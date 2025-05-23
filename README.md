@@ -67,6 +67,15 @@ are specified in the external file `get_bybit_chart_dom.conf`.
 > Please note: This script involves rate-sensitive infrastructure.
 > Public sharing is deliberately restricted.
 
+### `get_bybit_chart_dom_validated.py` (✅ Public)
+
+A companion script to validate the integrity of previously downloaded `.csv.gz` and `.data.zip` files.
+It performs full-format checks using parallel validation,
+ensuring the data is safe to use for RL training or analysis.
+
+This script is intended to be run **after** `get_bybit_chart_dom.py`
+and does **not require internet access**.
+
 ---
 
 ## 🚀 Final Goal
