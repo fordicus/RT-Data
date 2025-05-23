@@ -61,29 +61,20 @@ Local Test (DO NOT DELETE, ChatGPT):
 
 ................................................................................"""
 
-# Import FastAPI core components:
-# - FastAPI: the main app object
-# - Query: defines required query parameters
-# - HTTPException: used to return error messages to client
 from fastapi import FastAPI, Query, HTTPException
-
-# Import a helper to allow requests from another browser tab (e.g., frontend)
-# This is needed when the client and server use different ports (e.g., 5173 → 8000)
 from fastapi.middleware.cors import CORSMiddleware
 
-# Import data loaders from local file
-# These convert .csv and .data files into Python data structures
 from backend.loader import (
-	load_trades,              # Load tick-level trade data (CSV)
-	load_orderbook,           # Load DOM snapshots (NDJSON)
-	align_orderbook_to_ticks  # Align DOM snapshots to trade times
+	load_trades,
+	load_orderbook,
+	align_orderbook_to_ticks
 )
 
-# Create the FastAPI app (this becomes the API server)
+
 app = FastAPI()
 
-# Allow the frontend (running in browser) to fetch data from this server
-# This prevents browser-side blocking when ports differ (so-called cross-origin access)
+
+# Enable CORS for frontend development
 app.add_middleware(
 	CORSMiddleware,
 	allow_origins=["*"],
@@ -91,20 +82,18 @@ app.add_middleware(
 	allow_headers=["*"]
 )
 
-# In-memory cache dictionaries (no database)
-# These are filled once at startup and reused for all incoming requests
-tick_cache      = {}  # Holds loaded tick DataFrames, keyed by symbol
-orderbook_cache = {}  # Holds raw DOM snapshots per symbol
-aligned_cache   = {}  # Holds DOM-aligned-to-tick mapping: { timestamp → DOM }
-                     # Used for efficient lookup by frontend
+
+# Global caches for tick, orderbook, and alignment (by symbol)
+tick_cache      = {}
+orderbook_cache = {}
+aligned_cache   = {}
 
 
 @app.on_event("startup")
 def preload_data():
 	"""
-	Preload .csv and .data files into memory when server starts.
-
-	This step avoids repeated disk reads during requests.
+	Preload .csv and .data files into memory at server startup.
+	Only for symbol="UNIUSDC" and date="2025-05-17"
 	"""
 	symbol = "UNIUSDC"
 	date   = "2025-05-17"
@@ -112,11 +101,11 @@ def preload_data():
 	tick_path = f"data/{symbol}_{date}.csv"
 	dom_path  = f"data/{date}_{symbol}_ob200.data"
 
-	# Read CSV and NDJSON files once
+	# Load and cache CSV + DOM data
 	tick_cache[symbol]      = load_trades(tick_path)
 	orderbook_cache[symbol] = load_orderbook(dom_path)
 
-	# Align orderbook snapshots to tick timestamps for fast lookup
+	# Align once, cache result
 	aligned_cache[symbol] = align_orderbook_to_ticks(
 		tick_cache[symbol],
 		orderbook_cache[symbol]
@@ -129,8 +118,7 @@ def get_tick_data(
 	date: str   = "2025-05-17"
 ):
 	"""
-	Return full tick data (price, side, volume, etc.) as a list of JSON records.
-	Client specifies symbol and date via query parameters.
+	Serve tick-level trade data from CSV as JSON records.
 	"""
 	df = tick_cache.get(symbol)
 
@@ -147,8 +135,11 @@ def get_orderbook_snapshot(
 	time: float = Query(...)
 ):
 	"""
-	Look up and return the DOM snapshot aligned to the given timestamp.
-	Returns "N/A" if no matching timestamp exists in prealigned cache.
+	Serve DOM snapshot nearest to given tick timestamp.
+
+	Returns:
+		- DOM snapshot at closest past ts ≤ given time
+		- or "N/A" if no such snapshot exists
 	"""
 	aligned = aligned_cache.get(symbol)
 

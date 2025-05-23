@@ -1,0 +1,57 @@
+==========================================================
+[FRONTEND DEPENDENCIES]
+==========================================================
+STEP 1: Entered frontend → C:\workspace\RT-Data\unified_dom__trade_replay_gui\frontend
+
+STEP 2: Node version
+v20.17.0
+STEP 2 OK
+
+STEP 3: NPM version
+10.8.2
+STEP 3 OK
+
+STEP 4: Installed packages (top-level)
+frontend@0.0.0 C:\workspace\RT-Data\unified_dom__trade_replay_gui\frontend
++-- lightweight-charts@4.1.1
++-- typescript@5.8.3
+`-- vite@6.3.5
+
+STEP 4 OK
+
+STEP 5: TypeScript version
+Version 5.8.3
+STEP 5 OK
+
+STEP 6: Vite version
+vite/6.3.5 win32-x64 node-v20.17.0
+STEP 6 OK
+STEP 7: Returned to root → C:\workspace\RT-Data\unified_dom__trade_replay_gui
+==========================================================
+[BACKEND DEPENDENCIES]
+==========================================================
+
+STEP 8: Python version
+Python 3.9.19
+STEP 8 OK
+
+STEP 9: PIP version
+pip 24.2 from C:\Users\fordi\anaconda3\lib\site-packages\pip (python 3.9)
+STEP 9 OK
+
+STEP 10: FastAPI version
+Name: fastapi
+Version: 0.115.12
+STEP 10 OK
+
+STEP 11: pandas version
+Name: pandas
+Version: 2.2.2
+STEP 11 OK
+
+STEP 12: uvicorn version
+Name: uvicorn
+Version: 0.34.2
+STEP 12 OK
+
+✅ All dependency checks completed successfully.

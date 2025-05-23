@@ -1,91 +1,97 @@
 /**
- * ============================================================================
- * Project Overview:
- *
- *   Dual-panel GUI for tick-level replay and DOM snapshot visualization.
- *   Visualizes (historical) ByBit spot execution trace and order book flow.
- *   Left chart: price line, crosshair, floating & fixed tooltips.
- *   Right chart: canvas overlay for DOM bars and mirrored text debug.
- *
- * ============================================================================
- * Frontend Technology:
- *
- *   ▸ Language         :   TypeScript 5.8.3 (compiled via Vite/ESBuild)
- *   ▸ Build Tool       :   Vite 6.3.5 (dev server, ESM bundler)
- *   ▸ Charting Library :   lightweight-charts@4.1.1 (TradingView)
- *   ▸ Tooltip Layering :   DOM overlay (<div>, absolute-positioned)
- *   ▸ Depth Visualization: HTML5 <canvas> overlay on right pane
- *
- *   ▸ Runtime:
- *       • Node.js : v20.17.0
- *       • npm     : 10.8.2
- *
- *   ▸ Referenced Files:
- *       • tsconfig.json   → compiler options (strict mode, module)
- *       • vite.config.ts  → dev server config, module aliasing
- *       • index.html      → root layout, chart container anchors
- *
- * ============================================================================
- *
- * Backend Integration:
- *
- *   - Language     : Python 3.11 (FastAPI + pandas)
- *   - Components   : 
- *       • app.py       → FastAPI endpoints
- *       • loader.py    → tick and DOM file parser
- *   - Input files  :
- *       • CSV: tick stream (timestamp, price, side, volume)
- *       • NDJSON: DOM updates (ByBit ob200.data)
- *   - Example API Calls:
- *       curl "http://localhost:8000/api/tick?symbol=UNIUSDC&date=2025-05-17" \
- *            -o dump_tick.json
- *       curl "http://localhost:8000/api/orderbook?symbol=UNIUSDC&date=2025-05-17\
- *            &time=1747525846.066" -o dump_dom.json
- *
- * ============================================================================
- * How to Run (Dev Only):
- *
- *   # Start backend server
- *   uvicorn backend.app:app --reload
- *
- *   # Start frontend dev server via Vite
- *   cd frontend && npm run dev
- *
- *   ➤ Runtime URLs:
- *     FastAPI tick data  :
- *       http://localhost:8000/api/tick?symbol=UNIUSDC&date=2025-05-17
- *     FastAPI order book :
- *       http://localhost:8000/api/orderbook?symbol=UNIUSDC&date=2025-05-17&time=1747524319.016
- *     Frontend (Vite dev server):
- *       http://localhost:5173
- *
- *   ➤ Utility Files (in project root):
- *     • local_frontend.url – shortcut that opens frontend in browser
- *     • test_cmd.bat        – unified launcher for backend + frontend
- *
- * ============================================================================
- * Limitation:
- *
- *   2025-05-22:
- *     There are four sources of time information displayed in the charts:
- *       [1]. The x-axis' time labels.
- *       [2]. The custom crosshair hover tooltip (on the left pane).
- *       [3]. The mirrored text of the custom hover tooltip (on the right pane).
- *       [4]. The default tooltip on the bottom of the left pane's crosshair.
- *
- *     While sources [1-3] correctly apply the local timezone,
- *     source [4] consistently displays the original UNIX Timestamp,
- *     which is UTC+0. This specific behavior for the default crosshair
- *     tooltip [4] could not be modified or overridden within
- *     lightweight-charts@4.1.1.
- *
- * ============================================================================
- * TODO (DO NOT DELETE, ChatGPT):
- *
- *   Dynamic caching for the tooltip data according to the current viewport.
- *
- * ============================================================================
- */
+................................................................................
+
+How to Use:
+
+	Start backend (from project root):
+
+		uvicorn backend.app:app --reload
+
+	→ FastAPI runs at:
+		http://localhost:8000/api/tick?symbol=UNIUSDC&date=2025-05-17
+
+	Start frontend (from ./frontend):
+
+		cd frontend && npm run dev
+
+	→ Frontend runs at:
+		http://localhost:5173
+
+................................................................................
+
+Dependency:
+
+	npm install lightweight-charts@4.1.1
+
+................................................................................
+
+Functionality:
+
+	- Left chart: tick chart with tooltip (hover + fixed), red marker
+	- Right chart: blank chart with synced crosshair, tooltip text output
+	- Crosshair from left chart controls right chart (1-way sync)
+	- Full local timestamp formatting applied in both charts
+
+................................................................................
+
+IO Structure:
+
+	Input:
+		GET http://localhost:8000/api/tick?symbol=...&date=...
+		GET http://localhost:8000/api/orderbook?symbol=...&date=...&time=...
+
+	Output:
+		Dual-chart GUI with synchronized event-linked rendering
+
+................................................................................
+
+Project Structure & Build Tool:
+
+	This file:
+		frontend/src/main.ts
+
+	Related files:
+		frontend/vite.config.ts
+		frontend/index.html
+
+	Vite configuration is essential for:
+		- Module aliasing (e.g., "@/utils/...")
+		- TypeScript support
+		- Hot Module Replacement during `npm run dev`
+
+	NOTE: Without vite.config.ts, dev server will fail to resolve
+	      module paths correctly, especially when importing from ./src.
+
+	IMPORTANT:
+		Vite must be run from the `frontend/` directory for alias paths
+		and entry resolution to work as expected. Ensure consistency with
+		REPO_STRUCT.html and fast refresh pipeline.
+
+................................................................................
+
+Limitation:
+
+	2025-05-22:
+		There are four sources of time information displayed in the charts:
+		[1]. The x-axis' time labels.
+		[2]. The custom crosshair hover tooltip (on the left pane).
+		[3]. The mirrored text of the custom hover tooltip (on the right pane).
+		[4]. The default tooltip on the bottom of the left pane's crosshair.
+
+		While sources [1-3] correctly apply the local timezone,
+		source [4] consistently displays the original UNIX Timestamp,
+		which is UTC+0. This specific behavior for the default crosshair
+		tooltip [4] could not be modified or overridden within
+		lightweight-charts@4.1.1.
+		
+................................................................................
+
+TODO (DO NOT DELETE, ChatGPT):
+
+	Dynamic caching for the tooltip data according to the current viewport.
+
+................................................................................
+*/
 
 import {
 	createChart,
