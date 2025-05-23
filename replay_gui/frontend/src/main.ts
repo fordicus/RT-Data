@@ -7,6 +7,8 @@
  *   Left chart: price line, crosshair, floating & fixed tooltips.
  *   Right chart: canvas overlay for DOM bars and mirrored text debug.
  *
+ *	• Frontend (Vite dev server):	http://localhost:5173
+ *
  * ................................................................................
  * Frontend Technology:
  *
@@ -26,7 +28,6 @@
  *       • index.html      → root layout, chart container anchors
  *
  * ................................................................................
- *
  * Backend Integration:
  *
  *   - Language     : Python 3.9.19 (FastAPI 0.115.12 + pandas 2.2.2)
@@ -36,11 +37,27 @@
  *   - Input files  :
  *       • CSV: tick stream (timestamp, price, side, volume)
  *       • NDJSON: DOM updates (ByBit ob200.data)
+ *
  *   - Example API Calls:
 
 		curl "http://localhost:8000/api/tick?symbol=UNIUSDC&date=2025-05-17" -o dump_tick.json
 		curl "http://localhost:8000/api/orderbook?symbol=UNIUSDC&date=2025-05-17&time=1747525846.066" -o dump_dom.json
 
+ *
+ * ................................................................................
+ * Dynamic Dataset Support (Plan04):
+ *
+ *   ✅ Symbol and date are now dynamically retrieved via `/api/meta` at runtime.
+ *      → This removes hardcoded fetch URLs and enables seamless dataset switching.
+ *   ✅ The fetched values are stored in `globalSymbol` and `globalDate`,
+ *      and used to construct all subsequent tick and orderbook API queries.
+ *   ✅ Tooltip rendering also reflects the correct instrument name.
+ *
+ *   ✱ This allows external launchers (e.g., _run_reply_gui.bat) to supply
+ *     arbitrary tick/DOM data, as long as:
+ *       • Exactly one *.csv and one *.data file exist in the `data/` directory
+ *       • Their filenames encode both symbol and date
+ *         (e.g., "UNIUSDC_2025-05-17.csv" and "2025-05-17_UNIUSDC_ob200.data")
  *
  * ................................................................................
  * How to Run (Dev Only):
@@ -464,85 +481,133 @@ let currentMarker: {
 }[] = []
 
 /* ----------------------------------------------------------------------
-   📡 Fetch Tick Data
+   🧠 Global Runtime Context (Plan04)
 
-   Call backend API to retrieve tick-by-tick trade data for a specific
-   symbol and date. The response contains:
-   - time   (UNIX seconds)
-   - value  (price)
-   - volume (trade size)
-   - side   (buy/sell)
+   These two variables are populated once via /api/meta
+   and injected into all later API requests (tick, orderbook).
 
-   The following actions are performed:
-   - Convert to local Date
-   - Store in `tooltipCache` for quick access during hover/click
-   - Populate `leftSeries` chart
-   - Format tick labels on X-axis
-   - Sync visible range to right chart
+   This ensures:
+   - Flexible dataset switching without hardcoded symbols
+   - Clear labeling inside tooltips and chart logic
 ---------------------------------------------------------------------- */
-fetch('http://localhost:8000/api/tick?symbol=UNIUSDC&date=2025-05-17')
+let globalSymbol = ''
+let globalDate   = ''
+
+/* ----------------------------------------------------------------------
+   🛰️ Step 1: Fetch meta information (symbol & date)
+
+   Before loading any chart data, we must first know *what* we're plotting.
+   The backend provides this context via /api/meta, which returns:
+
+     {
+       "symbol": "UNIUSDC",
+       "date"  : "2025-05-17"
+     }
+
+   These values are used to:
+   - Construct the correct tick + DOM fetch URLs
+   - Label tooltips with current instrument (symbol)
+   - Dynamically adapt to any dataset (Plan04 goal)
+
+   Meta information is stored in global variables for use throughout.
+---------------------------------------------------------------------- */
+fetch("/api/meta")
 	.then(res => res.json())
-	.then(data => {
-		/* -----------------------------------------------------------
-		   🧮 Transform API data → chart points + tooltip cache
-		----------------------------------------------------------- */
-		const points = data.map((pt: any) => {
-			const local = toLocalDate(pt.time)
+	.then(meta => {
+		globalSymbol = meta.symbol
+		globalDate   = meta.date
 
-			tooltipCache.set(pt.time, {
-				timeObj: local,
-				value  : pt.value,
-				volume : pt.volume,
-				side   : pt.side
+		const tick_url = `/api/tick?symbol=${globalSymbol}&date=${globalDate}`
+
+		/* ----------------------------------------------------------------------
+		   📡 Step 2: Fetch tick-level trade data (execution trace)
+
+		   Now that symbol and date are known, we call the tick endpoint.
+		   This endpoint returns trade-by-trade entries from a ByBit CSV:
+
+		     {
+		       time  : float  (UNIX seconds w/ ms precision),
+		       value : float  (execution price),
+		       volume: float  (signed volume),
+		       side  : string ("buy" | "sell")
+		     }
+
+		   This data is used to:
+		   - Render a price line chart (left pane)
+		   - Enable hover/click tooltips
+		   - Sync to DOM depth data on the right pane
+		---------------------------------------------------------------------- */
+
+		fetch(tick_url)
+			.then(res => res.json())
+			.then(data => {
+
+				/* ----------------------------------------------------------------------
+				   🧮 Step 3: Transform tick data into chart points and tooltip cache
+
+				   - Convert each timestamp to a local Date object
+				   - Build tooltipCache for use during hover/click
+				   - Format series for Lightweight Charts
+				     (only time/value is needed for line chart rendering)
+				---------------------------------------------------------------------- */
+				const points = data.map((pt: any) => {
+					const local = toLocalDate(pt.time)
+
+					tooltipCache.set(pt.time, {
+						timeObj: local,         // used for human-readable display
+						symbol : globalSymbol,  // injected for tooltip rendering
+						value  : pt.value,      // execution price
+						volume : pt.volume,     // signed net volume
+						side   : pt.side        // buy or sell
+					})
+
+					return {
+						time : pt.time,         // timestamp for x-axis
+						value: pt.value         // price for y-axis
+					}
+				})
+
+				// Sort chronologically (in case file order is imperfect)
+				points.sort((a, b) => a.time - b.time)
+
+				/* ----------------------------------------------------------------------
+				   📊 Step 4: Chart configuration and series assignment
+				---------------------------------------------------------------------- */
+				leftChart.applyOptions({
+					timeScale: {
+						tickMarkFormatter: (ts: number) =>
+							formatTickLabel(toLocalDate(ts))
+					},
+					timeZone: localTimeZone
+				})
+
+				// Populate left chart with time-value points
+				leftSeries.setData(points)
+
+				// Zoom to fit all data
+				leftChart.timeScale().fitContent()
+
+				// Mirror the visible range to the right chart
+				rightChart.timeScale().setVisibleLogicalRange(
+					leftChart.timeScale().getVisibleLogicalRange()!
+				)
+
+				/* ----------------------------------------------------------------------
+				   🔗 Step 5: Dynamic DOM snapshot URL generator
+
+				   This globally defined function returns the correct backend endpoint
+				   to fetch the DOM state for a given timestamp.
+
+				   - Used later during hover/click events
+				   - Reflects meta-configured {symbol, date}
+				   - Prevents hardcoding of path templates
+				---------------------------------------------------------------------- */
+				window.__dom_url = (ts: number) =>
+					`/api/orderbook?symbol=${globalSymbol}&date=${globalDate}&time=${ts}`
 			})
-
-			return {
-				time : pt.time,
-				value: pt.value
-			}
-		})
-		
-		/* -----------------------------------------------------------
-		   🧠 Stable Sorting of Timestamps
-
-		   Tick data is strictly ordered by timestamp (UNIX epoch).
-		   Since multiple ticks can occur at the same second,
-		   this sort operation ensures chronological stability.
-
-		   JavaScript's `.sort()` is stable (since ECMAScript 2019),
-		   so insertion order among equal timestamps is preserved.
-		   This guarantees reliable indexing and visual consistency
-		   when hovering or searching the `tooltipCache`.
-
-		   Reference: ECMA-262, §22.1.3.27, Array.prototype.sort
-		----------------------------------------------------------- */
-		points.sort((a, b) => a.time - b.time)
-
-		/* -----------------------------------------------------------
-		   📊 Update chart appearance
-		   - Configure tick label formatter with localized date
-		   - Apply local time zone (redundant but explicit)
-		----------------------------------------------------------- */
-		leftChart.applyOptions({
-			timeScale: {
-				tickMarkFormatter: (ts: number) =>
-					formatTickLabel(toLocalDate(ts))
-			},
-			timeZone: localTimeZone
-		})
-
-		leftSeries.setData(points)
-		leftChart.timeScale().fitContent()
-
-		/* -----------------------------------------------------------
-		   🧭 Sync right chart range with left chart on load
-		----------------------------------------------------------- */
-		rightChart.timeScale().setVisibleLogicalRange(
-			leftChart.timeScale().getVisibleLogicalRange()!
-		)
 	})
 	.catch(err => {
-		console.error('Tick data fetch failed:', err)
+		console.error("Tick data fetch failed:", err)
 	})
 
 /* ----------------------------------------------------------------------
@@ -630,14 +695,31 @@ function formatDualTimestamp(ts: number): string {
 /* ----------------------------------------------------------------------
    🧾 formatTooltipText(ts, d)
 
-   Generate a unified tooltip text block for:
-   - floating tooltip (hover)
-   - fixed tooltip (click)
-   - mirrored debug box (rightText)
+   Generate unified multi-line tooltip content for:
 
-   Contains:
-   - dual-format timestamp
-   - price, volume, side
+     - 🖱️ Floating tooltip on hover
+     - 📌 Fixed tooltip on click
+     - 🪞 Mirrored debug box on the right chart
+
+   Contents:
+     - Dual-format timestamp (local + UTC)
+     - Symbol (instrument identifier from /api/meta)
+     - Execution price
+     - Trade volume (signed)
+     - Trade side (buy/sell)
+
+   Notes:
+     - `ts` is the UNIX timestamp in seconds (float)
+     - `d` is a structured cache entry from `tooltipCache`
+     - `globalSymbol` is injected from /api/meta (Plan04)
+
+   Example output:
+     2025-05-17 09:30:12.123 (UTC +2, Local)
+     2025-05-17 07:30:12.123 (UTC +0, Global)
+     symbol:  UNIUSDC
+     price:   6.021
+     volume:  2205.5
+     side:    buy
 ---------------------------------------------------------------------- */
 function formatTooltipText(ts: number, d: {
 	timeObj: Date,
@@ -647,6 +729,7 @@ function formatTooltipText(ts: number, d: {
 }): string {
 	return (
 		`${formatDualTimestamp(ts)}\n` +
+		`symbol:  ${globalSymbol}\n` +
 		`price:   ${d.value}\n` +
 		`volume:  ${d.volume}\n` +
 		`side:    ${d.side}`
@@ -714,8 +797,7 @@ leftChart.subscribeCrosshairMove(param => {
 	   - result is visualized as a canvas overlay
 	--------------------------------------------------------------- */
 	if (domFetchMode === 'hover' && !isClickSuppressed) {
-		const url =
-			`/api/orderbook?symbol=UNIUSDC&date=2025-05-17&time=${ts}`
+		const url = window.__dom_url(ts)
 
 		fetch(url)
 			.then(res => res.json())

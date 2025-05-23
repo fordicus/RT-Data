@@ -13,6 +13,11 @@ ARCHITECTURE:
 			• /api/tick       → tick data (from .csv)
 			• /api/orderbook  → DOM snapshot (from .data)
 
+		📁 Tick+DOM Pair Loader via Filename Convention
+			- Autodetects *.csv + *.data pair from ./data/ folder at startup
+			- Extracts {symbol, date} from filename patterns
+			- Ensures both files agree on symbol (e.g., "UNIUSDC")
+
 	↪ backend/loader.py
 		- Loads and aligns tick + DOM data at startup
 		- Populates in-memory caches (tick_cache, orderbook_cache, aligned_cache)
@@ -41,10 +46,10 @@ RUNTIME & DEV SETUP:
 ................................................................................
 RUNTIME URLS:
 
-	• FastAPI tick data:
+	• FastAPI tick data example:
 	    http://localhost:8000/api/tick?symbol=UNIUSDC&date=2025-05-17
 
-	• FastAPI order book:
+	• FastAPI order book example:
 	    http://localhost:8000/api/orderbook?symbol=UNIUSDC&date=2025-05-17
 	                                             &time=1747524319.016
 
@@ -70,6 +75,10 @@ DATA FLOW & STORAGE:
 		- load_trades(), load_orderbook()
 	Aligned using:
 		- align_orderbook_to_ticks()
+
+	📦 Plan04 (autodetect mode):
+		- Relies on a single valid .csv and .data pair in ./data/
+		- Enforces filename conventions to determine the instrument
 
 ................................................................................
 SAMPLE API CALLS:
@@ -128,30 +137,155 @@ orderbook_cache = {}  # Holds raw DOM snapshots per symbol
 aligned_cache   = {}  # Holds DOM-aligned-to-tick mapping: { timestamp → DOM }
                      # Used for efficient lookup by frontend
 
+import os
+import sys
+import pandas as pd
+from fastapi import FastAPI, Query, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+
+from backend.loader import (
+	load_trades,
+	load_orderbook,
+	align_orderbook_to_ticks
+)
+
+app = FastAPI()
+
+app.add_middleware(
+	CORSMiddleware,
+	allow_origins=["*"],
+	allow_methods=["*"],
+	allow_headers=["*"]
+)
+
+tick_cache      = {}
+orderbook_cache = {}
+aligned_cache   = {}
+
 
 @app.on_event("startup")
 def preload_data():
 	"""
-	Preload .csv and .data files into memory when server starts.
+	📦 Plan04: Autoload data files from `./data/` on FastAPI startup.
 
-	This step avoids repeated disk reads during requests.
+	Used when launching the backend via _run_reply_gui.bat without CLI arguments.
+	This function ensures a unified loading behavior that matches frontend requests.
+
+	🔒 Assumptions:
+	• Directory `./data/` exists under the current working directory.
+	• It contains exactly ONE `.csv` and ONE `.data` file.
+	• The filenames encode the instrument symbol to allow cross-checking:
+	    - Tick CSV     : {SYMBOL}_YYYY-MM-DD.csv
+	    - DOM Snapshot: YYYY-MM-DD_{SYMBOL}_ob200.data
+	• The `SYMBOL` part must match across both filenames.
+
+	🚫 Program exits immediately if:
+	• Directory `./data/` is missing
+	• Multiple or zero files of either type are present
+	• SYMBOL mismatch between the two files
 	"""
-	symbol = "UNIUSDC"
-	date   = "2025-05-17"
+	
+	# Compute absolute path to ./data/ subdirectory (relative to script location)
+	data_dir = os.path.join(os.getcwd(), "data")
 
-	tick_path = f"data/{symbol}_{date}.csv"
-	dom_path  = f"data/{date}_{symbol}_ob200.data"
+	# ✅ Existence check: folder must exist
+	if not os.path.isdir(data_dir):
+		print(f"[ERROR] Directory not found: {data_dir}")
+		sys.exit(1)
 
-	# Read CSV and NDJSON files once
-	tick_cache[symbol]      = load_trades(tick_path)
-	orderbook_cache[symbol] = load_orderbook(dom_path)
+	# List all filenames in data/ and filter by extensions
+	files = os.listdir(data_dir)
+	csvs  = [f for f in files if f.endswith(".csv")]
+	datas = [f for f in files if f.endswith(".data")]
 
-	# Align orderbook snapshots to tick timestamps for fast lookup
-	aligned_cache[symbol] = align_orderbook_to_ticks(
+	# ✅ Ensure exactly one file of each type
+	if len(csvs) != 1 or len(datas) != 1:
+		print("[ERROR] data/ must contain exactly ONE .csv and ONE .data file.")
+		sys.exit(1)
+
+	csv_file  = csvs[0]
+	data_file = datas[0]
+
+	# Extract symbols from each file name by parsing their filename format
+	try:
+		symbol_csv  = csv_file.split("_")[0]   # e.g., UNIUSDC_2025-05-17.csv → UNIUSDC
+		symbol_data = data_file.split("_")[1]  # e.g., 2025-05-17_UNIUSDC_ob200.data → UNIUSDC
+	except IndexError:
+		print("[ERROR] Failed to extract symbol from filenames.")
+		sys.exit(1)
+
+	# ✅ Ensure symbols from both files match
+	if symbol_csv != symbol_data:
+		print(f"[ERROR] Symbol mismatch: {symbol_csv} ≠ {symbol_data}")
+		sys.exit(1)
+
+	# Final resolved values for loading
+	symbol    = symbol_csv
+	csv_path  = os.path.join(data_dir, csv_file)
+	data_path = os.path.join(data_dir, data_file)
+
+	# 🧠 Log the resolved files to backend console (for developer inspection)
+	print(f"[INFO] Loading Tick CSV : {csv_path}")
+	print(f"[INFO] Loading DOM Data  : {data_path}")
+	print(f"[INFO] Using Symbol      : {symbol}")
+
+	# 🔁 Load, aggregate, and align data once during server startup
+	tick_cache[symbol]      = load_trades(csv_path)
+	orderbook_cache[symbol] = load_orderbook(data_path)
+	aligned_cache[symbol]   = align_orderbook_to_ticks(
 		tick_cache[symbol],
 		orderbook_cache[symbol]
 	)
 
+@app.get("/api/meta")
+def get_loaded_meta():
+	"""
+	📡 API: /api/meta
+
+	Return the currently loaded symbol and trading date.
+	Used by the frontend to dynamically construct backend data fetch URLs.
+
+	📤 Response Format:
+	{
+	    "symbol": "UNIUSDC",
+	    "date"  : "2025-05-17"
+	}
+
+	📌 Motivation:
+	- This decouples frontend logic from hardcoded filenames or paths.
+	- Enables flexible visualization for any {symbol, date} pair
+	  that has been auto-loaded via Plan04 preload logic.
+	- Ensures frontend chart labels, tooltip content, and URL templates
+	  remain consistent with backend state.
+
+	🔒 Error Conditions:
+	- If no tick data is present in memory (empty `tick_cache`)
+	  → returns HTTP 500.
+	- If the `time` column is missing in the DataFrame
+	  → returns HTTP 500 (malformed or corrupted CSV).
+	"""
+
+	# 🛑 Ensure tick data was preloaded
+	if not tick_cache:
+		raise HTTPException(500, "No tick data loaded.")
+
+	# ✅ Extract loaded symbol (only one expected under Plan04)
+	symbol = list(tick_cache.keys())[0]
+	df     = tick_cache[symbol]
+
+	# 🛑 Defensive check: 'time' column must exist in tick data
+	if "time" not in df.columns:
+		raise HTTPException(500, "Malformed tick data.")
+
+	# 🧠 Extract first timestamp to determine the trading date
+	first_ts = df["time"].iloc[0]
+	date_str = pd.to_datetime(first_ts, unit='s').strftime("%Y-%m-%d")
+
+	# ✅ Return the resolved metadata for frontend use
+	return {
+		"symbol": symbol,
+		"date"  : date_str
+	}
 
 @app.get("/api/tick")
 def get_tick_data(
@@ -159,8 +293,31 @@ def get_tick_data(
 	date: str   = "2025-05-17"
 ):
 	"""
-	Return full tick data (price, side, volume, etc.) as a list of JSON records.
-	Client specifies symbol and date via query parameters.
+	📡 API: /api/tick
+
+	Return full tick-by-tick data as a list of JSON records.
+
+	🧠 Usage Context:
+	- Frontend fetches this data using `/api/meta`-provided symbol/date.
+	- Used to render price chart and tooltips.
+
+	📥 Query Parameters (from frontend):
+	  - symbol : str  (e.g., "UNIUSDC")
+	  - date   : str  (e.g., "2025-05-17")
+
+	📤 Response Format (list of objects):
+	  [
+		{
+		  "time"  : float  (UNIX timestamp in seconds),
+		  "value" : float  (execution price),
+		  "volume": float  (signed trade volume),
+		  "side"  : str    ("buy" or "sell")
+		},
+		...
+	  ]
+
+	📌 Note:
+	  This endpoint currently assumes data is preloaded during startup.
 	"""
 	df = tick_cache.get(symbol)
 
@@ -177,8 +334,27 @@ def get_orderbook_snapshot(
 	time: float = Query(...)
 ):
 	"""
-	Look up and return the DOM snapshot aligned to the given timestamp.
-	Returns "N/A" if no matching timestamp exists in prealigned cache.
+	📡 API: /api/orderbook
+
+	Return DOM (Depth of Market) snapshot aligned to the requested timestamp.
+
+	🧠 Usage Context:
+	- Called on hover or click in the frontend for visualizing orderbook depth.
+
+	📥 Query Parameters:
+	  - symbol : str   (e.g., "UNIUSDC")
+	  - date   : str   (e.g., "2025-05-17")
+	  - time   : float (UNIX timestamp in seconds, ms precision)
+
+	📤 Response Format:
+	  {
+		"time": float,
+		"DOM" : dict | str  // {"a": [...], "b": [...]} or "N/A"
+	  }
+
+	📌 Notes:
+	- If the timestamp has no matching DOM snapshot (e.g., before first DOM tick),
+	  the string `"N/A"` is returned.
 	"""
 	aligned = aligned_cache.get(symbol)
 

@@ -2,7 +2,8 @@
 # 🚫 Private or Local Files
 # ========================
 # Historical downloader (sensitive scraping logic)
-get_hist_ob.py
+get_bybit_chart_dom.py
+get_bybit_chart_dom.conf
 
 # Local
 *.data

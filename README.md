@@ -1,4 +1,4 @@
-# High-Frequency Spot OrderBook Dataset
+# High-Frequency Spot OrderBook and Chart Dataset
 
 This repository manages high-frequency Level 2 (DOM) data 
 from a major cryptocurrency spot exchange. The goal is to structure 
@@ -21,18 +21,12 @@ to extract alpha signals from market microstructure dynamics.
 
 ## 📅 Latest Data Acquisition
 
-- **Date:**  2025-05-20  
-- **Range:** 2025-05-07 to 2025-05-19  
+- **Date:**  2025-05-23  
+- **Range:** 2025-05-10 to 2025-05-22  
 - **Symbols (45):**
 
-['PEPEUSDT', 'UNIUSDT', 'ADAUSDT', 'AAVEUSDT', 'XRPUSDC', 'SHIBUSDT',
-'SOLUSDT', 'PEPEUSDC', 'ETHUSDT', 'SUIUSDC', 'BCHUSDC', 'SUIUSDT',
-'ONDOUSDT', 'NEARUSDC', 'BTCUSDT', 'DOTUSDC', 'AVAXUSDT', 'TONUSDT',
-'SOLUSDC', 'TONUSDC', 'LTCUSDC', 'DOTUSDT', 'ETHUSDC', 'BTCUSDC',
-'WLDUSDC', 'ADAUSDC', 'XLMUSDC', 'BNBUSDT', 'WBTCUSDT', 'AVAXUSDC',
-'UNIUSDC', 'BCHUSDT', 'LTCUSDT', 'BNBUSDC', 'ONDOUSDC', 'HBARUSDT',
-'SHIBUSDC', 'XRPUSDT', 'WLDUSDT', 'DOGEUSDC', 'XLMUSDT', 'LINKUSDT',
-'DOGEUSDT', 'NEARUSDT', 'LINKUSDC']
+BTCUSDT,ETHUSDT,XRPUSDT,BNBUSDT,SOLUSDT,DOGEUSDT,ADAUSDT,XLMUSDT,SUIUSDT,WBTCUSDT,LINKUSDT,AVAXUSDT,SHIBUSDT,HBARUSDT,TONUSDT,DOTUSDT,BCHUSDT,LTCUSDT,PEPEUSDT,ONDOUSDT,UNIUSDT,WLDUSDT,NEARUSDT,AAVEUSDT,BTCUSDC,ETHUSDC,XRPUSDC,BNBUSDC,SOLUSDC,DOGEUSDC,ADAUSDC,XLMUSDC,SUIUSDC,LINKUSDC,AVAXUSDC,SHIBUSDC,TONUSDC,DOTUSDC,BCHUSDC,LTCUSDC,PEPEUSDC,ONDOUSDC,UNIUSDC,WLDUSDC,NEARUSDC
+
 
 
 ---
@@ -51,21 +45,26 @@ See also 🔗 [ByBit Data Explanation](https://bybit-exchange.github.io/docs/tax
 
 ## 📝 TODO
 
-- [ ] Summarize the features, pros, and cons of Spot OrderBook data.
-- [ ] Fully understand the field structure and data schema.
-- [ ] Add a few papers.
+- [ ] Summarize the features, advantages, and limitations of Spot Chart and Order Book data, including their intended purpose.
+- [ ] Fully understand the field structures and data schemas involved.
+- [ ] Add relevant papers and video links that help explain the underlying concepts.
+
 
 ---
 
 ## 🔧 Code Structure
 
-### `get_hist_ob.py` (🔒 Private)
+### `get_bybit_chart_dom.py` (🔒 Private)
 
-This script automates the download of historical spot order book data.  
-**It is private and intentionally excluded from version control (`.gitignore`)**  
-to protect the data collection mechanism from overexposure.
+This script automates the download of historical spot **chart data (executions)**
+and **DOM snapshots (orderbook)** from ByBit public archives.
 
-> Please note: This script involves rate-sensitive infrastructure.  
+**It supports multi-day, multi-symbol batch retrieval via parallel curl executions**
+and includes post-download validation to ensure data format integrity.
+Configuration parameters (e.g., date range, trading pairs, max parallelism)
+are specified in the external file `get_bybit_chart_dom.conf`.
+
+> Please note: This script involves rate-sensitive infrastructure.
 > Public sharing is deliberately restricted.
 
 ---
