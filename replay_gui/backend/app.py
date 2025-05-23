@@ -74,11 +74,8 @@ DATA FLOW & STORAGE:
 ................................................................................
 SAMPLE API CALLS:
 
-	curl "http://localhost:8000/api/tick?symbol=UNIUSDC&date=2025-05-17" \
-	     -o dump_tick.json
-
-	curl "http://localhost:8000/api/orderbook?symbol=UNIUSDC&date=2025-05-17\
-	     &time=1747525846.066" -o dump_dom.json
+	curl "http://localhost:8000/api/tick?symbol=UNIUSDC&date=2025-05-17" -o dump_tick.json
+	curl "http://localhost:8000/api/orderbook?symbol=UNIUSDC&date=2025-05-17&time=1747525846.066" -o dump_dom.json
 
 ................................................................................
 📚 DATA FORMAT REFERENCE:

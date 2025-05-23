@@ -2,7 +2,7 @@
 setlocal
 
 rem ============================================================================
-rem Script: get_dependencies.bat
+rem Script: _get_dependencies.bat
 rem Purpose:
 rem     Collect essential dependency versions for both frontend and backend.
 rem     Meant to be executed from the root of the project repository.
