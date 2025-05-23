@@ -114,7 +114,7 @@ const toLocalDate = (ts: number): Date => new Date(ts * 1000)
 /**
  * Formats a Date to "YYYY-MM-DD hh:mm:ss.fff (UTC ±X)" format
  */
-/* const formatFullTimestamp = (d: Date): string => {
+const formatFullTimestamp = (d: Date): string => {
 	const tzOffset = -d.getTimezoneOffset() / 60
 	const sign     = tzOffset >= 0 ? '+' : '-'
 
@@ -123,7 +123,7 @@ const toLocalDate = (ts: number): Date => new Date(ts * 1000)
 		`${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.` +
 		`${pad(d.getMilliseconds(), 3)} (UTC ${sign}${Math.abs(tzOffset)})`
 	)
-} */
+}
 
 /**
  * Tick label: if day starts (00:00:00) → YYYY-MM-DD else → hh:mm:ss
@@ -447,27 +447,6 @@ leftEl.addEventListener(
 	true
 )
 
-const formatFullTimestamp = (d: Date): string => {
-	return (
-		`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
-		`${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.` +
-		`${pad(d.getMilliseconds(), 3)}`
-	)
-}
-
-function formatDualTimestamp(ts: number): string {
-	const localDate  = new Date(ts * 1000)
-	const globalDate = new Date(ts * 1000 + localDate.getTimezoneOffset() * 60000)
-
-	const tzOffset = -localDate.getTimezoneOffset() / 60
-	const sign     = tzOffset >= 0 ? '+' : '-'
-
-	return (
-		`${formatFullTimestamp(localDate)} (UTC ${sign}${Math.abs(tzOffset)}, Local)\n` +
-		`${formatFullTimestamp(globalDate)} (UTC +0, Global)`
-	)
-}
-
 /**
  * Hover handler → update floating tooltip + mirror to right chart
  */
@@ -482,10 +461,10 @@ leftChart.subscribeCrosshairMove(param => {
 	const ts = param.time as number
 	const d  = tooltipCache.get(ts)
 	if (!d || !param.point) return
-	
+
 	const r = leftEl.getBoundingClientRect()
 	tooltip.innerText =
-		`${formatDualTimestamp(ts)}\n` +
+		`${formatFullTimestamp(d.timeObj)}\n` +
 		`price:   ${d.value}\n` +
 		`volume:  ${d.volume}\n` +
 		`side:    ${d.side}`
@@ -532,10 +511,10 @@ leftChart.subscribeClick(param => {
 	time_cursor = param.time as number
 	const d     = tooltipCache.get(time_cursor)
 	if (!d) return
-	
+
 	const r = leftEl.getBoundingClientRect()
 	fixedTooltip.innerText =
-		`${formatDualTimestamp(ts)}\n` +
+		`${formatFullTimestamp(d.timeObj)}\n` +
 		`price:   ${d.value}\n` +
 		`volume:  ${d.volume}\n` +
 		`side:    ${d.side}`
