@@ -32,7 +32,7 @@ BTCUSDT,ETHUSDT,XRPUSDT,BNBUSDT,SOLUSDT,DOGEUSDT,ADAUSDT,XLMUSDT,SUIUSDT,WBTCUSD
 ## 📅 Next Data Acquisition
 Next data acquisition date is +13 days from the latest data acquisition date, e.g.,  
 Latest Acq. Date +00: 2025-05-23  
-Next Acq..... Date   +13: ***2025-06-05***
+Next Acq.... Date   +13: ***2025-06-05***
 
 ---
 
