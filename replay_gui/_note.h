@@ -1,3 +1,93 @@
+
+마지막 박스의 내용물:
+- 바디 필로우
+- 고중량 이불
+
+---
+
+Certain items that I may leave or give away:
+
+	1) Matratze
+	2) Mikrowelle
+	3) Kunststoffkorb x2
+	4) Klappbarer Tisch
+
+You can tell me which item belongs to which
+category of the following:
+
+	1) leave it at the room for the next tenant
+	2) give away to any others
+
+---
+
+	I have thoroughly cleaned the entire room
+to the best of my ability. Naturally, it may
+not look as fresh as newly renovated.
+
+	Just as a small personal suggestion:
+If you consider refreshing the room for future
+tenants, it might be helpful to partially repaint
+a few small areas on the walls (less than 2% of
+the total wall surface).
+
+---
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 | 항목						| 설명												|
 |---------------------------|---------------------------------------------------|
 | 과거 시계열 길이				| 60분 (past LOB + OHLCV features 포함)				|
