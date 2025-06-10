@@ -1,8 +1,3 @@
-
-마지막 박스의 내용물:
-- 바디 필로우
-- 고중량 이불
-
 ---
 
 Certain items that I may leave or give away:
@@ -20,15 +15,26 @@ category of the following:
 
 ---
 
+	I placed a Badezimmer-Organizer for better
+organization during my stay. It might also be
+useful for the next tenant. I attached it to
+the tiled wall using silicone, so it can be
+removed without any damage. However, if you
+prefer, I will of course remove it carefully
+before I leave.
+
+---
+
 	I have thoroughly cleaned the entire room
 to the best of my ability. Naturally, it may
 not look as fresh as newly renovated.
 
 	Just as a small personal suggestion:
-If you consider refreshing the room for future
-tenants, it might be helpful to partially repaint
-a few small areas on the walls (less than 2% of
-the total wall surface).
+If you consider refreshing the room for
+future tenants, it might be helpful to
+partially repaint a few small areas on
+the walls (less than 2% of the total wall
+surface).
 
 ---
 
