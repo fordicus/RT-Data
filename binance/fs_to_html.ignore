@@ -1,0 +1,9 @@
+.git/
+__pycache__/
+*.zip
+desktop.ini
+.gitignore
+push.py
+fs_to_html.ignore
+fs_to_html.py
+_Anaconda Prompt.lnk
