@@ -3,8 +3,17 @@
 r"""................................................................................
 
 How to Use:
-	Import this module and run:
-		$ uvicorn stream_binance:app --host 0.0.0.0 --port 8000
+
+	🧪 Development Mode (e.g., Windows, debugging):
+	$ python stream_binance.py
+
+	🐧 Production Mode (Ubuntu, self-contained executable):
+	$ ./stream_binance
+
+Note:
+	- The production binary is built via `compile_linux.bat`, which uses Docker
+	  to produce a statically linked Linux executable from `stream_binance.py`.
+	- No Python environment is required at runtime for the production build.
 
 Temporary Simple Order Book Rendering:
 		http://localhost:8000/orderbook/btcusdc
@@ -13,35 +22,36 @@ Temporary Simple Order Book Rendering:
 
 Dependency:
 	Python ≥ 3.9
-	aiohttp==3.9.5
 	websockets==11.0.3
-	orjson==3.10.1
-	sortedcontainers==2.4.0
-	pydantic==2.7.1
-	pydantic-settings>=2.0.0
 	fastapi==0.111.0
-	prometheus_client==0.20.0
 	uvicorn==0.30.1
-	psutil==5.9.8
 	jinja2==3.1.3
 
 Functionality:
-	Stream Binance partial order book (depth20 @100ms) via a combined websocket subscription.
-	Maintain an in-memory snapshot of the top 20 bids and asks for each symbol.
-	Expose both machine-readable JSON endpoints and a lightweight HTML UI for real-time visualization.
+	Stream Binance depth20 order books (100ms interval) via combined websocket.
+	Maintain top-20 in-memory snapshots for each symbol.
+	Periodically persist snapshots to JSONL → zip → aggregate daily.
+	Serve REST endpoints for JSON/HTML access and health monitoring.
 
 IO Structure:
+	Config:
+		- get_binance_chart.conf
+			• Shared between `stream_binance.py` and `get_binance_chart.py`
+			• Defines symbols, backoff intervals, output paths, etc.
 	Inputs:
-		- Binance websocket stream:
+		- Binance websocket:
 		  wss://stream.binance.com:9443/stream?streams={symbol}@depth20@100ms
 	Outputs:
-		- JSON Endpoints:
-			/health/live	   → liveness probe
-			/health/ready	  → readiness after first stream message
-			/state/{symbol}	→ current order book state
-		- HTML Endpoint:
-			/orderbook/{symbol} → auto-refreshing top-20 bid/ask view
-
+		- Zipped JSONL files (per-symbol, per-minute/day):
+		  ./data/binance/orderbook/temporary/{symbol}_orderbook_{YYYY-MM-DD}/
+		- Daily merged archive:
+		  ./data/binance/orderbook/{symbol}_orderbook_{YYYY-MM-DD}.zip
+		- API Endpoints:
+			/health/live		→ liveness probe
+			/health/ready		→ readiness after first snapshot
+			/state/{symbol}		→ JSON: current top-20 snapshot
+			/orderbook/{symbol}	→ HTML: real-time bid/ask viewer
+			
 ................................................................................
 
 Binance Official GitHub Manual:
@@ -55,7 +65,6 @@ Binance Official GitHub Manual:
 # ─────────────────────────────────────────────────────────────
 import asyncio
 import json
-import logging
 import os
 import random
 import shutil
@@ -63,12 +72,50 @@ import sys
 import threading
 import time
 import zipfile
-from datetime import datetime
+
+# ─── Set up rotating log to file + console with UTC timestamps
+import logging
+from logging.handlers import RotatingFileHandler
+from datetime import datetime, timezone
+
+class UTCFormatter(logging.Formatter):
+	def formatTime(self, record, datefmt=None):
+		dt = datetime.fromtimestamp(record.created, tz=timezone.utc)
+		if datefmt:
+			return dt.strftime(datefmt)
+		return dt.isoformat()
+		
+log_formatter = UTCFormatter("[%(asctime)s] %(levelname)s: %(message)s")
+
+file_handler = RotatingFileHandler("stream_binance.log", maxBytes=10_000_000, backupCount=3)
+file_handler.setFormatter(log_formatter)
+
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(log_formatter)
+
+logger = logging.getLogger("uvicorn.error")
+logger.setLevel(logging.INFO)
+logger.propagate = False
+logger.addHandler(file_handler)
+logger.addHandler(console_handler)
 
 # ─────────────────────────────────────────────────────────────
-# 📦 Third-Party Imports (from requirements.txt)
+# 📦 Third-Party Dependencies (from requirements.txt)
 # ─────────────────────────────────────────────────────────────
+
+# 📡 CORE ──────────────────────────────────────────────────────
+# websockets:
+#   - Core dependency for Binance L2 stream (`depth20@100ms`)
+#   - Absolutely required for order book ingestion
 import websockets
+
+# 🌐 OPTIONAL (UI/API Layer) ───────────────────────────────────
+# fastapi:
+#   - Lightweight ASGI framework for dev/debugging
+#   - Enables HTTP API (`/state/{symbol}`) + healthchecks
+# jinja2 (via FastAPI templates):
+#   - Renders HTML order book UI (`/orderbook/{symbol}`)
+# ⚠️ These can be removed for headless batch processing
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
@@ -77,52 +124,62 @@ from fastapi.templating import Jinja2Templates
 # 📁 Utility: PyInstaller-Compatible Resource Resolver
 # ─────────────────────────────────────────────────────────────
 def resource_path(relative_path: str) -> str:
-    """
-    Returns the absolute path to a resource, resolving differences
-    between PyInstaller bundle (_MEIPASS) and standard script mode.
+	"""
+	Resolve an absolute path to a file or folder, supporting both:
 
-    Args:
-        relative_path (str): Path to file or directory relative to the source.
+	  • Development mode (direct script execution)
+	  • PyInstaller frozen mode (e.g., self-contained Linux binary)
 
-    Returns:
-        str: Absolute path resolved to real filesystem location.
-    """
-    base = getattr(sys, "_MEIPASS", os.path.dirname(__file__))
-    return os.path.join(base, relative_path)
+	PyInstaller bundles all files into a temp directory at runtime.
+	This directory is exposed via the _MEIPASS attribute on sys.
+
+	Args:
+		relative_path (str):
+			Path relative to this script (e.g., "templates/", "config.ini")
+
+	Returns:
+		str:
+			Absolute filesystem path usable in both dev and bundled modes.
+	"""
+	base = getattr(sys, "_MEIPASS", os.path.dirname(__file__))
+	return os.path.join(base, relative_path)
 
 # ───────────────────────────────
 # ⚙️ FastAPI App + Template Setup
 # ───────────────────────────────
-app       = FastAPI()
-logger    = logging.getLogger("uvicorn.error")
-templates = Jinja2Templates(directory=resource_path("templates"))
+app			= FastAPI()
+templates	= Jinja2Templates(directory=resource_path("templates"))
 
-# ─────────────────────────────────────────────────────────────
-# ⚙️ Configuration Loading: Parse get_binance_chart.conf
-# ─────────────────────────────────────────────────────────────
-CONFIG_PATH = "get_binance_chart.conf"  # Name of external config file
+# ───────────────────────────────
+# ⚙️ Configuration from .conf
+# ───────────────────────────────
+# Shared configuration file between `stream_binance.py` and
+# `get_binance_chart.py`. Defines key runtime parameters such as
+# SYMBOLS, output directory, and backoff strategy.
+CONFIG_PATH = "get_binance_chart.conf"
 CONFIG = {}  # Dictionary to store parsed key-value pairs
 
 def load_config(conf_path: str):
-    """
-    Parses a simple .conf file with `KEY=VALUE` pairs, ignoring comments and blanks.
-    Populates the global CONFIG dictionary.
+	"""
+	Parses a simple .conf file with `KEY=VALUE` pairs,
+	ignoring comments and blanks.
+	Populates the global CONFIG dictionary.
 
-    Args:
-        conf_path (str): Relative path to configuration file
-    """
-    try:
-        with open(conf_path, 'r', encoding='utf-8') as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue  # Skip blank/comment lines
-                line = line.split("#", 1)[0].strip()  # Remove inline comments
-                if "=" in line:
-                    key, val = line.split("=", 1)
-                    CONFIG[key.strip()] = val.strip()
-    except Exception as e:
-        logger.error(f"Failed to load config from {conf_path}: {e}")
+	Args:
+		conf_path (str): Relative path to configuration file
+	"""
+	try:
+		with open(conf_path, 'r', encoding='utf-8') as f:
+			for line in f:
+				line = line.strip()
+				if not line or line.startswith("#") or "=" not in line:
+					continue  # Skip blank/comment lines
+				line = line.split("#", 1)[0].strip()  # Remove inline comments
+				if "=" in line:
+					key, val = line.split("=", 1)
+					CONFIG[key.strip()] = val.strip()
+	except Exception as e:
+		logger.error(f"Failed to load config from {conf_path}: {e}")
 
 # 🔧 Load configuration during module import
 load_config(resource_path(CONFIG_PATH))
@@ -132,7 +189,7 @@ load_config(resource_path(CONFIG_PATH))
 # ─────────────────────────────────────────────────────────────
 SYMBOLS = [s.lower() for s in CONFIG.get("SYMBOLS", "").split(",") if s.strip()]
 if not SYMBOLS:
-    raise RuntimeError("No SYMBOLS loaded from config.")
+	raise RuntimeError("No SYMBOLS loaded from config.")
 
 STREAMS_PARAM = "/".join(f"{sym}@depth20@100ms" for sym in SYMBOLS)
 WS_URL = f"wss://stream.binance.com:9443/stream?streams={STREAMS_PARAM}"
@@ -140,15 +197,15 @@ WS_URL = f"wss://stream.binance.com:9443/stream?streams={STREAMS_PARAM}"
 # ─────────────────────────────────────────────────────────────
 # 🕒 Backoff and Order Book Save Configuration
 # ─────────────────────────────────────────────────────────────
-BASE_BACKOFF        = int(CONFIG.get("BASE_BACKOFF", 2))
-MAX_BACKOFF         = int(CONFIG.get("MAX_BACKOFF", 30))
+BASE_BACKOFF		= int(CONFIG.get("BASE_BACKOFF", 2))
+MAX_BACKOFF		 = int(CONFIG.get("MAX_BACKOFF", 30))
 RESET_CYCLE_AFTER   = int(CONFIG.get("RESET_CYCLE_AFTER", 7))
-LOB_DIR             = CONFIG.get("LOB_DIR", "./data/binance/orderbook/")
+LOB_DIR			 = CONFIG.get("LOB_DIR", "./data/binance/orderbook/")
 SAVE_INTERVAL_MIN   = int(CONFIG.get("SAVE_INTERVAL_MIN", 1440))
 PURGE_ON_DATE_CHANGE= int(CONFIG.get("PURGE_ON_DATE_CHANGE", 1))
 
 if SAVE_INTERVAL_MIN > 1440:
-    raise ValueError("SAVE_INTERVAL_MIN must be ≤ 1440")
+	raise ValueError("SAVE_INTERVAL_MIN must be ≤ 1440")
 
 # 📁 Ensure order book directory exists
 os.makedirs(LOB_DIR, exist_ok=True)
@@ -172,23 +229,22 @@ ready_event = asyncio.Event()
 # 🧰 Utility Functions: File Naming and Compression
 # ─────────────────────────────────────────────────────────────
 
-def get_file_suffix(interval_min: int) -> str:
+def get_file_suffix(interval_min: int, event_ts_ms: int) -> str:
 	"""
-	Returns a string suffix for the current file based on time granularity.
+	Returns a string suffix for the file, based on event timestamp and interval.
 
 	Args:
-		interval_min (int): Save interval in minutes
+		interval_min (int): Save interval in minutes.
+		event_ts_ms (int): Event time in milliseconds (UTC).
 
 	Returns:
-		str: Timestamp string used to distinguish output file
-			 - Daily:     YYYY-MM-DD
-			 - Intraday:  YYYY-MM-DD_HH-MM
+		str: Timestamp string used for zip file grouping.
 	"""
-	now = datetime.utcnow()
+	ts = datetime.utcfromtimestamp(event_ts_ms / 1000)
 	if interval_min >= 1440:
-		return now.strftime("%Y-%m-%d")
+		return ts.strftime("%Y-%m-%d")
 	else:
-		return now.strftime("%Y-%m-%d_%H-%M")
+		return ts.strftime("%Y-%m-%d_%H-%M")
 
 def get_date_from_suffix(suffix: str) -> str:
 	"""
@@ -232,7 +288,7 @@ def merge_day_zips_to_single_jsonl(symbol: str, day_str: str, base_dir: str, pur
 		Final merged archive appears at:
 			base_dir/{SYMBOL}_orderbook_{YYYY-MM-DD}.zip
 	"""
-	tmp_dir     = os.path.join(base_dir, "temporary", f"{symbol.upper()}_orderbook_{day_str}")
+	tmp_dir	 = os.path.join(base_dir, "temporary", f"{symbol.upper()}_orderbook_{day_str}")
 	merged_path = os.path.join(base_dir, f"{symbol.upper()}_orderbook_{day_str}.jsonl")
 
 	if not os.path.isdir(tmp_dir):
@@ -302,8 +358,12 @@ async def orderbook_writer():
 		symbol, snapshot = await save_queue.get()
 
 		# ── Determine filename suffix (by interval) and date string
-		suffix   = get_file_suffix(SAVE_INTERVAL_MIN)               # e.g., "2024-06-27" or "2024-06-27_15-00"
-		day_str  = get_date_from_suffix(suffix)                     # e.g., "2024-06-27"
+		# consume_order_books() → await save_queue.put((symbol, snapshot))
+		# orderbook_writer() → symbol, snapshot = await save_queue.get()
+		event_ts_ms = snapshot.get("eventTime", int(time.time() * 1000))
+		suffix	 = get_file_suffix(SAVE_INTERVAL_MIN, event_ts_ms)
+		day_str  = get_date_from_suffix(suffix)
+		
 		filename = f"{symbol.upper()}_orderbook_{suffix}.jsonl"
 
 		# ── Ensure intermediate directory exists
@@ -360,6 +420,17 @@ async def consume_order_books() -> None:
 					bids = data.get("bids", [])
 					asks = data.get("asks", [])
 
+					"""
+						Partial depth streams like @depth20@100ms do not include
+						a server-side event timestamp ("E" field), unlike diff depth
+						streams (@depth). This limitation means all timestamping must
+						rely on client-side receipt time, which may introduce small
+						inconsistencies during interval-based snapshot grouping. We
+						accept this trade-off for faster development, but a future
+						migration to full diff streams could be considered for more
+						precise time alignment. Reference:
+							https://tinyurl.com/partial-depth-missing-E
+					"""
 					snapshot = {
 						"lastUpdateId": last_update,
 						"eventTime": int(time.time() * 1_000),
@@ -368,6 +439,8 @@ async def consume_order_books() -> None:
 					}
 					book_state[symbol] = snapshot
 					await save_queue.put((symbol, snapshot))
+					# consume_order_books() → await save_queue.put((symbol, snapshot))
+					# orderbook_writer() → symbol, snapshot = await save_queue.get()
 
 					if not ready_event.is_set():
 						ready_event.set()
@@ -393,14 +466,14 @@ async def startup_event():
 	Triggered when the FastAPI app starts.
 
 	- Launches two background coroutines:
-	    1. `orderbook_writer`: flushes `save_queue` to disk.
-	    2. `consume_order_books`: connects to Binance WebSocket and streams orderbook data.
+		1. `orderbook_writer`: flushes `save_queue` to disk.
+		2. `consume_order_books`: connects to Binance WebSocket and streams orderbook data.
 	- Waits for the first `ready_event` to ensure at least one snapshot was received before serving.
 	"""
-	asyncio.create_task(orderbook_writer())       # Background task for saving orderbook data to disk
-	asyncio.create_task(consume_order_books())    # Binance WebSocket consumer (depth20@100ms)
-	await ready_event.wait()                      # Block until at least one valid snapshot arrives
-	logger.info(f"Ready. Try [http://localhost:8000/orderbook/{SYMBOLS[0]}]")  # Startup banner
+	asyncio.create_task(orderbook_writer())	   # Background task for saving orderbook data to disk
+	asyncio.create_task(consume_order_books())	# Binance WebSocket consumer (depth20@100ms)
+	await ready_event.wait()					  # Block until at least one valid snapshot arrives
+	logger.info(f"Ready. Try <  http://localhost:8000/orderbook/{SYMBOLS[0]}  >")  # Startup banner
 
 # ───────────────────────────────
 # 🔍 Healthcheck Endpoints
@@ -420,8 +493,8 @@ async def health_ready():
 	Readiness probe — Returns 200 OK only after first market snapshot is received.
 
 	Before readiness:
-	    - Server may be running, but not yet connected to Binance stream.
-	    - Kubernetes/monitoring agents can use this to delay traffic routing.
+		- Server may be running, but not yet connected to Binance stream.
+		- Kubernetes/monitoring agents can use this to delay traffic routing.
 	"""
 	if ready_event.is_set():
 		return {"status": "ready"}
@@ -437,13 +510,13 @@ async def get_order_book(symbol: str):
 	Returns the most recent full order book snapshot (depth20) for a given symbol.
 
 	Args:
-	    symbol (str): Trading pair symbol (e.g., "btcusdt").
+		symbol (str): Trading pair symbol (e.g., "btcusdt").
 
 	Returns:
-	    JSONResponse: Snapshot containing lastUpdateId, eventTime, bids, and asks.
+		JSONResponse: Snapshot containing lastUpdateId, eventTime, bids, and asks.
 
 	Raises:
-	    HTTPException 404 if the requested symbol is not being tracked.
+		HTTPException 404 if the requested symbol is not being tracked.
 	"""
 	symbol = symbol.lower()
 	if symbol not in book_state:
@@ -459,14 +532,14 @@ async def orderbook_ui(request: Request, symbol: str):
 	Renders a lightweight HTML page showing the current order book snapshot for the given symbol.
 
 	Args:
-	    request (Request): FastAPI request context (used for templating).
-	    symbol (str): Trading pair symbol (e.g., "btcusdt").
+		request (Request): FastAPI request context (used for templating).
+		symbol (str): Trading pair symbol (e.g., "btcusdt").
 
 	Returns:
-	    Jinja2-rendered HTMLResponse of `orderbook.html` with top 20 bids and asks.
+		Jinja2-rendered HTMLResponse of `orderbook.html` with top 20 bids and asks.
 
 	Raises:
-	    HTTPException 404 if the requested symbol is not available in memory.
+		HTTPException 404 if the requested symbol is not available in memory.
 	"""
 	sym = symbol.lower()
 	if sym not in book_state:
@@ -489,17 +562,36 @@ async def orderbook_ui(request: Request, symbol: str):
 	)
 
 # ───────────────────────────────
-# 🧪 Script Entrypoint (dev only)
+# 🧪 Script Entrypoint (dev + prod-safe)
 # ───────────────────────────────
 if __name__ == "__main__":
 	import uvicorn
-	from fastapi import FastAPI
+	import asyncio
+	import sys
 
 	"""
-	Development entrypoint for launching the FastAPI app via Uvicorn.
-
-	Note:
-	    - Used only when running the script directly (not when imported as a module).
-	    - Host `0.0.0.0` ensures external access (e.g., Docker/WSL networking).
+	Universal entrypoint for:
+	  - 🧪 Windows development mode: uses uvicorn.run("module:app") to avoid event loop conflicts
+	  - 🐧 Linux or PyInstaller-built binary: uses uvicorn.run(app), as previously verified stable
 	"""
-	uvicorn.run(app, host="0.0.0.0", port=8000)
+
+	is_windows = sys.platform.startswith("win")
+	is_frozen = getattr(sys, "frozen", False)  # True if running as PyInstaller binary
+
+	if is_windows and not is_frozen:
+		# 💻 Windows dev mode — use module path to prevent event loop issues
+		uvicorn.run(
+			"stream_binance:app",
+			host="0.0.0.0",
+			port=8000,
+			reload=False,
+			use_colors=False
+		)
+	else:
+		# 🐧 Linux or frozen executable — use direct app reference (stable and verified)
+		uvicorn.run(
+			app,
+			host="0.0.0.0",
+			port=8000,
+			use_colors=False
+		)
