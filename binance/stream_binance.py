@@ -588,7 +588,7 @@ if __name__ == "__main__":
 
 		# FastAPI
 		logger.info(
-			f"Ready. FastAPI server starts, e.g., "
+			f"FastAPI server starts, e.g., "
 			f"<  http://localhost:8000/orderbook/{SYMBOLS[0]}  >"
 		)
 		cfg = Config(app=app, host="0.0.0.0", port=8000, lifespan="off", use_colors=False)
