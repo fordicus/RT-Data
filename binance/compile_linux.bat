@@ -40,7 +40,7 @@ IF ERRORLEVEL 1 (
 REM ── [2/3] Run PyInstaller inside Docker ────────────────────────────────────────
 echo [2/3] Running PyInstaller inside Docker...
 REM The following is one long command; do NOT split with carets (^).
-docker run --rm -v %cd%:/app %IMAGE_NAME% bash -lc "cd /app && pyinstaller --onefile --clean --noconfirm --log-level=WARN --name=%OUTPUT_NAME% --hidden-import=jinja2 --add-data=%TEMPLATE_DIR%:%TEMPLATE_DIR% --add-data=%CONF_FILE%:. %SOURCE_FILE% && cp /app/dist/%OUTPUT_NAME% /app/"
+docker run --rm -v %cd%:/app %IMAGE_NAME% bash -lc "cd /app && pyinstaller --onefile --clean --noconfirm --log-level=INFO --console --name=%OUTPUT_NAME% --hidden-import=jinja2 --add-data=%TEMPLATE_DIR%:%TEMPLATE_DIR% --add-data=%CONF_FILE%:. %SOURCE_FILE% && cp /app/dist/%OUTPUT_NAME% /app/"
 IF ERRORLEVEL 1 (
     echo ❌ PyInstaller build failed!
     goto error
@@ -65,6 +65,7 @@ del  /f /q *.spec      >nul 2>&1
 echo.
 echo ✅ Done! Self-contained Linux binary ready: .\%OUTPUT_NAME%
 echo 📦 Embedded resources: %TEMPLATE_DIR%\  %CONF_FILE%
+echo.
 pause
 exit /b 0
 

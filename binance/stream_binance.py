@@ -219,12 +219,6 @@ book_state: dict[str, dict] = {}
 file_handles: dict[str, tuple[str, asyncio.StreamWriter]] = {}
 #   └── file_handles[symbol]: (file_suffix, active file writer handle)
 
-save_queue = asyncio.Queue()
-#   └── queue of (symbol, order book data) tuples for batch persistence
-
-ready_event = asyncio.Event()
-#   └── used to signal readiness of initial WebSocket setup
-
 # ─────────────────────────────────────────────────────────────
 # 🧰 Utility Functions: File Naming and Compression
 # ─────────────────────────────────────────────────────────────
@@ -271,48 +265,80 @@ def zip_and_remove(src_path: str):
 			zf.write(src_path, arcname=os.path.basename(src_path))
 		os.remove(src_path)
 
-def merge_day_zips_to_single_jsonl(symbol: str, day_str: str, base_dir: str, purge: bool = True):
+def merge_day_zips_to_single_jsonl(
+	symbol: str,
+	day_str: str,
+	base_dir: str,
+	purge: bool = True
+):
 	"""
-	Merges multiple zipped .jsonl files for a specific trading day and symbol into a single .jsonl,
-	then compresses the result into one .zip file. Optionally purges intermediate files.
+	Merges multiple per-minute .zip snapshots for a given symbol and day
+	into a single .jsonl, then recompresses it as a .zip. Optionally
+	purges the temporary folder afterwards.
 
 	Args:
-		symbol (str): Trading pair (e.g., 'btcusdt')
-		day_str (str): Date string in 'YYYY-MM-DD' format
-		base_dir (str): Base directory for orderbook data
-		purge (bool): If True, deletes temporary input directory after merging
-
-	Structure:
-		Assumes source .zip files are under:
-			base_dir/temporary/{SYMBOL}_orderbook_{YYYY-MM-DD}/
-		Final merged archive appears at:
-			base_dir/{SYMBOL}_orderbook_{YYYY-MM-DD}.zip
+		symbol (str): Trading pair, e.g. 'btcusdt'
+		day_str (str): Date in 'YYYY-MM-DD' format
+		base_dir (str): Root directory of orderbook data
+		purge (bool): If True, deletes temp folder after successful merge
 	"""
-	tmp_dir	 = os.path.join(base_dir, "temporary", f"{symbol.upper()}_orderbook_{day_str}")
-	merged_path = os.path.join(base_dir, f"{symbol.upper()}_orderbook_{day_str}.jsonl")
+	# Construct paths
+	tmp_dir = os.path.join(
+		base_dir,
+		"temporary",
+		f"{symbol.upper()}_orderbook_{day_str}"
+	)
+	merged_path = os.path.join(
+		base_dir,
+		f"{symbol.upper()}_orderbook_{day_str}.jsonl"
+	)
 
+	# 1) If no temp directory or no .zip files inside, nothing to do
 	if not os.path.isdir(tmp_dir):
-		return  # nothing to merge
+		return
+	zip_files = [f for f in os.listdir(tmp_dir) if f.endswith(".zip")]
+	if not zip_files:
+		return
 
-	with open(merged_path, "w", encoding="utf-8") as fout:
-		for zip_file in sorted(os.listdir(tmp_dir)):
-			if not zip_file.endswith(".zip"):
-				continue
-			zip_path = os.path.join(tmp_dir, zip_file)
-			with zipfile.ZipFile(zip_path, "r") as zf:
-				for name in zf.namelist():
-					with zf.open(name) as f:
-						for line in f:
-							fout.write(line.decode("utf-8"))
+	try:
+		# 2) Open merged output for writing
+		with open(merged_path, "w", encoding="utf-8") as fout:
+			# 3) Iterate through each .zip in timestamp order
+			for zip_file in sorted(zip_files):
+				zip_path = os.path.join(tmp_dir, zip_file)
+				# 4) Extract each line from the zipped JSONL and write it out
+				with zipfile.ZipFile(zip_path, "r") as zf:
+					for member in zf.namelist():
+						with zf.open(member) as f:
+							for raw in f:
+								fout.write(raw.decode("utf-8"))
 
-	# Recompress into final .zip and optionally remove intermediate files
-	final_zip = merged_path.replace(".jsonl", ".zip")
-	with zipfile.ZipFile(final_zip, "w", zipfile.ZIP_DEFLATED) as zf:
-		zf.write(merged_path, arcname=os.path.basename(merged_path))
-	os.remove(merged_path)
+		# 5) Recompress the merged JSONL into a final zip
+		final_zip = merged_path.replace(".jsonl", ".zip")
+		with zipfile.ZipFile(final_zip, "w", zipfile.ZIP_DEFLATED) as zf:
+			zf.write(merged_path, arcname=os.path.basename(merged_path))
 
-	if purge:
-		shutil.rmtree(tmp_dir)
+		# 6) Remove the intermediate .jsonl only if it really exists
+		if os.path.exists(merged_path):
+			os.remove(merged_path)
+
+		# 7) Optionally purge the entire temporary directory
+		if purge:
+			shutil.rmtree(tmp_dir)
+
+	except FileNotFoundError as e:
+		# Catch any missing‐file errors (e.g., if a zip vanished mid-merge)
+		logger.warning(
+			f"[merge_day_zips] No files found to merge for {symbol} on {day_str}: {e}"
+		)
+		return
+	except Exception as e:
+		# Catch and log any unexpected error, but don’t crash the thread
+		logger.error(
+			f"[merge_day_zips] Unexpected error merging {symbol} on {day_str}: {e}",
+			exc_info=True
+		)
+		return
 
 def merge_all_symbols_for_day(symbols: list[str], day_str: str):
 	"""
@@ -458,24 +484,6 @@ async def consume_order_books() -> None:
 			logger.info("WebSocket connection closed.")
 
 # ───────────────────────────────
-# 🚀 Startup Hook
-# ───────────────────────────────
-@app.on_event("startup")
-async def startup_event():
-	"""
-	Triggered when the FastAPI app starts.
-
-	- Launches two background coroutines:
-		1. `orderbook_writer`: flushes `save_queue` to disk.
-		2. `consume_order_books`: connects to Binance WebSocket and streams orderbook data.
-	- Waits for the first `ready_event` to ensure at least one snapshot was received before serving.
-	"""
-	asyncio.create_task(orderbook_writer())	   # Background task for saving orderbook data to disk
-	asyncio.create_task(consume_order_books())	# Binance WebSocket consumer (depth20@100ms)
-	await ready_event.wait()					  # Block until at least one valid snapshot arrives
-	logger.info(f"Ready. Try <  http://localhost:8000/orderbook/{SYMBOLS[0]}  >")  # Startup banner
-
-# ───────────────────────────────
 # 🔍 Healthcheck Endpoints
 # ───────────────────────────────
 
@@ -561,37 +569,30 @@ async def orderbook_ui(request: Request, symbol: str):
 		},
 	)
 
-# ───────────────────────────────
-# 🧪 Script Entrypoint (dev + prod-safe)
-# ───────────────────────────────
 if __name__ == "__main__":
-	import uvicorn
 	import asyncio
-	import sys
+	from uvicorn.config import Config
+	from uvicorn.server import Server
 
-	"""
-	Universal entrypoint for:
-	  - 🧪 Windows development mode: uses uvicorn.run("module:app") to avoid event loop conflicts
-	  - 🐧 Linux or PyInstaller-built binary: uses uvicorn.run(app), as previously verified stable
-	"""
+	async def main():
+		global ready_event, save_queue
+		ready_event = asyncio.Event()
+		save_queue = asyncio.Queue()
 
-	is_windows = sys.platform.startswith("win")
-	is_frozen = getattr(sys, "frozen", False)  # True if running as PyInstaller binary
+		# start background tasks
+		asyncio.create_task(orderbook_writer())
+		asyncio.create_task(consume_order_books())
 
-	if is_windows and not is_frozen:
-		# 💻 Windows dev mode — use module path to prevent event loop issues
-		uvicorn.run(
-			"stream_binance:app",
-			host="0.0.0.0",
-			port=8000,
-			reload=False,
-			use_colors=False
+		# a snapshot
+		await ready_event.wait()
+
+		# FastAPI
+		logger.info(
+			f"Ready. FastAPI server starts, e.g., "
+			f"<  http://localhost:8000/orderbook/{SYMBOLS[0]}  >"
 		)
-	else:
-		# 🐧 Linux or frozen executable — use direct app reference (stable and verified)
-		uvicorn.run(
-			app,
-			host="0.0.0.0",
-			port=8000,
-			use_colors=False
-		)
+		cfg = Config(app=app, host="0.0.0.0", port=8000, lifespan="off", use_colors=False)
+		server = Server(cfg)
+		await server.serve()
+
+	asyncio.run(main())
