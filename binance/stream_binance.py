@@ -1283,6 +1283,7 @@ async def get_order_book(symbol: str):
 	symbol = symbol.lower()
 
 	if symbol not in symbol_snapshots_to_render:
+		
 		raise HTTPException(status_code=404, detail="symbol not found")
 
 	return JSONResponse(content=symbol_snapshots_to_render[symbol])
