@@ -11,6 +11,15 @@ REM the executable via PyInstaller's --add-data option. Designed for use within
 REM a conda env matching `requirements.txt`. See `Dockerfile` for details.
 REM ===============================================================================
 
+REM ─────────────────────────────────────────────────────────────
+REM 📦 Pre-Cleanup: Remove old binary if already exists
+REM ─────────────────────────────────────────────────────────────
+
+if exist stream_binance (
+    del /f /q stream_binance
+    echo [0/3] Existing output deleted: stream_binance
+)
+
 REM ── Configuration ───────────────────────────────────────────────────────────────
 REM Docker image tag for build
 SET IMAGE_NAME=pyinstaller-stream-binance
