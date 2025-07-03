@@ -18,6 +18,7 @@ datasets/
 downloads/
 outputs/
 unshared/
+_dev_log_/
 
 # ========================
 # 🛠️  Build Artifacts
