@@ -43,4 +43,4 @@ COPY . .
 RUN pyinstaller --onefile --clean --noconfirm --log-level=ERROR --hidden-import=jinja2 --add-data templates:templates --add-data get_binance_chart.conf:. stream_binance.py
 
 # Default command prints completion message; binary is available under /app/dist/stream_binance
-CMD ["echo", "✅ Build complete! Find binary in /app/dist"]
+CMD ["echo", "Build complete! Find binary in /app/dist"]

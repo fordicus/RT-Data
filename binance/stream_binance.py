@@ -306,32 +306,6 @@ def resource_path(relative_path: str) -> str:
 
 		return None
 
-# ───────────────────────────────────────────────────────────────────────────────
-# ⚙️ FastAPI Initialization + HTML Template Binding
-# ───────────────────────────────────────────────────────────────────────────────
-# FastAPI serves as the **core runtime backbone** for this application.
-# It is not merely optional; several key subsystems depend on it:
-#
-#   1. 📊 Logging Integration:
-#	  - Logging is routed via `uvicorn.error`, which is managed by FastAPI's ASGI server.
-#	  - This means our logger (`logger = logging.getLogger("uvicorn.error")`) is **active**
-#		and functional even before we explicitly launch the app, as long as FastAPI is imported.
-#
-#   2. 🌐 REST API Endpoints:
-#	  - Used for health checks, JSON-based order book access, and real-time UI rendering.
-#
-#   3. 🧱 HTML UI Layer (Optional but Useful):
-#	  - The Jinja2 template system is integrated via FastAPI to serve HTML at `/orderbook/{symbol}`.
-#
-# ⚠️ If FastAPI were removed, the following features would break:
-#	 → Logging infrastructure
-#	 → REST endpoints (/health, /state)
-#	 → HTML visualization
-#
-# So although not all FastAPI features are always used, **its presence is structurally required**.
-
-app = FastAPI()
-
 # Bind template directory (used for rendering HTML order book UI)
 # `resource_path()` ensures compatibility with PyInstaller-frozen Linux binaries.
 
@@ -478,13 +452,19 @@ LATENCY_SAMPLE_MIN		= int(CONFIG.get("LATENCY_SAMPLE_MIN",		10))
 LATENCY_THRESHOLD_SEC	= float(CONFIG.get("LATENCY_THRESHOLD_SEC",	0.5))
 LATENCY_SIGNAL_SLEEP	= float(CONFIG.get("LATENCY_SIGNAL_SLEEP",	0.2))
 
-# ───────────────────────────────────────────────────────────────────────────────
-# 🔄 WebSocket Keepalive Ping/Pong Timing (from .conf)
-# Controls client ping interval and pong timeout for Binance WebSocket streams.
-# ───────────────────────────────────────────────────────────────────────────────
+# ────────────────────────────────────────────────────────────────────────────────────
+# 🔄 WebSocket Ping/Pong Timing (from .conf)
+# Controls client ping interval and pong timeout for Binance streams.
+# Set to None to disable client pings (Binance pings the client by default).
+# See Section `WebSocket Streams for Binance (2025-01-28)` in
+# 	https://github.com/binance/binance-spot-api-docs/blob/master/web-socket-streams.md
+# ────────────────────────────────────────────────────────────────────────────────────
 
-WS_PING_INTERVAL = int(CONFIG.get("WS_PING_INTERVAL", 20))
-WS_PING_TIMEOUT  = int(CONFIG.get("WS_PING_TIMEOUT", 20))
+WS_PING_INTERVAL = int(CONFIG.get("WS_PING_INTERVAL", 0))
+WS_PING_TIMEOUT  = int(CONFIG.get("WS_PING_TIMEOUT",  0))
+
+if WS_PING_INTERVAL == 0: WS_PING_INTERVAL = None
+if WS_PING_TIMEOUT  == 0: WS_PING_TIMEOUT  = None
 
 # ───────────────────────────────────────────────────────────────────────────────
 # 🧠 Runtime Per-Symbol State
@@ -1089,7 +1069,9 @@ async def gate_streaming_by_latency() -> None:
 			if latency_passed and not stream_currently_on:
 
 				logger.info(
-					"Latency normalized. Enable order book stream."
+					"[gate_streaming_by_latency] "
+					f"Latency normalized. "
+					f"Enable order book stream."
 				)
 
 				event_stream_enable.set()
@@ -1100,7 +1082,8 @@ async def gate_streaming_by_latency() -> None:
 				if not has_any_latency and not has_logged_warmup:
 
 					logger.info(
-						"Warming up latency measurements..."
+						f"[gate_streaming_by_latency] "
+						f"Warming up latency measurements..."
 					)
 
 					has_logged_warmup = True
@@ -1108,7 +1091,9 @@ async def gate_streaming_by_latency() -> None:
 				elif has_any_latency and stream_currently_on:
 
 					logger.warning(
-						"Latency degraded. Pausing order book stream."
+						f"[gate_streaming_by_latency] "
+						f"Latency degraded. "
+						f"Pausing order book stream."
 					)
 
 					event_stream_enable.clear()
@@ -1118,7 +1103,8 @@ async def gate_streaming_by_latency() -> None:
 		except Exception as e:
 
 			logger.error(
-				"[gate_streaming_by_latency] Exception in latency gate: "
+				"[gate_streaming_by_latency] "
+				f"Exception in latency gate: "
 				f"{e}",
 				exc_info=True
 			)
@@ -1184,13 +1170,13 @@ async def estimate_latency_via_diff_depth() -> None:
 
 			async with websockets.connect(
 				url,
-				ping_interval=WS_PING_INTERVAL,
-				ping_timeout=WS_PING_TIMEOUT
+				ping_interval = WS_PING_INTERVAL,
+				ping_timeout  = WS_PING_TIMEOUT
 			) as ws:
 
 				logger.info(
-					f"Connected to:\n"
-					f"\t{url} (@depth)"
+					f"[estimate_latency_via_diff_depth] "
+					f"Connected to:\n{format_ws_url(url, '(@depth)')}\n"
 				)
 
 				reconnect_attempt = 0  # Reset retry counter
@@ -1252,7 +1238,9 @@ async def estimate_latency_via_diff_depth() -> None:
 									event_latency_valid.set()
 
 									logger.info(
-										"Latency OK — all symbols within threshold. Event set."
+										"[estimate_latency_via_diff_depth] "
+										f"Latency OK — all symbols within threshold. "
+										f"Event set."
 									)
 					except Exception as e:
 
@@ -1305,6 +1293,33 @@ async def estimate_latency_via_diff_depth() -> None:
 				f"WebSocket connection closed."
 			)
 
+def format_ws_url(url: str, label: str = "") -> str:
+
+	"""
+	Formats a Binance WebSocket URL for multi-symbol readability.
+	Example:
+		wss://stream.binance.com:9443/stream?streams=
+			btcusdc@depth/
+			ethusdc@depth/
+			solusdc@depth (@depth)
+	"""
+
+	if "streams=" not in url:
+
+		return url + (f" {label}" if label else "")
+
+	prefix, streams = url.split("streams=", 1)
+	symbols = streams.split("/")
+	formatted = "\t" + prefix + "streams=\n"
+	formatted += "".join(f"\t\t{s}/\n" for s in symbols if s)
+	formatted = formatted.rstrip("/\n")
+
+	if label:
+
+		formatted += f" {label}"
+
+	return formatted
+
 # ───────────────────────────────────────────────────────────────────────────────
 # 🧩 Depth20 Snapshot Collector — Streams → Queue Buffer
 # ───────────────────────────────────────────────────────────────────────────────
@@ -1353,15 +1368,15 @@ async def put_snapshot() -> None:
 
 			async with websockets.connect(
 				WS_URL,
-				ping_interval=WS_PING_INTERVAL,
-				ping_timeout=WS_PING_TIMEOUT
+				ping_interval = WS_PING_INTERVAL,
+				ping_timeout  = WS_PING_TIMEOUT
 			) as ws:
 
 				logger.info(
-					f"Connected to:\n"
-					f"\t{WS_URL} (depth20@100ms)"
+					f"[put_snapshot] "
+					f"Connected to:\n{format_ws_url(WS_URL, '(depth20@100ms)')}\n"
 				)
-
+				
 				attempt = 0  # Reset retry count
 
 				# 🔄 Process stream messages
@@ -1666,6 +1681,85 @@ async def dump_snapshot_for_symbol(symbol: str) -> None:
 			continue
 
 # ───────────────────────────────────────────────────────────────────────────────
+# 🛑 Graceful Shutdown Handler (FastAPI Lifespan)
+# Migrates from deprecated @app.on_event("shutdown") to lifespan context.
+# Ensures all file writers are closed and data is safely flushed on shutdown.
+# ───────────────────────────────────────────────────────────────────────────────
+
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app):
+
+	"""
+	FastAPI lifespan handler for graceful shutdown.
+
+	On shutdown, closes all active file writers for each symbol to ensure
+	all snapshot data is flushed and safely written to disk.
+	This prevents data loss in case the application exits before
+	individual file handles are rotated or closed.
+	"""
+
+	# Startup logic (if any) goes here
+
+	yield
+
+	# Shutdown logic: close all file writers
+
+	for symbol in SYMBOLS:
+
+		suffix_writer = symbol_to_file_handles.get(symbol)
+		
+		if not suffix_writer:
+
+			continue  # No writer was created for this symbol
+
+		suffix, writer = suffix_writer
+
+		try:
+
+			if writer:
+
+				writer.close()
+
+			logger.info(
+				f"[shutdown] Closed file for {symbol} (suffix: {suffix})"
+			)
+
+		except Exception as e:
+			
+			logger.error(
+				f"[shutdown] Failed to close file for {symbol}: {e}",
+				exc_info=True
+			)
+
+# ───────────────────────────────────────────────────────────────────────────────
+# ⚙️ FastAPI Initialization + HTML Template Binding
+# ───────────────────────────────────────────────────────────────────────────────
+# FastAPI serves as the **core runtime backbone** for this application.
+# It is not merely optional; several key subsystems depend on it:
+#
+#   1. 📊 Logging Integration:
+#	  - Logging is routed via `uvicorn.error`, which is managed by FastAPI's ASGI server.
+#	  - This means our logger (`logger = logging.getLogger("uvicorn.error")`) is **active**
+#		and functional even before we explicitly launch the app, as long as FastAPI is imported.
+#
+#   2. 🌐 REST API Endpoints:
+#	  - Used for health checks, JSON-based order book access, and real-time UI rendering.
+#
+#   3. 🧱 HTML UI Layer (Optional but Useful):
+#	  - The Jinja2 template system is integrated via FastAPI to serve HTML at `/orderbook/{symbol}`.
+#
+# ⚠️ If FastAPI were removed, the following features would break:
+#	 → Logging infrastructure
+#	 → REST endpoints (/health, /state)
+#	 → HTML visualization
+#
+# So although not all FastAPI features are always used, **its presence is structurally required**.
+
+app = FastAPI(lifespan=lifespan)
+
+# ───────────────────────────────────────────────────────────────────────────────
 # 🔍 Healthcheck Endpoints
 # ───────────────────────────────────────────────────────────────────────────────
 
@@ -1816,50 +1910,6 @@ async def orderbook_ui(request: Request, symbol: str):
 		raise HTTPException(status_code=500, detail="internal error")
 
 # ───────────────────────────────────────────────────────────────────────────────
-# 🛑 Graceful Shutdown Handler
-# ───────────────────────────────────────────────────────────────────────────────
-
-@app.on_event("shutdown")
-def graceful_shutdown():
-
-	"""
-	🛑 Shutdown handler that closes all active file writers to ensure
-	all snapshot data is flushed and safely written to disk.
-	This prevents data loss in case the application exits
-	before individual file handles are rotated or closed.
-	"""
-
-	for symbol in SYMBOLS:
-
-		# Get the writer info for this symbol, if any
-
-		suffix_writer = symbol_to_file_handles.get(symbol)
-
-		if not suffix_writer:
-
-			continue  # No writer was created for this symbol
-
-		suffix, writer = suffix_writer
-
-		try:
-
-			if writer:
-
-				writer.close()
-
-			logger.info(
-				f"[shutdown] Closed file for {symbol} "
-				f"(suffix: {suffix})"
-			)
-
-		except Exception as e:
-
-			logger.error(
-				f"[shutdown] Failed to close file for {symbol}: {e}",
-				exc_info=True
-			)
-
-# ───────────────────────────────────────────────────────────────────────────────
 # ⏱️ Timed Watchdog for Graceful Profiling Shutdown
 # ───────────────────────────────────────────────────────────────────────────────
 
@@ -1967,7 +2017,9 @@ def dump_yappi_stats() -> None:
 			exc_info=True
 		)
 
-atexit.register(dump_yappi_stats)   # Register dump on shutdown
+if PROFILE_DURATION > 0:
+
+	atexit.register(dump_yappi_stats)   # Register dump on shutdown
 
 # ───────────────────────────────────────────────────────────────────────────────
 # 🚦 Main Entrypoint & Async Task Orchestration
@@ -2109,8 +2161,8 @@ if __name__ == "__main__":
 			try:
 
 				logger.info(
-					f"FastAPI server starts. Try:\n"
-					f"\thttp://localhost:8000/orderbook/{SYMBOLS[0]}"
+					f"[main] FastAPI server starts. Try:\n"
+					f"\thttp://localhost:8000/orderbook/{SYMBOLS[0]}\n"
 				)
 
 				cfg = Config(app=app, host="0.0.0.0", port=8000, lifespan="off", use_colors=False)
