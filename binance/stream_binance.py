@@ -120,7 +120,21 @@ file_handler = RotatingFileHandler(
 	maxBytes=10_000_000,	# Rotate after 10 MB
 	backupCount=3			# Keep 3 backups
 )
-file_handler.setFormatter(log_formatter)
+
+try:
+
+	file_handler.setFormatter(log_formatter)
+
+except Exception as e:
+
+	# Logging is not fully initialized yet, so use stderr directly.
+
+	print(
+		f"[{datetime.now(timezone.utc).isoformat()}] ERROR: "
+		f"[global] Failed to set formatter for file_handler: {e}",
+		file=sys.stderr
+	)
+	sys.exit(1)
 
 # ───────────────────────────────────────────────────────────────────────────────
 # 📺 Console Handler Configuration
@@ -128,26 +142,69 @@ file_handler.setFormatter(log_formatter)
 # ───────────────────────────────────────────────────────────────────────────────
 
 console_handler = logging.StreamHandler()
-console_handler.setFormatter(log_formatter)
+
+try:
+
+	console_handler.setFormatter(log_formatter)
+
+except Exception as e:
+
+	# Logging is not fully initialized yet, so use stderr directly.
+
+	print(
+		f"[{datetime.now(timezone.utc).isoformat()}] ERROR: "
+		f"[global] Failed to set formatter for console_handler: {e}",
+		file=sys.stderr
+	)
+
+	sys.exit(1)
 
 # ───────────────────────────────────────────────────────────────────────────────
-# 🧠 Logger Setup
-# Reuses uvicorn logger for unified logging across FastAPI +
-# background coroutines. This ensures all output (e.g., during
-# streaming or file I/O) appears within the same structured
-# logging stream as FastAPI responses.
-#
-# Output format (via uvicorn defaults) includes timestamp and
-# log level.
+# 🧠 Logger Setup & Handler Integration
+# Unified logging for FastAPI, Uvicorn, websockets, and all dependencies.
+# All logs are routed to both file and console with UTC timestamps.
 # ───────────────────────────────────────────────────────────────────────────────
 
-logger = logging.getLogger("uvicorn.error")
-logger.setLevel(logging.INFO)
-logger.propagate = False  # Avoid double logging
+try:
 
-# Attach both file and console handlers
-logger.addHandler(file_handler)
-logger.addHandler(console_handler)
+	# Root logger: attach file and console handlers
+
+	logger = logging.getLogger()
+	logger.setLevel(logging.INFO)
+	logger.addHandler(file_handler)
+	logger.addHandler(console_handler)
+
+	# Ensure third-party loggers propagate to root
+
+	for name in [
+		"websockets",
+		"websockets.server",
+		"websockets.client",
+		"uvicorn",
+		"uvicorn.error",
+		"uvicorn.access",
+		"fastapi",
+		"starlette",
+		"asyncio",
+		"concurrent.futures"
+	]:
+
+		individual_logger = logging.getLogger(name)
+		individual_logger.propagate = True
+		individual_logger.setLevel(logging.INFO)
+
+		for handler in individual_logger.handlers:
+			handler.setFormatter(log_formatter)
+
+except Exception as e:
+
+	print(
+		f"[{datetime.now(timezone.utc).isoformat()}] ERROR: "
+		f"[global] Failed to initialize logging: {e}",
+		file=sys.stderr
+	)
+
+	sys.exit(1)
 
 # ───────────────────────────────────────────────────────────────────────────────
 # 📦 Third-Party Dependencies (from requirements.txt)
@@ -187,6 +244,7 @@ import yappi						# Coroutine-aware profiler
 # ───────────────────────────────────────────────────────────────────────────────
 # 📁 Utility: PyInstaller-Compatible Resource Resolver
 # ───────────────────────────────────────────────────────────────────────────────
+
 def resource_path(relative_path: str) -> str:
 
 	"""
@@ -231,8 +289,22 @@ def resource_path(relative_path: str) -> str:
 			Absolute path to the resource file, portable across environments.
 	"""
 
-	base = getattr(sys, "_MEIPASS", os.path.dirname(__file__))
-	return os.path.join(base, relative_path)
+	logger.info(f"[resource_path] Called with relative_path='{relative_path}'")
+
+	try:
+
+		base = getattr(sys, "_MEIPASS", os.path.dirname(__file__))
+
+		return os.path.join(base, relative_path)
+
+	except Exception as e:
+
+		logger.error(
+			f"[resource_path] Failed to resolve path for '{relative_path}': {e}",
+			exc_info=True
+		)
+
+		return None
 
 # ───────────────────────────────────────────────────────────────────────────────
 # ⚙️ FastAPI Initialization + HTML Template Binding
@@ -263,7 +335,18 @@ app = FastAPI()
 # Bind template directory (used for rendering HTML order book UI)
 # `resource_path()` ensures compatibility with PyInstaller-frozen Linux binaries.
 
-templates = Jinja2Templates(directory=resource_path("templates"))
+templates_dir = resource_path("templates")
+
+if templates_dir is None:
+
+	logger.error(
+		"[global] Failed to resolve template directory path for 'templates'. "
+		"Application cannot start."
+	)
+
+	sys.exit(1)
+
+templates = Jinja2Templates(directory=templates_dir)
 
 # ───────────────────────────────────────────────────────────────────────────────
 # ⚙️ Configuration Loader (.conf)
@@ -321,21 +404,45 @@ def load_config(conf_path: str):
 		with open(conf_path, 'r', encoding='utf-8') as f:
 
 			for line in f:
+
 				line = line.strip()
+
 				if not line or line.startswith("#") or "=" not in line:
+
 					continue
+
 				line = line.split("#", 1)[0].strip()
+
 				if "=" in line:
+
 					key, val = line.split("=", 1)
 					CONFIG[key.strip()] = val.strip()
 
 	except Exception as e:
 
+		logger.error(
+			f"[load_config] Failed to load config from '{conf_path}': {e}",
+			exc_info=True
+		)
+
 		logger.error(f"Failed to load config from {conf_path}: {e}")
+
+		sys.exit(1)
 
 # 🔧 Load config via resource_path() for PyInstaller compatibility
 
-load_config(resource_path(CONFIG_PATH))
+conf_abs_path = resource_path(CONFIG_PATH)
+
+if conf_abs_path is None:
+
+	logger.error(
+		f"[global] Failed to resolve config path for '{CONFIG_PATH}'. "
+		f"Application cannot start."
+	)
+
+	sys.exit(1)
+
+load_config(conf_abs_path)
 
 # ───────────────────────────────────────────────────────────────────────────────
 # 📊 Stream Parameters Derived from Config
@@ -345,8 +452,15 @@ load_config(resource_path(CONFIG_PATH))
 #   • Tracking dicts for latency and update consistency
 
 SYMBOLS = [s.lower() for s in CONFIG.get("SYMBOLS", "").split(",") if s.strip()]
+
 if not SYMBOLS:
-	raise RuntimeError("No SYMBOLS loaded from config.")
+
+	logger.error(
+		"[global] No SYMBOLS loaded from config. "
+		"Check 'get_binance_chart.conf'. Application cannot start."
+	)
+
+	sys.exit(1)
 
 STREAMS_PARAM	= "/".join(f"{sym}@depth20@100ms" for sym in SYMBOLS)
 WS_URL			= f"wss://stream.binance.com:9443/stream?streams={STREAMS_PARAM}"
@@ -359,10 +473,18 @@ WS_URL			= f"wss://stream.binance.com:9443/stream?streams={STREAMS_PARAM}"
 #   - LATENCY_THRESHOLD_SEC: max latency allowed for stream readiness
 # ───────────────────────────────────────────────────────────────────────────────
 
-LATENCY_DEQUE_SIZE	= int(CONFIG.get("LATENCY_DEQUE_SIZE", 10))
-LATENCY_SAMPLE_MIN	= int(CONFIG.get("LATENCY_SAMPLE_MIN", 10))
-LATENCY_THRESHOLD_SEC = float(CONFIG.get("LATENCY_THRESHOLD_SEC", 0.5))
-LATENCY_SIGNAL_SLEEP  = float(CONFIG.get("LATENCY_SIGNAL_SLEEP", 0.2))
+LATENCY_DEQUE_SIZE		= int(CONFIG.get("LATENCY_DEQUE_SIZE",		10))
+LATENCY_SAMPLE_MIN		= int(CONFIG.get("LATENCY_SAMPLE_MIN",		10))
+LATENCY_THRESHOLD_SEC	= float(CONFIG.get("LATENCY_THRESHOLD_SEC",	0.5))
+LATENCY_SIGNAL_SLEEP	= float(CONFIG.get("LATENCY_SIGNAL_SLEEP",	0.2))
+
+# ───────────────────────────────────────────────────────────────────────────────
+# 🔄 WebSocket Keepalive Ping/Pong Timing (from .conf)
+# Controls client ping interval and pong timeout for Binance WebSocket streams.
+# ───────────────────────────────────────────────────────────────────────────────
+
+WS_PING_INTERVAL = int(CONFIG.get("WS_PING_INTERVAL", 20))
+WS_PING_TIMEOUT  = int(CONFIG.get("WS_PING_TIMEOUT", 20))
 
 # ───────────────────────────────────────────────────────────────────────────────
 # 🧠 Runtime Per-Symbol State
@@ -406,24 +528,49 @@ EVENT_FLAGS_INITIALIZED = False
 
 def initialize_event_flags():
 
-	global ready_event, event_latency_valid, event_stream_enable
-	global EVENT_FLAGS_INITIALIZED
+	"""
+	Initializes global asyncio.Event flags for controlling stream state.
+	Logs any exception and terminates if initialization fails.
+	"""
 
-	ready_event			= asyncio.Event()
-	event_latency_valid = asyncio.Event()
-	event_stream_enable = asyncio.Event()
+	try:
 
-	EVENT_FLAGS_INITIALIZED = True
+		global ready_event, event_latency_valid, event_stream_enable
+		global EVENT_FLAGS_INITIALIZED
+
+		ready_event = asyncio.Event()
+		event_latency_valid = asyncio.Event()
+		event_stream_enable = asyncio.Event()
+
+		EVENT_FLAGS_INITIALIZED = True
+
+		logger.info("[initialize_event_flags] Event flags initialized.")
+
+	except Exception as e:
+
+		logger.error(
+			"[initialize_event_flags] Failed to initialize event flags: "
+			f"{e}",
+			exc_info=True
+		)
+
+		sys.exit(1)
 
 def assert_event_flags_initialized():
 
+	"""
+	Asserts that event flags have been initialized.
+	Logs and terminates if not initialized.
+	"""
+
 	if not EVENT_FLAGS_INITIALIZED:
 
-		raise RuntimeError(
-			f"Event flags not initialized. "
-			f"Call initialize_event_flags() "
-			f"before using event objects."
+		logger.error(
+			"[assert_event_flags_initialized] Event flags not initialized. "
+			"Call initialize_event_flags() before using event objects."
 		)
+
+		sys.exit(1)
 
 # ───────────────────────────────────────────────────────────────────────────────
 # 🕒 Backoff Strategy & Snapshot Save Policy
@@ -433,18 +580,30 @@ def assert_event_flags_initialized():
 #   • Optional data purging upon date rollover
 # ───────────────────────────────────────────────────────────────────────────────
 
-BASE_BACKOFF		 = int(CONFIG.get("BASE_BACKOFF", 2))
-MAX_BACKOFF		  = int(CONFIG.get("MAX_BACKOFF", 30))
-RESET_CYCLE_AFTER	= int(CONFIG.get("RESET_CYCLE_AFTER", 7))
-RESET_BACKOFF_LEVEL	 = int(CONFIG.get("RESET_BACKOFF_LEVEL", 3))
+try:
 
-LOB_DIR = CONFIG.get("LOB_DIR", "./data/binance/orderbook/")
+	BASE_BACKOFF		= int(CONFIG.get("BASE_BACKOFF", 2))
+	MAX_BACKOFF		 = int(CONFIG.get("MAX_BACKOFF", 30))
+	RESET_CYCLE_AFTER   = int(CONFIG.get("RESET_CYCLE_AFTER", 7))
+	RESET_BACKOFF_LEVEL = int(CONFIG.get("RESET_BACKOFF_LEVEL", 3))
 
-PURGE_ON_DATE_CHANGE = int(CONFIG.get("PURGE_ON_DATE_CHANGE", 1))
-SAVE_INTERVAL_MIN	= int(CONFIG.get("SAVE_INTERVAL_MIN", 1440))
+	LOB_DIR = CONFIG.get("LOB_DIR", "./data/binance/orderbook/")
 
-if SAVE_INTERVAL_MIN > 1440:
-	raise ValueError("SAVE_INTERVAL_MIN must be ≤ 1440")
+	PURGE_ON_DATE_CHANGE= int(CONFIG.get("PURGE_ON_DATE_CHANGE", 1))
+	SAVE_INTERVAL_MIN   = int(CONFIG.get("SAVE_INTERVAL_MIN", 1440))
+
+	if SAVE_INTERVAL_MIN > 1440:
+
+		raise ValueError("SAVE_INTERVAL_MIN must be ≤ 1440")
+
+except Exception as e:
+
+	logger.error(
+		f"[global] Failed to load or validate stream/save config: {e}",
+		exc_info=True
+	)
+	
+	sys.exit(1)
 
 # ───────────────────────────────────────────────────────────────────────────────
 # 🧪 Optional Profiling (Controlled via .conf)
@@ -453,11 +612,23 @@ if SAVE_INTERVAL_MIN > 1440:
 #   • If 0 → profiling is disabled, runs indefinitely
 # ───────────────────────────────────────────────────────────────────────────────
 
-PROFILE_DURATION = int(CONFIG.get("PROFILE_DURATION", 0))
+try:
 
-# 📁 Ensure order book directory exists
+	PROFILE_DURATION = int(CONFIG.get("PROFILE_DURATION", 0))
 
-os.makedirs(LOB_DIR, exist_ok=True)
+	# Ensure order book directory exists
+
+	os.makedirs(LOB_DIR, exist_ok=True)
+
+except Exception as e:
+
+	logger.error(
+		"[global] Failed to set up profiling or create order book directory: "
+		f"{e}",
+		exc_info=True
+	)
+
+	sys.exit(1)
 
 # ───────────────────────────────────────────────────────────────────────────────
 # 📦 Runtime Memory Buffers & Async File Handles
@@ -500,42 +671,56 @@ merged_days_set:			set[str] = set()
 MERGE_LOCK:					threading.Lock = threading.Lock()
 
 def initialize_runtime_state():
+	"""
+	Initializes all global runtime state dictionaries and sets.
+	Logs and terminates if any error occurs during initialization.
+	"""
+	try:
+		global SYMBOLS
+		global latency_dict, median_latency_dict, depth_update_id_dict
+		global snapshots_queue_dict
 
-	global SYMBOLS
-	global latency_dict, median_latency_dict, depth_update_id_dict
-	global snapshots_queue_dict
-	
-	latency_dict.clear()
-	latency_dict.update({
-		symbol: deque(maxlen=LATENCY_DEQUE_SIZE)
-		for symbol in SYMBOLS
-	})
+		latency_dict.clear()
+		latency_dict.update({
+			symbol: deque(maxlen=LATENCY_DEQUE_SIZE)
+			for symbol in SYMBOLS
+		})
 
-	median_latency_dict.clear()
-	median_latency_dict.update({
-		symbol: 0.0
-		for symbol in SYMBOLS
-	})
+		median_latency_dict.clear()
+		median_latency_dict.update({
+			symbol: 0.0
+			for symbol in SYMBOLS
+		})
 
-	depth_update_id_dict.clear()
-	depth_update_id_dict.update({
-		symbol: 0
-		for symbol in SYMBOLS
-	})
+		depth_update_id_dict.clear()
+		depth_update_id_dict.update({
+			symbol: 0
+			for symbol in SYMBOLS
+		})
 
-	snapshots_queue_dict.clear()
-	snapshots_queue_dict.update({
-		symbol: asyncio.Queue() for symbol in SYMBOLS
-	})
+		snapshots_queue_dict.clear()
+		snapshots_queue_dict.update({
+			symbol: asyncio.Queue() for symbol in SYMBOLS
+		})
 
-	symbol_snapshots_to_render.clear()
-	symbol_snapshots_to_render.update({
-		symbol: {}
-		for symbol in SYMBOLS
-	})
+		symbol_snapshots_to_render.clear()
+		symbol_snapshots_to_render.update({
+			symbol: {}
+			for symbol in SYMBOLS
+		})
 
-	symbol_to_file_handles.clear()
-	merged_days_set.clear()
+		symbol_to_file_handles.clear()
+		merged_days_set.clear()
+
+		logger.info("[initialize_runtime_state] Runtime state initialized.")
+
+	except Exception as e:
+		logger.error(
+			"[initialize_runtime_state] Failed to initialize runtime state: "
+			f"{e}",
+			exc_info=True
+		)
+		sys.exit(1)
 
 # ───────────────────────────────────────────────────────────────────────────────
 # 📦 File Utilities: Naming, Compression, and Periodic Merging
@@ -570,10 +755,27 @@ def get_file_suffix(interval_min: int, event_ts_ms: int) -> str:
 		str: e.g., '2025-07-01_13-00' or '2025-07-01' if daily.
 	"""
 
-	ts = datetime.utcfromtimestamp(event_ts_ms / 1000)
+	try:
 
-	if interval_min >= 1440:	return ts.strftime("%Y-%m-%d")
-	else:						return ts.strftime("%Y-%m-%d_%H-%M")
+		ts = datetime.utcfromtimestamp(event_ts_ms / 1000)
+
+		if interval_min >= 1440:
+
+			return ts.strftime("%Y-%m-%d")
+
+		else:
+
+			return ts.strftime("%Y-%m-%d_%H-%M")
+
+	except Exception as e:
+
+		logger.error(
+			f"[get_file_suffix] Failed to generate suffix for "
+			f"interval_min={interval_min}, event_ts_ms={event_ts_ms}: {e}",
+			exc_info=True
+		)
+
+		return "invalid_suffix"
 
 # .............................................................
 
@@ -589,7 +791,19 @@ def get_date_from_suffix(suffix: str) -> str:
 		str: Date string in 'YYYY-MM-DD'
 	"""
 
-	return suffix.split("_")[0]
+	try:
+
+		return suffix.split("_")[0]
+
+	except Exception as e:
+
+		logger.error(
+			f"[get_date_from_suffix] Failed to extract date "
+			f"from suffix '{suffix}': {e}",
+			exc_info=True
+		)
+
+		return "invalid_date"
 
 # .............................................................
 
@@ -602,11 +816,30 @@ def zip_and_remove(src_path: str):
 		src_path (str): Path to the JSONL file to compress
 	"""
 
-	if os.path.exists(src_path):
-		zip_path = src_path.replace(".jsonl", ".zip")
-		with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-			zf.write(src_path, arcname=os.path.basename(src_path))
-		os.remove(src_path)
+	try:
+
+		if os.path.exists(src_path):
+
+			zip_path = src_path.replace(".jsonl", ".zip")
+
+			with zipfile.ZipFile(
+				zip_path, "w", zipfile.ZIP_DEFLATED
+			) as zf:
+
+				zf.write(
+					src_path,
+					arcname=os.path.basename(src_path)
+				)
+
+			os.remove(src_path)
+
+	except Exception as e:
+
+		logger.error(
+			f"[zip_and_remove] Failed to zip "
+			f"or remove '{src_path}': {e}",
+			exc_info=True
+		)
 
 # .............................................................
 
@@ -627,117 +860,158 @@ def merge_day_zips_to_single_jsonl(
 	This consolidation serves long-term archival, reducing file system clutter and
 	enabling efficient downstream loading.
 
-	─────────────────────────────────────────────────────────────
-	▶️ Behavior
-	─────────────────────────────────────────────────────────────
-	• Scans directory:
-		./data/binance/orderbook/temporary/{SYMBOL}_orderbook_{YYYY-MM-DD}/
-
-	• Finds all `.zip` files per minute (e.g., `BTCUSDT_orderbook_1730.jsonl.zip`)
-
-	• Merges contents into:
-		./data/binance/orderbook/BTCUSDT_orderbook_{YYYY-MM-DD}.jsonl
-
-	• Compresses the above file into `.zip` and removes intermediate `.jsonl`.
-
-	• If `purge=True`, also removes the temporary minute-level `.zip` folder.
-
-	─────────────────────────────────────────────────────────────
-	▶️ Arguments
-	─────────────────────────────────────────────────────────────
-	- `symbol (str)`:
-		Binance trading pair (e.g., "btcusdt")
-
-	- `day_str (str)`:
-		UTC date string ("YYYY-MM-DD") to process
-
-	- `base_dir (str)`:
-		Path prefix (typically `LOB_DIR`) under which data folders are nested
-
-	- `purge (bool)`:
-		Whether to delete the temporary folder after merging.
-		Typically set via global `PURGE_ON_DATE_CHANGE` constant.
-
-	─────────────────────────────────────────────────────────────
-	▶️ Fault Tolerance
-	─────────────────────────────────────────────────────────────
-	- Gracefully skips if:
-		• Temp folder is missing
-		• Zip files are not found
-		• Some zips are corrupted or concurrently removed
-
-	- Logs detailed error messages, but never throws to caller
-
-	─────────────────────────────────────────────────────────────
-	▶️ Usage Context
-	─────────────────────────────────────────────────────────────
-	• This function is dispatched once per day (per symbol) from within
-	`dump_snapshot_for_symbol()` to consolidate fragmented minute-level data.
-
-	• Avoids duplicate invocation via `merged_days_set`.
-
+	Fault tolerance: gracefully skips if temp folder or zip files are missing,
+	or if some zips are corrupted or concurrently removed. Logs all errors.
+	Never throws to caller.
 	"""
 
-	# ── Construct working directories and target paths
+	# Construct working directories and target paths
+
 	tmp_dir = os.path.join(
 		base_dir,
 		"temporary",
 		f"{symbol.upper()}_orderbook_{day_str}"
 	)
+
 	merged_path = os.path.join(
 		base_dir,
 		f"{symbol.upper()}_orderbook_{day_str}.jsonl"
 	)
 
-	# ── 1. Abort early if directory is missing (no data captured for this day)
+	# Abort early if directory is missing (no data captured for this day)
+
 	if not os.path.isdir(tmp_dir):
+
+		logger.info(
+			f"[merge_day_zips] Temp dir missing for {symbol} on {day_str}: {tmp_dir}"
+		)
 		return
 
-	# ── 2. List all zipped minute-level `symbol_snapshots_to_render` (may be empty)
-	zip_files = [f for f in os.listdir(tmp_dir) if f.endswith(".zip")]
+	# List all zipped minute-level files (may be empty)
+
+	try:
+
+		zip_files = [f for f in os.listdir(tmp_dir) if f.endswith(".zip")]
+
+	except Exception as e:
+
+		logger.warning(
+			f"[merge_day_zips] Failed to list zips in {tmp_dir}: {e}",
+			exc_info=True
+		)
+
+		return
+
 	if not zip_files:
+
+		logger.info(
+			f"[merge_day_zips] No zip files to merge for {symbol} on {day_str}."
+		)
+
 		return
 
 	try:
-		# ── 3. Open output file for merged .jsonl content
+
+		# Open output file for merged .jsonl content
+
 		with open(merged_path, "w", encoding="utf-8") as fout:
-			# ── 4. Process each zip file in chronological order
+
+			# Process each zip file in chronological order
+
 			for zip_file in sorted(zip_files):
+
 				zip_path = os.path.join(tmp_dir, zip_file)
 
-				# ── 5. Unzip each file and stream its lines directly into the merged file
-				with zipfile.ZipFile(zip_path, "r") as zf:
-					for member in zf.namelist():
-						with zf.open(member) as f:
-							for raw in f:
-								fout.write(raw.decode("utf-8") + "\n")
+				try:
 
-		# ── 6. Recompress the consolidated .jsonl into a final single-archive zip
-		final_zip = merged_path.replace(".jsonl", ".zip")
-		with zipfile.ZipFile(final_zip, "w", zipfile.ZIP_DEFLATED) as zf:
-			zf.write(merged_path, arcname=os.path.basename(merged_path))
+					with zipfile.ZipFile(zip_path, "r") as zf:
 
-		# ── 7. Remove intermediate plain-text .jsonl file after compression
-		if os.path.exists(merged_path):
-			os.remove(merged_path)
+						for member in zf.namelist():
 
-		# ── 8. Optionally delete the original temp folder containing per-minute zips
+							with zf.open(member) as f:
+
+								for raw in f:
+
+									fout.write(raw.decode("utf-8") + "\n")
+
+				except Exception as e:
+
+					logger.warning(
+						f"[merge_day_zips] Failed to extract {zip_path}: {e}",
+						exc_info=True
+					)
+
+					continue  # Skip this zip and continue
+
+		# Recompress the consolidated .jsonl into a final single-archive zip
+
+		try:
+
+			final_zip = merged_path.replace(".jsonl", ".zip")
+
+			with zipfile.ZipFile(final_zip, "w", zipfile.ZIP_DEFLATED) as zf:
+
+				zf.write(merged_path, arcname=os.path.basename(merged_path))
+
+		except Exception as e:
+
+			logger.error(
+				f"[merge_day_zips] Failed to compress merged file for {symbol} on {day_str}: {e}",
+				exc_info=True
+			)
+
+			# Do not remove .jsonl if compression failed
+
+			return
+
+		# Remove intermediate plain-text .jsonl file after compression
+
+		try:
+
+			if os.path.exists(merged_path):
+
+				os.remove(merged_path)
+
+		except Exception as e:
+
+			logger.warning(
+				f"[merge_day_zips] Failed to remove merged .jsonl "
+				f"for {symbol} on {day_str}: {e}",
+				exc_info=True
+			)
+
+		# Optionally delete the original temp folder containing per-minute zips
+
 		if purge:
-			shutil.rmtree(tmp_dir)
+
+			try:
+
+				shutil.rmtree(tmp_dir)
+
+			except Exception as e:
+
+				logger.warning(
+					f"[merge_day_zips] Failed to remove temp dir {tmp_dir}: {e}",
+					exc_info=True
+				)
 
 	except FileNotFoundError as e:
-		# ── Likely due to concurrent cleanup (e.g., temp folder or zip deleted externally)
+
 		logger.warning(
-			f"[merge_day_zips] No files found to merge for {symbol} on {day_str}: {e}"
+			f"[merge_day_zips] No files found to merge "
+			f"for {symbol} on {day_str}: {e}"
 		)
+
 		return
 
 	except Exception as e:
-		# ── Catch-all safeguard for any other unexpected I/O error
+
 		logger.error(
-			f"[merge_day_zips] Unexpected error merging {symbol} on {day_str}: {e}",
+			f"[merge_day_zips] Unexpected error "
+			f"merging {symbol} on {day_str}: {e}",
 			exc_info=True
 		)
+
 		return
 
 # .............................................................
@@ -745,8 +1019,10 @@ def merge_day_zips_to_single_jsonl(
 def merge_all_symbols_for_day(symbols: list[str], day_str: str):
 
 	"""
-	Trigger parallel merge operations for each symbol for the given UTC+0 date.
-	Each symbol's zipped snapshots are consolidated into a single `.jsonl` archive.
+	Trigger parallel merge operations for each symbol
+	for the given UTC+0 date.
+	Each symbol's zipped snapshots are consolidated into
+	a single `.jsonl` archive.
 
 	Args:
 		symbols (list[str]):
@@ -755,18 +1031,32 @@ def merge_all_symbols_for_day(symbols: list[str], day_str: str):
 			Target UTC date string in "YYYY-MM-DD" format
 
 	Note:
-		- This function merely orchestrates per-symbol merges via `merge_day_zips_to_single_jsonl()`.
-		- Duplicate merge attempts must be avoided externally (e.g., via `merged_days_set`).
-		- Can be safely invoked from multiple sources as long as external guards are applied.
+		- This function merely orchestrates per-symbol merges
+		  via `merge_day_zips_to_single_jsonl()`.
+		- Duplicate merge attempts must be avoided externally,
+		  e.g., via `merged_days_set`.
+		- Can be safely invoked from multiple sources as long as
+		external guards are applied.
 	"""
 
 	for symbol in symbols:
-		merge_day_zips_to_single_jsonl(
-			symbol,
-			day_str,
-			LOB_DIR,
-			purge=(PURGE_ON_DATE_CHANGE == 1)
-		)
+
+		try:
+
+			merge_day_zips_to_single_jsonl(
+				symbol,
+				day_str,
+				LOB_DIR,
+				purge=(PURGE_ON_DATE_CHANGE == 1)
+			)
+
+		except Exception as e:
+
+			logger.error(
+				f"[merge_all_symbols_for_day] Failed to merge "
+				f"for symbol '{symbol}' on '{day_str}': {e}",
+				exc_info=True
+			)
 
 # ───────────────────────────────────────────────────────────────────────────────
 # 🕓 Latency Control: Measurement, Thresholding, and Flow Gate
@@ -775,65 +1065,65 @@ def merge_all_symbols_for_day(symbols: list[str], day_str: str):
 async def gate_streaming_by_latency() -> None:
 
 	"""
-	🔁 Streaming Controller based on Latency
-
-	This coroutine manages the `event_stream_enable` flag,
-	which controls whether the main order book stream (`put_snapshot`) 
-	is permitted to run.
-
-	It does so by observing `event_latency_valid`, a signal set by the 
-	latency estimation loop (`estimate_latency_via_diff_depth`) only when:
-		- Every tracked symbol has at least LATENCY_SAMPLE_MIN samples, and
-		- Their median latency is below LATENCY_THRESHOLD_SEC.
-
-	Behavior:
-
-	- Initial Warm-up Phase:
-		• If no symbols have latency samples yet, logs a one-time warm-up message.
-	- Latency OK → Allow Streaming:
-		• If `event_latency_valid` is set, enables `event_stream_enable`.
-		• This unblocks `await event_stream_enable.wait()` in `put_snapshot()`.
-	- Latency NOT OK → Pause Streaming:
-		• If `event_latency_valid` becomes unset, disables `event_stream_enable`,
-		  but only if all symbols have some latency samples (i.e., warm-up is over).
-		• This prevents premature pausing before data collection begins.
-
-	Loop Interval:
-		Controlled by `LATENCY_SIGNAL_SLEEP` (from config), e.g., 0.2 seconds.
+	Streaming controller based on latency.
+	Manages event_stream_enable flag for order book streaming.
+	Observes event_latency_valid, set by latency estimation loop.
 	"""
 
 	global latency_dict
 
-	has_logged_warmup = False	# The initial launch of the program
+	has_logged_warmup = False  # Initial launch flag
 
 	while True:
 
-		latency_passed		= event_latency_valid.is_set()	# ⬅️ Acceptable latency verified
-		stream_currently_on = event_stream_enable.is_set()	# ⬅️ Stream currently active
+		try:
 
-		has_any_latency = all(
-			len(latency_dict[s]) > 0 for s in SYMBOLS
-		)
+			# Check latency and streaming flags
 
-		if latency_passed and not stream_currently_on:
+			latency_passed = event_latency_valid.is_set()
+			stream_currently_on = event_stream_enable.is_set()
+			has_any_latency = all(
+				len(latency_dict[s]) > 0 for s in SYMBOLS
+			)
 
-			logger.info("Latency normalized. Enable order book stream.")
-			event_stream_enable.set()
-			has_logged_warmup = False
+			if latency_passed and not stream_currently_on:
 
-		elif not latency_passed:
+				logger.info(
+					"Latency normalized. Enable order book stream."
+				)
 
-			if not has_any_latency and not has_logged_warmup:
+				event_stream_enable.set()
+				has_logged_warmup = False
 
-				logger.info("Warming up latency measurements...")
-				has_logged_warmup = True
+			elif not latency_passed:
 
-			elif has_any_latency and stream_currently_on:
+				if not has_any_latency and not has_logged_warmup:
 
-				logger.warning("Latency degraded. Pausing order book stream.")
-				event_stream_enable.clear()
+					logger.info(
+						"Warming up latency measurements..."
+					)
 
-		await asyncio.sleep(LATENCY_SIGNAL_SLEEP)
+					has_logged_warmup = True
+
+				elif has_any_latency and stream_currently_on:
+
+					logger.warning(
+						"Latency degraded. Pausing order book stream."
+					)
+
+					event_stream_enable.clear()
+
+			await asyncio.sleep(LATENCY_SIGNAL_SLEEP)
+
+		except Exception as e:
+
+			logger.error(
+				"[gate_streaming_by_latency] Exception in latency gate: "
+				f"{e}",
+				exc_info=True
+			)
+
+			await asyncio.sleep(1)
 
 # .............................................................
 
@@ -892,7 +1182,11 @@ async def estimate_latency_via_diff_depth() -> None:
 
 		try:
 
-			async with websockets.connect(url) as ws:
+			async with websockets.connect(
+				url,
+				ping_interval=WS_PING_INTERVAL,
+				ping_timeout=WS_PING_TIMEOUT
+			) as ws:
 
 				logger.info(
 					f"Connected to:\n"
@@ -902,27 +1196,31 @@ async def estimate_latency_via_diff_depth() -> None:
 				reconnect_attempt = 0  # Reset retry counter
 
 				async for raw_msg in ws:
-					
-					message		= json.loads(raw_msg)
-					data		= message.get("data", {})
-					
-					server_event_ts_ms = data.get("E")  # Server-side timestamp (in ms)
 
-					if server_event_ts_ms is None:
-						continue  # Drop malformed message
+					try:
 
-					stream_name	= message.get("stream", "")
-					symbol		= stream_name.split("@", 1)[0].lower()
+						message = json.loads(raw_msg)
+						data = message.get("data", {})
+						server_event_ts_ms = data.get("E")
 
-					if symbol not in SYMBOLS:
-						continue  # Ignore unexpected symbols
-					
-					update_id	= data.get("u")
+						if server_event_ts_ms is None:
 
-					if update_id is None or update_id <= depth_update_id_dict.get(symbol, 0):
-						continue  # Duplicate or out-of-order update
+							continue  # Drop malformed message
 
-					depth_update_id_dict[symbol] = update_id
+						stream_name = message.get("stream", "")
+						symbol = stream_name.split("@", 1)[0].lower()
+
+						if symbol not in SYMBOLS:
+
+							continue  # Ignore unexpected symbols
+
+						update_id = data.get("u")
+
+						if update_id is None or update_id <= depth_update_id_dict.get(symbol, 0):
+
+							continue  # Duplicate or out-of-order update
+
+						depth_update_id_dict[symbol] = update_id
 					
 					# ................................................................
 					# Estimate latency (difference between client and server clocks)
@@ -933,48 +1231,55 @@ async def estimate_latency_via_diff_depth() -> None:
 					# and is sufficient for latency gating decisions in practice.
 					# ................................................................
 
-					server_time_sec = server_event_ts_ms / 1000.0
-					client_time_sec = time.time()
-					latency_sec = max(0.0, client_time_sec - server_time_sec)
+						server_time_sec = server_event_ts_ms / 1000.0
+						client_time_sec = time.time()
+						latency_sec = max(0.0, client_time_sec - server_time_sec)
 
-					# ................................................................
+						latency_dict[symbol].append(latency_sec)
 
-					# Store latency sample
+						if len(latency_dict[symbol]) >= LATENCY_SAMPLE_MIN:
 
-					latency_dict[symbol].append(latency_sec)
+							median = statistics.median(latency_dict[symbol])
+							median_latency_dict[symbol] = median
 
-					# Once enough samples are collected, evaluate median
+							if all(
+								len(latency_dict[s]) >= LATENCY_SAMPLE_MIN and
+								statistics.median(latency_dict[s]) < LATENCY_THRESHOLD_SEC
+								for s in SYMBOLS
+							):
+								if not event_latency_valid.is_set():
 
-					if len(latency_dict[symbol]) >= LATENCY_SAMPLE_MIN:
+									event_latency_valid.set()
 
-						median = statistics.median(latency_dict[symbol])
-						median_latency_dict[symbol] = median
+									logger.info(
+										"Latency OK — all symbols within threshold. Event set."
+									)
+					except Exception as e:
 
-						# Check if all symbols have valid latency below threshold
+						logger.warning(
+							f"[estimate_latency_via_diff_depth] "
+							f"Failed to process message: {e}",
+							exc_info=True
+						)
 
-						if all(
-							len(latency_dict[s]) >= LATENCY_SAMPLE_MIN and
-							statistics.median(latency_dict[s]) < LATENCY_THRESHOLD_SEC
-							for s in SYMBOLS
-						):
-							if not event_latency_valid.is_set():
-								event_latency_valid.set()
-								logger.info("Latency OK — all symbols within threshold. Event set.")
+						continue
 
 		except Exception as e:
 
 			reconnect_attempt += 1
-			logger.warning(f"WebSocket connection error (attempt {reconnect_attempt}): {e}")
 
-			# Reset signal and buffers
+			logger.warning(
+				f"[estimate_latency_via_diff_depth] "
+				f"WebSocket connection error (attempt {reconnect_attempt}): {e}",
+				exc_info=True
+			)
 
 			event_latency_valid.clear()
 
 			for symbol in SYMBOLS:
+
 				latency_dict[symbol].clear()
 				depth_update_id_dict[symbol] = 0
-
-			# Compute exponential backoff
 
 			backoff_sec = (
 				min(MAX_BACKOFF, BASE_BACKOFF * (2 ** reconnect_attempt))
@@ -986,14 +1291,19 @@ async def estimate_latency_via_diff_depth() -> None:
 				reconnect_attempt = RESET_BACKOFF_LEVEL
 
 			logger.warning(
-				f"Retrying in {backoff_sec:.1f} seconds (attempt {reconnect_attempt})..."
+				f"[estimate_latency_via_diff_depth] "
+				f"Retrying in {backoff_sec:.1f} seconds "
+				f"(attempt {reconnect_attempt})..."
 			)
 
 			await asyncio.sleep(backoff_sec)
 
 		finally:
 
-			logger.info("WebSocket connection closed.")
+			logger.info(
+				f"[estimate_latency_via_diff_depth] "
+				f"WebSocket connection closed."
+			)
 
 # ───────────────────────────────────────────────────────────────────────────────
 # 🧩 Depth20 Snapshot Collector — Streams → Queue Buffer
@@ -1005,33 +1315,30 @@ async def put_snapshot() -> None:
 	🧩 Binance Depth20 Snapshot Collector → Per-Symbol Async Queue + Render Cache
 
 	Continuously consumes top-20 order book snapshots from Binance WebSocket stream
-	(`@depth20@100ms`) for all tracked symbols, applies latency compensation, and dispatches
-	each processed snapshot into:
+	(`@depth20@100ms`) for all tracked symbols, applies latency compensation, and
+	dispatches each processed snapshot into:
 	• `snapshots_queue_dict[symbol]` — for persistent file logging.
 	• `symbol_snapshots_to_render[symbol]` — for live debug rendering via FastAPI.
 
-	─────────────────────────────────────────────────────────────
-	▶️ Behavior
-	─────────────────────────────────────────────────────────────
+	Behavior:
 	• Waits for `event_stream_enable` to confirm latency quality.
 	• For each stream message:
 		- Extracts symbol, bid/ask levels, and last update ID.
 		- Applies median-latency correction to compute `eventTime` (in ms).
 		- Dispatches snapshot to both persistence queue and render cache.
 
-	─────────────────────────────────────────────────────────────
-	▶️ Notes
-	─────────────────────────────────────────────────────────────
+	Notes:
 	• This stream lacks Binance-provided timestamps ("E"); all timing
-	is client-side and latency-compensated.
+	  is client-side and latency-compensated.
 	• `eventTime` is an `int` (milliseconds since UNIX epoch).
 	• Only `snapshots_queue_dict[symbol]` is used for durable storage.
 	• `symbol_snapshots_to_render` is ephemeral and used exclusively
-	for internal diagnostics or FastAPI display.
+	  for internal diagnostics or FastAPI display.
 	• On failure, reconnects with exponential backoff + jitter.
 	"""
 
 	global latency_dict, median_latency_dict, snapshots_queue_dict
+
 	attempt = 0  # Retry counter for reconnects
 
 	while True:
@@ -1044,7 +1351,11 @@ async def put_snapshot() -> None:
 
 			# 🔌 Connect to Binance combined stream (depth20@100ms)
 
-			async with websockets.connect(WS_URL) as ws:
+			async with websockets.connect(
+				WS_URL,
+				ping_interval=WS_PING_INTERVAL,
+				ping_timeout=WS_PING_TIMEOUT
+			) as ws:
 
 				logger.info(
 					f"Connected to:\n"
@@ -1057,84 +1368,111 @@ async def put_snapshot() -> None:
 
 				async for raw in ws:
 
-					# 📦 Parse WebSocket message
-					
-					msg 	= json.loads(raw)
-					stream	= msg.get("stream", "")
-					symbol	= stream.split("@", 1)[0].lower()
+					try:
 
-					if symbol not in SYMBOLS:
-						continue  # Skip unexpected symbols
+						# 📦 Parse WebSocket message
 
-					# ✅ Enforce latency gate per-symbol
-					
-					if not event_stream_enable.is_set() or not latency_dict[symbol]:
-						continue  # Skip if latency is untrusted
+						msg = json.loads(raw)
+						stream = msg.get("stream", "")
+						symbol = stream.split("@", 1)[0].lower()
 
-					data		= msg.get("data", {})
-					last_update = data.get("lastUpdateId")
+						if symbol not in SYMBOLS:
 
-					if last_update is None:
-						continue  # Ignore malformed updates
+							continue  # Skip unexpected symbols
 
-					bids = data.get("bids", [])
-					asks = data.get("asks", [])
+						# ✅ Enforce latency gate per-symbol
 
-					# 📝 Binance partial streams like @depth20@100ms do NOT include
-					# the server-side event timestamp ("E"). Therefore, we must rely
-					# on local receipt time corrected by estimated network latency.
-					
-					# 🎯 Estimate event timestamp via median latency compensation
-					med_latency		= int(median_latency_dict.get(symbol, 0.0))		# in ms
-					client_time_sec	= int(time.time() * 1_000)
-					event_ts		= client_time_sec - med_latency	  # adjusted event time
+						if not event_stream_enable.is_set() or not latency_dict[symbol]:
 
-					# 🧾 Construct snapshot
-					snapshot = {
-						"lastUpdateId": last_update,
-						"eventTime": event_ts,
-						"bids": [[float(p), float(q)] for p, q in bids],
-						"asks": [[float(p), float(q)] for p, q in asks],
-					}
+							continue  # Skip if latency is untrusted
 
-					# 📤 Push to downstream queue for file dump
+						data = msg.get("data", {})
+						last_update = data.get("lastUpdateId")
 
-					await snapshots_queue_dict[symbol].put(snapshot)
+						if last_update is None:
 
-					# 🧠 Cache to in-memory store (just for debug-purpose rendering)
+							continue  # Ignore malformed updates
 
-					symbol_snapshots_to_render[symbol] = snapshot
+						bids = data.get("bids", [])
+						asks = data.get("asks", [])
 
-					# 🔓 Signal FastAPI readiness after first snapshot
+						# 📝 Binance partial streams like @depth20@100ms do NOT include
+						# the server-side event timestamp ("E"). Therefore, we must rely
+						# on local receipt time corrected by estimated network latency.
 
-					if not ready_event.is_set():
-						ready_event.set()
+						# 🎯 Estimate event timestamp via median latency compensation
+
+						med_latency = int(median_latency_dict.get(symbol, 0.0))  # in ms
+						client_time_sec = int(time.time() * 1_000)
+						event_ts = client_time_sec - med_latency  # adjusted event time
+
+						# 🧾 Construct snapshot
+
+						snapshot = {
+							"lastUpdateId": last_update,
+							"eventTime": event_ts,
+							"bids": [[float(p), float(q)] for p, q in bids],
+							"asks": [[float(p), float(q)] for p, q in asks],
+						}
+
+						# 📤 Push to downstream queue for file dump
+
+						await snapshots_queue_dict[symbol].put(snapshot)
+
+						# 🧠 Cache to in-memory store (just for debug-purpose rendering)
+
+						symbol_snapshots_to_render[symbol] = snapshot
+
+						# 🔓 Signal FastAPI readiness after first snapshot
+
+						if not ready_event.is_set():
+
+							ready_event.set()
+
+					except Exception as e:
+
+						logger.warning(
+							f"[put_snapshot] Failed to process message: {e}",
+							exc_info=True
+						)
+
+						continue
 
 		except Exception as e:
 
 			# ⚠️ On error: log and retry with backoff
 
 			attempt += 1
-			logger.warning(f"WebSocket error (attempt {attempt}): {e}")
-			backoff = min(MAX_BACKOFF, BASE_BACKOFF * (2 ** attempt)) + random.uniform(0, 1)
+
+			logger.warning(
+				f"[put_snapshot] WebSocket error (attempt {attempt}): {e}",
+				exc_info=True
+			)
+
+			backoff = min(
+				MAX_BACKOFF, BASE_BACKOFF * (2 ** attempt)
+			) + random.uniform(0, 1)
 
 			if attempt > RESET_CYCLE_AFTER:
 
 				attempt = RESET_BACKOFF_LEVEL
 
-			logger.warning(f"Retrying in {backoff:.1f} seconds...")
+			logger.warning(
+				f"[put_snapshot] Retrying in {backoff:.1f} seconds..."
+			)
 
 			await asyncio.sleep(backoff)
 
 		finally:
-			
-			logger.info("WebSocket connection closed.")
+
+			logger.info("[put_snapshot] WebSocket connection closed.")
 
 # ───────────────────────────────────────────────────────────────────────────────
 # 📝 Background Task: Save to File
 # ───────────────────────────────────────────────────────────────────────────────
 
 async def dump_snapshot_for_symbol(symbol: str) -> None:
+
 	"""
 	📤 Per-Symbol Snapshot File Dumper (async, persistent, compressed)
 
@@ -1142,9 +1480,7 @@ async def dump_snapshot_for_symbol(symbol: str) -> None:
 	and appends them to per-symbol `.jsonl` files partitioned by time.
 	When a UTC day rolls over, triggers merging/compression in a thread.
 
-	─────────────────────────────────────────────────────────────
-	▶️ Behavior
-	─────────────────────────────────────────────────────────────
+	Behavior:
 	• For each snapshot:
 		- Compute `suffix` (e.g., "1730") and `day_str` (e.g., "2025-07-03")
 		- Ensure directory and file path for current interval exist
@@ -1152,21 +1488,15 @@ async def dump_snapshot_for_symbol(symbol: str) -> None:
 		- If suffix changes: rotate file handle
 		- If day changes: start merge thread (with lock protection)
 
-	─────────────────────────────────────────────────────────────
-	▶️ Internal Structures
-	─────────────────────────────────────────────────────────────
+	Internal Structures:
 	• `symbol_to_file_handles[symbol] → (suffix, writer)`
 		↳ Active file writer for the current time window.
-
 	• `merged_days_set` tracks which UTC days have been merged
 	  to avoid launching redundant threads across symbols.
-
 	• `MERGE_LOCK` protects access to `merged_days_set` to avoid
 	  race conditions in multi-symbol contexts.
 
-	─────────────────────────────────────────────────────────────
-	▶️ Notes
-	─────────────────────────────────────────────────────────────
+	Notes:
 	• Runs forever via `asyncio.create_task(...)`
 	• Flushes every snapshot to prevent memory loss
 	• Merge is dispatched only once per UTC day
@@ -1180,74 +1510,159 @@ async def dump_snapshot_for_symbol(symbol: str) -> None:
 	while True:
 
 		# Block until new snapshot is received
-		snapshot = await queue.get()
 
-		if not event_stream_enable.is_set(): break
+		try:
+
+			snapshot = await queue.get()
+
+		except Exception as e:
+
+			logger.error(
+				f"[{symbol.upper()}] ❌ Failed to get snapshot from queue: {e}",
+				exc_info=True
+			)
+
+			continue
+
+		if not event_stream_enable.is_set():
+
+			break
 
 		# ── Compute suffix (time block) and day string (UTC)
-		event_ts_ms = snapshot.get("eventTime", int(time.time() * 1000))
-		suffix = get_file_suffix(SAVE_INTERVAL_MIN, event_ts_ms)
-		day_str = get_date_from_suffix(suffix)
+
+		try:
+
+			event_ts_ms = snapshot.get("eventTime", int(time.time() * 1000))
+			suffix = get_file_suffix(SAVE_INTERVAL_MIN, event_ts_ms)
+			day_str = get_date_from_suffix(suffix)
+
+		except Exception as e:
+
+			logger.error(
+				f"[{symbol.upper()}] ❌ Failed to compute suffix/day: {e}",
+				exc_info=True
+			)
+
+			continue
 
 		# ── Build filename and full path
-		filename = f"{symbol.upper()}_orderbook_{suffix}.jsonl"
-		tmp_dir = os.path.join(
-			LOB_DIR,
-			"temporary",
-			f"{symbol.upper()}_orderbook_{day_str}",
-		)
-		os.makedirs(tmp_dir, exist_ok=True)
-		file_path = os.path.join(tmp_dir, filename)
+
+		try:
+
+			filename = f"{symbol.upper()}_orderbook_{suffix}.jsonl"
+			tmp_dir = os.path.join(
+				LOB_DIR,
+				"temporary",
+				f"{symbol.upper()}_orderbook_{day_str}",
+			)
+			os.makedirs(tmp_dir, exist_ok=True)
+			file_path = os.path.join(tmp_dir, filename)
+
+		except Exception as e:
+
+			logger.error(
+				f"[{symbol.upper()}] ❌ Failed to build file path: {e}",
+				exc_info=True
+			)
+
+			continue
 
 		# ── Retrieve last writer (if any)
+
 		last_suffix, writer = symbol_to_file_handles.get(symbol, (None, None))
 
 		# ── Spawn merge thread if day has changed and not already merged
-		if last_suffix:
-			last_day = get_date_from_suffix(last_suffix)
-			with MERGE_LOCK:
-				if last_day != day_str and last_day not in merged_days_set:
-					merged_days_set.add(last_day)
-					threading.Thread(
-						target=merge_all_symbols_for_day,
-						args=(SYMBOLS, last_day),
-					).start()
+
+		try:
+
+			if last_suffix:
+
+				last_day = get_date_from_suffix(last_suffix)
+
+				with MERGE_LOCK:
+
+					if last_day != day_str and last_day not in merged_days_set:
+
+						merged_days_set.add(last_day)
+
+						threading.Thread(
+							target=merge_all_symbols_for_day,
+							args=(SYMBOLS, last_day),
+						).start()
+
+		except Exception as e:
+
+			logger.warning(
+				f"[{symbol.upper()}] ⚠️ Failed to spawn merge thread: {e}",
+				exc_info=True
+			)
 
 		# ── Rotate writer if suffix (HHMM) window has changed
+
 		if last_suffix != suffix:
+
 			if writer:
+
 				try:
+
 					writer.close()
+
 				except Exception as e:
+
 					logger.warning(
-						f"[{symbol.upper()}] ⚠️ Close failed → {e}"
+						f"[{symbol.upper()}] ⚠️ Close failed → {e}",
+						exc_info=True
 					)
-				zip_and_remove(
-					os.path.join(
-						tmp_dir,
-						f"{symbol.upper()}_orderbook_{last_suffix}.jsonl"
+
+				try:
+					zip_and_remove(
+						os.path.join(
+							tmp_dir,
+							f"{symbol.upper()}_orderbook_{last_suffix}.jsonl"
+						)
 					)
-				)
+
+				except Exception as e:
+
+					logger.warning(
+						f"[{symbol.upper()}] ⚠️ zip_and_remove failed: {e}",
+						exc_info=True
+					)
+
 			try:
+
 				writer = open(file_path, "a", encoding="utf-8")
+
 			except OSError as e:
+
 				logger.error(
-					f"[{symbol.upper()}] ❌ Open failed: {file_path} → {e}"
+					f"[{symbol.upper()}] ❌ Open failed: {file_path} → {e}",
+					exc_info=True
 				)
+
 				continue  # Skip this snapshot
+
 			symbol_to_file_handles[symbol] = (suffix, writer)
 
 		# ── Write snapshot as compact JSON line
+
 		try:
+
 			line = json.dumps(snapshot, separators=(",", ":"))
 			writer.write(line + "\n")
 			writer.flush()
+
 		except Exception as e:
+
 			logger.error(
-				f"[{symbol.upper()}] ❌ Write failed: {file_path} → {e}"
+				f"[{symbol.upper()}] ❌ Write failed: {file_path} → {e}",
+				exc_info=True
 			)
+
 			# Invalidate writer for next iteration
+
 			symbol_to_file_handles.pop(symbol, None)
+
 			continue
 
 # ───────────────────────────────────────────────────────────────────────────────
@@ -1262,7 +1677,18 @@ async def health_live():
 	Used to check if the server process is alive (not necessarily functional).
 	"""
 
-	return {"status": "alive"}
+	try:
+
+		return {"status": "alive"}
+
+	except Exception as e:
+
+		logger.error(
+			f"[health_live] Healthcheck failed: {e}",
+			exc_info=True
+		)
+
+		raise HTTPException(status_code=500, detail="healthcheck error")
 
 @app.get("/health/ready")
 async def health_ready():
@@ -1275,10 +1701,22 @@ async def health_ready():
 		- Kubernetes/monitoring agents can use this to delay traffic routing.
 	"""
 
-	if ready_event.is_set():
-		return {"status": "ready"}
+	try:
 
-	raise HTTPException(status_code=503, detail="not ready")
+		if ready_event.is_set():
+
+			return {"status": "ready"}
+
+		raise HTTPException(status_code=503, detail="not ready")
+
+	except Exception as e:
+
+		logger.error(
+			f"[health_ready] Readiness check failed: {e}",
+			exc_info=True
+		)
+
+		raise HTTPException(status_code=500, detail="readiness check error")
 
 # ───────────────────────────────────────────────────────────────────────────────
 # 🧠 JSON API for Order Book
@@ -1300,17 +1738,29 @@ async def get_order_book(symbol: str):
 		HTTPException 404 if the requested symbol is not being tracked.
 	"""
 
-	symbol = symbol.lower()
+	try:
 
-	if symbol not in symbol_snapshots_to_render:
+		symbol = symbol.lower()
+
+		if symbol not in symbol_snapshots_to_render:
+
+			raise HTTPException(status_code=404, detail="symbol not found")
+
+		return JSONResponse(content=symbol_snapshots_to_render[symbol])
+
+	except Exception as e:
+
+		logger.error(
+			f"[get_order_book] Failed to serve order book for '{symbol}': {e}",
+			exc_info=True
+		)
 		
-		raise HTTPException(status_code=404, detail="symbol not found")
-
-	return JSONResponse(content=symbol_snapshots_to_render[symbol])
+		raise HTTPException(status_code=500, detail="internal error")
 
 # ───────────────────────────────────────────────────────────────────────────────
 # 👁️ HTML UI for Order Book
 # ───────────────────────────────────────────────────────────────────────────────
+
 @app.get("/orderbook/{symbol}", response_class=HTMLResponse)
 async def orderbook_ui(request: Request, symbol: str):
 
@@ -1328,31 +1778,52 @@ async def orderbook_ui(request: Request, symbol: str):
 		HTTPException 404 if the requested symbol is not available in memory.
 	"""
 
-	sym = symbol.lower()
+	try:
 
-	if sym not in symbol_snapshots_to_render:
-		raise HTTPException(status_code=404, detail="symbol not found")
+		sym = symbol.lower()
 
-	data = symbol_snapshots_to_render[sym]
-	bids = data["bids"]
-	asks = data["asks"]
-	max_len = max(len(bids), len(asks))  # For consistent rendering in the template
+		if sym not in symbol_snapshots_to_render:
 
-	return templates.TemplateResponse(
-		"orderbook.html",
-		{
-			"request": request,
-			"symbol": sym,
-			"bids": bids,
-			"asks": asks,
-			"max_len": max_len,
-		},
-	)
+			raise HTTPException(status_code=404, detail="symbol not found")
+
+		data = symbol_snapshots_to_render[sym]
+		bids = data["bids"]
+		asks = data["asks"]
+		max_len = max(len(bids), len(asks))  # For consistent rendering in the template
+
+		return templates.TemplateResponse(
+			"orderbook.html",
+			{
+				"request": request,
+				"symbol": sym,
+				"bids": bids,
+				"asks": asks,
+				"max_len": max_len,
+			},
+		)
+
+	except HTTPException:
+
+		raise
+
+	except Exception as e:
+
+		logger.error(
+			f"[orderbook_ui] Failed to render order book for '{symbol}': {e}",
+			exc_info=True
+		)
+
+		raise HTTPException(status_code=500, detail="internal error")
+
+# ───────────────────────────────────────────────────────────────────────────────
+# 🛑 Graceful Shutdown Handler
+# ───────────────────────────────────────────────────────────────────────────────
 
 @app.on_event("shutdown")
 def graceful_shutdown():
+
 	"""
-	Shutdown handler that closes all active file writers to ensure
+	🛑 Shutdown handler that closes all active file writers to ensure
 	all snapshot data is flushed and safely written to disk.
 	This prevents data loss in case the application exits
 	before individual file handles are rotated or closed.
@@ -1361,23 +1832,31 @@ def graceful_shutdown():
 	for symbol in SYMBOLS:
 
 		# Get the writer info for this symbol, if any
+
 		suffix_writer = symbol_to_file_handles.get(symbol)
 
 		if not suffix_writer:
+
 			continue  # No writer was created for this symbol
 
 		suffix, writer = suffix_writer
 
 		try:
+
 			if writer:
+
 				writer.close()
+
 			logger.info(
 				f"[shutdown] Closed file for {symbol} "
 				f"(suffix: {suffix})"
 			)
+
 		except Exception as e:
+
 			logger.error(
-				f"[shutdown] Failed to close file for {symbol}: {e}"
+				f"[shutdown] Failed to close file for {symbol}: {e}",
+				exc_info=True
 			)
 
 # ───────────────────────────────────────────────────────────────────────────────
@@ -1385,36 +1864,86 @@ def graceful_shutdown():
 # ───────────────────────────────────────────────────────────────────────────────
 
 async def watchdog_timer(timeout_sec: int) -> None:
+
 	"""
 		Waits for a given number of seconds,
 		then triggers profiling shutdown.
 	"""
 
 	global event_stream_enable
-	
-	await asyncio.sleep(timeout_sec)
 
-	logger.info(
-		f"[watchdog_timer] {timeout_sec}s elapsed. "
-		f"Initiating shutdown..."
-	)
+	try:
 
-	event_stream_enable.clear()	# Signal downstream tasks to stop
+		await asyncio.sleep(timeout_sec)
 
-	yappi.stop()				# Stop profiling
-	dump_yappi_stats()			# Dump profiler results to disk
-	graceful_shutdown()			# Close writers and background tasks
+		logger.info(
+			f"[watchdog_timer] {timeout_sec}s elapsed. "
+			f"Initiating shutdown..."
+		)
 
-	logger.info(f"Profiling completed. Terminating application.")
+		event_stream_enable.clear()  # Signal downstream tasks to stop
 
-	os._exit(0)					# Force full process termination
+		try:
+
+			yappi.stop()				# Stop profiling
+
+		except Exception as e:
+
+			logger.error(
+				f"[watchdog_timer] Failed to stop yappi: {e}",
+				exc_info=True
+			)
+
+		try:
+
+			dump_yappi_stats()		  # Dump profiler results to disk
+
+		except Exception as e:
+
+			logger.error(
+				f"[watchdog_timer] Failed to dump yappi stats: {e}",
+				exc_info=True
+			)
+
+		try:
+
+			graceful_shutdown()		 # Close writers and background tasks
+
+		except Exception as e:
+
+			logger.error(
+				f"[watchdog_timer] Failed to run graceful_shutdown: {e}",
+				exc_info=True
+			)
+
+		logger.info("Profiling completed. Terminating application.")
+
+		os._exit(0)					 # Force full process termination
+
+	except Exception as e:
+
+		logger.error(
+			f"[watchdog_timer] Unexpected error: {e}",
+			exc_info=True
+		)
+
+		os._exit(1)
 
 # ───────────────────────────────────────────────────────────────────────────────
 # 🧪 Start Profiling
 # ───────────────────────────────────────────────────────────────────────────────
 
-yappi.set_clock_type("wall")	# Walltime-based profiling
-yappi.start()
+try:
+
+	yappi.set_clock_type("wall")	# Walltime-based profiling
+	yappi.start()
+
+except Exception as e:
+
+	logger.error(
+		f"[profiling] Failed to start yappi profiler: {e}",
+		exc_info=True
+	)
 
 # ───────────────────────────────────────────────────────────────────────────────
 # 🧪 Result Dump on Exit
@@ -1422,12 +1951,27 @@ yappi.start()
 
 def dump_yappi_stats() -> None:
 
-	yappi.get_func_stats().save(
-		"yappi_stats.callgrind", 
-		type="callgrind"
-	)
+	try:
 
-atexit.register(dump_yappi_stats)	# Register dump on shutdown
+		yappi.get_func_stats().save(
+			"yappi_stats.callgrind", 
+			type="callgrind"
+		)
+
+		logger.info("[profiling] Yappi stats dumped to yappi_stats.callgrind")
+
+	except Exception as e:
+
+		logger.error(
+			f"[profiling] Failed to dump yappi stats: {e}",
+			exc_info=True
+		)
+
+atexit.register(dump_yappi_stats)   # Register dump on shutdown
+
+# ───────────────────────────────────────────────────────────────────────────────
+# 🚦 Main Entrypoint & Async Task Orchestration
+# ───────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
 
@@ -1437,55 +1981,159 @@ if __name__ == "__main__":
 
 	async def main():
 
-		# Initialize in-memory structures
+		try:
 
-		global ready_event
+			# Initialize in-memory structures
 
-		initialize_runtime_state()
-		initialize_event_flags()
-		assert_event_flags_initialized()
+			global ready_event
 
-		# Launch background tasks
-		
-		# Handles periodic snapshot persistence per symbol
+			try:
 
-		for symbol in SYMBOLS:
-			asyncio.create_task(dump_snapshot_for_symbol(symbol))
+				initialize_runtime_state()
+				initialize_event_flags()
+				assert_event_flags_initialized()
 
-		# Streams and stores depth20@100ms `symbol_snapshots_to_render`
+			except Exception as e:
 
-		asyncio.create_task(put_snapshot())
+				logger.error(
+					f"[main] Initialization failed: {e}",
+					exc_info=True
+				)
 
-		# Streams @depth for latency estimation
+				sys.exit(1)
 
-		asyncio.create_task(estimate_latency_via_diff_depth())
+			# Launch background tasks
+			# Handles periodic snapshot persistence per symbol
 
-		# Synchronize latency control
+			try:
 
-		asyncio.create_task(gate_streaming_by_latency())
+				for symbol in SYMBOLS:
 
-		# Triggers shutdown after fixed duration (profiling scenario)
+					asyncio.create_task(dump_snapshot_for_symbol(symbol))
 
-		if PROFILE_DURATION > 0:
+			except Exception as e:
 
-			asyncio.create_task(watchdog_timer(timeout_sec=PROFILE_DURATION))
-			
-			logger.info(
-				"Profiling started. "
-				f"Execution will stop after {PROFILE_DURATION} seconds."
+				logger.error(
+					f"[main] Failed to launch dump_snapshot_for_symbol tasks: {e}",
+					exc_info=True
+				)
+
+				sys.exit(1)
+
+			# Streams and stores depth20@100ms `symbol_snapshots_to_render`
+
+			try:
+
+				asyncio.create_task(put_snapshot())
+
+			except Exception as e:
+
+				logger.error(
+					f"[main] Failed to launch put_snapshot task: {e}",
+					exc_info=True
+				)
+
+				sys.exit(1)
+
+			# Streams @depth for latency estimation
+
+			try:
+
+				asyncio.create_task(estimate_latency_via_diff_depth())
+
+			except Exception as e:
+
+				logger.error(
+					f"[main] Failed to launch estimate_latency_via_diff_depth task: {e}",
+					exc_info=True
+				)
+
+				sys.exit(1)
+
+			# Synchronize latency control
+
+			try:
+
+				asyncio.create_task(gate_streaming_by_latency())
+
+			except Exception as e:
+
+				logger.error(
+					f"[main] Failed to launch gate_streaming_by_latency task: {e}",
+					exc_info=True
+				)
+
+				sys.exit(1)
+
+			# Triggers shutdown after fixed duration (profiling scenario)
+
+			if PROFILE_DURATION > 0:
+
+				try:
+
+					asyncio.create_task(
+						watchdog_timer(timeout_sec=PROFILE_DURATION)
+					)
+
+					logger.info(
+						"Profiling started. "
+						f"Execution will stop after {PROFILE_DURATION} seconds."
+					)
+
+				except Exception as e:
+
+					logger.error(
+						f"[main] Failed to launch watchdog_timer: {e}",
+						exc_info=True
+					)
+
+					sys.exit(1)
+
+			# Wait for at least one valid snapshot before serving
+
+			try:
+
+				await ready_event.wait()
+
+			except Exception as e:
+
+				logger.error(
+					f"[main] Error while waiting for ready_event: {e}",
+					exc_info=True
+				)
+
+				sys.exit(1)
+
+			# FastAPI
+
+			try:
+
+				logger.info(
+					f"FastAPI server starts. Try:\n"
+					f"\thttp://localhost:8000/orderbook/{SYMBOLS[0]}"
+				)
+
+				cfg = Config(app=app, host="0.0.0.0", port=8000, lifespan="off", use_colors=False)
+				server = Server(cfg)
+
+				await server.serve()
+
+			except Exception as e:
+
+				logger.error(
+					f"[main] FastAPI server failed to start: {e}",
+					exc_info=True
+				)
+
+				sys.exit(1)
+
+		except Exception as e:
+
+			logger.critical(
+				f"[main] Unhandled exception in main(): {e}",
+				exc_info=True
 			)
 
-		# Wait for at least one valid snapshot before serving
-
-		await ready_event.wait()
-
-		# FastAPI
-		logger.info(
-			f"FastAPI server starts. Try:\n"
-			f"\thttp://localhost:8000/orderbook/{SYMBOLS[0]}"
-		)
-		cfg = Config(app=app, host="0.0.0.0", port=8000, lifespan="off", use_colors=False)
-		server = Server(cfg)
-		await server.serve()
+			sys.exit(1)
 
 	asyncio.run(main())
