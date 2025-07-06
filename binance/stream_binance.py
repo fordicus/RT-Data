@@ -1,4 +1,5 @@
 # stream_binance.py
+# Refer to RULESET.md for coding guidelines.
 
 r"""................................................................................
 
@@ -117,8 +118,8 @@ log_formatter = UTCFormatter("[%(asctime)s] %(levelname)s: %(message)s")
 
 file_handler = RotatingFileHandler(
 	"stream_binance.log",
-	maxBytes=10_000_000,	# Rotate after 10 MB
-	backupCount=3			# Keep 3 backups
+	maxBytes	= 10_000_000,	# Rotate after 10 MB
+	backupCount	= 100			# Keep 3 backups
 )
 
 try:
@@ -470,11 +471,11 @@ if WS_PING_TIMEOUT  == 0: WS_PING_TIMEOUT  = None
 # 🧠 Runtime Per-Symbol State
 #
 # Maintains:
-#   • latency_dict: Deque of recent latency samples per symbol
+#   • LATENCY_DICT: Deque of recent latency samples per symbol
 # 	  (used to compute median)
-#   • median_latency_dict: Cached median latency in milliseconds
+#   • MEDIAN_LATENCY_DICT: Cached median latency in milliseconds
 # 	  per symbol
-#   • depth_update_id_dict: Latest `updateId` seen per symbol
+#   • DEPTH_UPDATE_ID_DICT: Latest `updateId` seen per symbol
 # 	  from diff-depth streams
 #
 # Used to:
@@ -484,9 +485,9 @@ if WS_PING_TIMEOUT  == 0: WS_PING_TIMEOUT  = None
 # 	  server timestamps
 # ───────────────────────────────────────────────────────────────────────────────
 
-latency_dict:			Dict[str, Deque[float]] = {}
-median_latency_dict:	Dict[str, float]		= {}
-depth_update_id_dict:	Dict[str, int]			= {}
+LATENCY_DICT:		  Dict[str, Deque[float]] = {}
+MEDIAN_LATENCY_DICT:  Dict[str, float] = {}
+DEPTH_UPDATE_ID_DICT: Dict[str, int] = {}
 	
 # ───────────────────────────────────────────────────────────────────────────────
 # 🔒 Global Event Flags (pre-declared to prevent NameError)
@@ -500,9 +501,9 @@ depth_update_id_dict:	Dict[str, int]			= {}
 # 	if modularization/multi-instance is needed
 # ───────────────────────────────────────────────────────────────────────────────
 
-ready_event: asyncio.Event
-event_latency_valid: asyncio.Event
-event_stream_enable: asyncio.Event
+READY_EVENT:		 asyncio.Event
+EVENT_LATENCY_VALID: asyncio.Event
+EVENT_STREAM_ENABLE: asyncio.Event
 
 EVENT_FLAGS_INITIALIZED = False
 
@@ -515,12 +516,12 @@ def initialize_event_flags():
 
 	try:
 
-		global ready_event, event_latency_valid, event_stream_enable
+		global READY_EVENT, EVENT_LATENCY_VALID, EVENT_STREAM_ENABLE
 		global EVENT_FLAGS_INITIALIZED
 
-		ready_event = asyncio.Event()
-		event_latency_valid = asyncio.Event()
-		event_stream_enable = asyncio.Event()
+		READY_EVENT = asyncio.Event()
+		EVENT_LATENCY_VALID = asyncio.Event()
+		EVENT_STREAM_ENABLE = asyncio.Event()
 
 		EVENT_FLAGS_INITIALIZED = True
 
@@ -621,7 +622,7 @@ except Exception as e:
 #
 # Structures:
 #
-#   snapshots_queue_dict: dict[str, asyncio.Queue[dict]]
+#   SNAPSHOTS_QUEUE_DICT: dict[str, asyncio.Queue[dict]]
 #	 → Per-symbol async queues storing order book snapshots pushed
 #	   by `put_snapshot()` and consumed by `dump_snapshot_for_symbol()`.
 #
@@ -629,57 +630,65 @@ except Exception as e:
 #	 → In-memory latest snapshot per symbol for API rendering via FastAPI.
 #	   Used only for testing/debug visualization; not persisted to disk.
 #
-#   symbol_to_file_handles: dict[str, tuple[str, TextIOWrapper]]
+#   SYMBOL_TO_FILE_HANDLES: dict[str, tuple[str, TextIOWrapper]]
 #	 → Tracks open file writers per symbol:
 #		└── (last_suffix, writer) where:
 #			• last_suffix: str = time suffix like "2025-07-03_15-00"
 #			• writer: open text file handle for appending .jsonl data
 #
-#   merged_days_set: set[str]
+#   MERGED_DAYS: set[str]
 #	 → Contains UTC day strings ("YYYY-MM-DD") that have already been
 #	   merged+compressed to prevent duplicate merge threads.
 #
-#   MERGE_LOCK: threading.Lock
-#	 → Prevents race condition on `merged_days_set` during concurrent
+#   MERGE_LOCKS: `threading.Lock` per SYMBOL
+#	 → Prevents race condition on `MERGED_DAYS` during concurrent
 #	   merge launches from multiple symbol writers.
 # ───────────────────────────────────────────────────────────────────────────────
 
-snapshots_queue_dict:		dict[str, asyncio.Queue] = {}
+SNAPSHOTS_QUEUE_DICT:		dict[str, asyncio.Queue] = {}
 symbol_snapshots_to_render: dict[str, dict] = {}
-symbol_to_file_handles:		dict[str, tuple[str, TextIOWrapper]] = {}
-merged_days_set:			set[str] = set()
-MERGE_LOCK:					threading.Lock = threading.Lock()
+SYMBOL_TO_FILE_HANDLES:		dict[str, tuple[str, TextIOWrapper]] = {}
+
+# Each symbol has its own threading.Lock to ensure
+# independent synchronization during merge operations.
+
+MERGED_DAYS: set[str] = set()
+MERGE_LOCKS: dict[str, threading.Lock] = {
+	symbol: threading.Lock() for symbol in SYMBOLS
+}
 
 def initialize_runtime_state():
+
 	"""
 	Initializes all global runtime state dictionaries and sets.
 	Logs and terminates if any error occurs during initialization.
 	"""
+
 	try:
 		global SYMBOLS
-		global latency_dict, median_latency_dict, depth_update_id_dict
-		global snapshots_queue_dict
+		global LATENCY_DICT, MEDIAN_LATENCY_DICT, DEPTH_UPDATE_ID_DICT
+		global SNAPSHOTS_QUEUE_DICT
 
-		latency_dict.clear()
-		latency_dict.update({
+		LATENCY_DICT.clear()
+		LATENCY_DICT.update({
 			symbol: deque(maxlen=LATENCY_DEQUE_SIZE)
 			for symbol in SYMBOLS
 		})
 
-		median_latency_dict.clear()
-		median_latency_dict.update({
+		MEDIAN_LATENCY_DICT.clear()
+		MEDIAN_LATENCY_DICT.update({
 			symbol: 0.0
 			for symbol in SYMBOLS
 		})
 
-		depth_update_id_dict.clear()
-		depth_update_id_dict.update({
+		DEPTH_UPDATE_ID_DICT.clear()
+		DEPTH_UPDATE_ID_DICT.update({
 			symbol: 0
 			for symbol in SYMBOLS
 		})
 
-		snapshots_queue_dict.clear()
-		snapshots_queue_dict.update({
+		SNAPSHOTS_QUEUE_DICT.clear()
+		SNAPSHOTS_QUEUE_DICT.update({
 			symbol: asyncio.Queue() for symbol in SYMBOLS
 		})
 
@@ -689,8 +698,8 @@ def initialize_runtime_state():
 			for symbol in SYMBOLS
 		})
 
-		symbol_to_file_handles.clear()
-		merged_days_set.clear()
+		SYMBOL_TO_FILE_HANDLES.clear()
+		MERGED_DAYS.clear()
 
 		logger.info("[initialize_runtime_state] Runtime state initialized.")
 
@@ -824,10 +833,10 @@ def zip_and_remove(src_path: str):
 # .............................................................
 
 def merge_day_zips_to_single_jsonl(
-	symbol: str,
-	day_str: str,
+	symbol:	  str,
+	day_str:  str,
 	base_dir: str,
-	purge: bool = True
+	purge:	  bool = True
 ):
 
 	"""
@@ -894,34 +903,77 @@ def merge_day_zips_to_single_jsonl(
 
 		# Open output file for merged .jsonl content
 
-		with open(merged_path, "w", encoding="utf-8") as fout:
+		try:
 
-			# Process each zip file in chronological order
+			with open(merged_path, "w", encoding="utf-8") as fout:
 
-			for zip_file in sorted(zip_files):
+				# Process each zip file in chronological order
 
-				zip_path = os.path.join(tmp_dir, zip_file)
+				for zip_file in sorted(zip_files):
 
-				try:
+					zip_path = os.path.join(tmp_dir, zip_file)
 
-					with zipfile.ZipFile(zip_path, "r") as zf:
+					try:
 
-						for member in zf.namelist():
+						with zipfile.ZipFile(zip_path, "r") as zf:
 
-							with zf.open(member) as f:
+							for member in zf.namelist():
 
-								for raw in f:
+								with zf.open(member) as f:
 
-									fout.write(raw.decode("utf-8") + "\n")
+									for raw in f:
 
-				except Exception as e:
+										fout.write(raw.decode("utf-8") + "\n")
 
-					logger.warning(
-						f"[merge_day_zips] Failed to extract {zip_path}: {e}",
-						exc_info=True
-					)
+					except Exception as e:
 
-					continue  # Skip this zip and continue
+						logger.error(
+							f"[merge_day_zips] Failed to extract {zip_path}: {e}",
+							exc_info=True
+						)
+
+						return
+
+		except Exception as e:
+
+			logger.error(
+				f"[merge_day_zips] Failed to open or "
+				f"write to merged file {merged_path}: {e}",
+				exc_info=True
+
+			)
+
+			try:
+
+				if fout: fout.close()
+
+			except Exception as close_error:
+				
+				logger.warning(
+					f"[merge_day_zips] Failed to close output file: {close_error}",
+					exc_info=True
+				)
+
+			return
+
+		finally:
+
+			# Ensure the output file is closed
+
+			try:
+
+				if fout: fout.close()
+
+			except Exception as close_error:
+
+				logger.warning(
+					f"[merge_day_zips] Failed to close output file: {close_error}",
+					exc_info=True
+				)
+
+				return
+
+			return
 
 		# Recompress the consolidated .jsonl into a final single-archive zip
 
@@ -1014,7 +1066,7 @@ def merge_all_symbols_for_day(symbols: list[str], day_str: str):
 		- This function merely orchestrates per-symbol merges
 		  via `merge_day_zips_to_single_jsonl()`.
 		- Duplicate merge attempts must be avoided externally,
-		  e.g., via `merged_days_set`.
+		  e.g., via `MERGED_DAYS`.
 		- Can be safely invoked from multiple sources as long as
 		external guards are applied.
 	"""
@@ -1046,11 +1098,9 @@ async def gate_streaming_by_latency() -> None:
 
 	"""
 	Streaming controller based on latency.
-	Manages event_stream_enable flag for order book streaming.
-	Observes event_latency_valid, set by latency estimation loop.
+	Manages EVENT_STREAM_ENABLE flag for order book streaming.
+	Observes EVENT_LATENCY_VALID, set by latency estimation loop.
 	"""
-
-	global latency_dict
 
 	has_logged_warmup = False  # Initial launch flag
 
@@ -1060,10 +1110,10 @@ async def gate_streaming_by_latency() -> None:
 
 			# Check latency and streaming flags
 
-			latency_passed = event_latency_valid.is_set()
-			stream_currently_on = event_stream_enable.is_set()
+			latency_passed = EVENT_LATENCY_VALID.is_set()
+			stream_currently_on = EVENT_STREAM_ENABLE.is_set()
 			has_any_latency = all(
-				len(latency_dict[s]) > 0 for s in SYMBOLS
+				len(LATENCY_DICT[s]) > 0 for s in SYMBOLS
 			)
 
 			if latency_passed and not stream_currently_on:
@@ -1074,7 +1124,7 @@ async def gate_streaming_by_latency() -> None:
 					f"Enable order book stream."
 				)
 
-				event_stream_enable.set()
+				EVENT_STREAM_ENABLE.set()
 				has_logged_warmup = False
 
 			elif not latency_passed:
@@ -1096,7 +1146,7 @@ async def gate_streaming_by_latency() -> None:
 						f"Pausing order book stream."
 					)
 
-					event_stream_enable.clear()
+					EVENT_STREAM_ENABLE.clear()
 
 			await asyncio.sleep(LATENCY_SIGNAL_SLEEP)
 
@@ -1138,13 +1188,13 @@ async def estimate_latency_via_diff_depth() -> None:
 	- Maintains a rolling deque of latency samples per symbol.
 	- Once `LATENCY_SAMPLE_MIN` samples exist:
 		• Computes median latency per symbol.
-		• If all medians < `LATENCY_THRESHOLD_SEC`, sets `event_latency_valid`.
+		• If all medians < `LATENCY_THRESHOLD_SEC`, sets `EVENT_LATENCY_VALID`.
 		• If excessive latency or disconnection, clears the signal.
 
 	Purpose:
-	- `event_latency_valid` acts as a global flow control flag.
+	- `EVENT_LATENCY_VALID` acts as a global flow control flag.
 	- Used by `gate_streaming_by_latency()` to pause/resume 
-	order book streaming via `event_stream_enable`.
+	order book streaming via `EVENT_STREAM_ENABLE`.
 
 	Backoff:
 	- On disconnection or failure, retries with exponential backoff and jitter.
@@ -1155,7 +1205,7 @@ async def estimate_latency_via_diff_depth() -> None:
 	directly affects snapshot timestamp correctness.
 	"""
 
-	global latency_dict, median_latency_dict, depth_update_id_dict
+	global LATENCY_DICT, MEDIAN_LATENCY_DICT, DEPTH_UPDATE_ID_DICT
 
 	url = (
 		"wss://stream.binance.com:9443/stream?"
@@ -1202,11 +1252,11 @@ async def estimate_latency_via_diff_depth() -> None:
 
 						update_id = data.get("u")
 
-						if update_id is None or update_id <= depth_update_id_dict.get(symbol, 0):
+						if update_id is None or update_id <= DEPTH_UPDATE_ID_DICT.get(symbol, 0):
 
 							continue  # Duplicate or out-of-order update
 
-						depth_update_id_dict[symbol] = update_id
+						DEPTH_UPDATE_ID_DICT[symbol] = update_id
 					
 					# ................................................................
 					# Estimate latency (difference between client and server clocks)
@@ -1221,21 +1271,21 @@ async def estimate_latency_via_diff_depth() -> None:
 						client_time_sec = time.time()
 						latency_sec = max(0.0, client_time_sec - server_time_sec)
 
-						latency_dict[symbol].append(latency_sec)
+						LATENCY_DICT[symbol].append(latency_sec)
 
-						if len(latency_dict[symbol]) >= LATENCY_SAMPLE_MIN:
+						if len(LATENCY_DICT[symbol]) >= LATENCY_SAMPLE_MIN:
 
-							median = statistics.median(latency_dict[symbol])
-							median_latency_dict[symbol] = median
+							median = statistics.median(LATENCY_DICT[symbol])
+							MEDIAN_LATENCY_DICT[symbol] = median
 
 							if all(
-								len(latency_dict[s]) >= LATENCY_SAMPLE_MIN and
-								statistics.median(latency_dict[s]) < LATENCY_THRESHOLD_SEC
+								len(LATENCY_DICT[s]) >= LATENCY_SAMPLE_MIN and
+								statistics.median(LATENCY_DICT[s]) < LATENCY_THRESHOLD_SEC
 								for s in SYMBOLS
 							):
-								if not event_latency_valid.is_set():
+								if not EVENT_LATENCY_VALID.is_set():
 
-									event_latency_valid.set()
+									EVENT_LATENCY_VALID.set()
 
 									logger.info(
 										"[estimate_latency_via_diff_depth] "
@@ -1262,12 +1312,12 @@ async def estimate_latency_via_diff_depth() -> None:
 				exc_info=True
 			)
 
-			event_latency_valid.clear()
+			EVENT_LATENCY_VALID.clear()
 
 			for symbol in SYMBOLS:
 
-				latency_dict[symbol].clear()
-				depth_update_id_dict[symbol] = 0
+				LATENCY_DICT[symbol].clear()
+				DEPTH_UPDATE_ID_DICT[symbol] = 0
 
 			backoff_sec = (
 				min(MAX_BACKOFF, BASE_BACKOFF * (2 ** reconnect_attempt))
@@ -1332,11 +1382,11 @@ async def put_snapshot() -> None:
 	Continuously consumes top-20 order book snapshots from Binance WebSocket stream
 	(`@depth20@100ms`) for all tracked symbols, applies latency compensation, and
 	dispatches each processed snapshot into:
-	• `snapshots_queue_dict[symbol]` — for persistent file logging.
+	• `SNAPSHOTS_QUEUE_DICT[symbol]` — for persistent file logging.
 	• `symbol_snapshots_to_render[symbol]` — for live debug rendering via FastAPI.
 
 	Behavior:
-	• Waits for `event_stream_enable` to confirm latency quality.
+	• Waits for `EVENT_STREAM_ENABLE` to confirm latency quality.
 	• For each stream message:
 		- Extracts symbol, bid/ask levels, and last update ID.
 		- Applies median-latency correction to compute `eventTime` (in ms).
@@ -1346,13 +1396,13 @@ async def put_snapshot() -> None:
 	• This stream lacks Binance-provided timestamps ("E"); all timing
 	  is client-side and latency-compensated.
 	• `eventTime` is an `int` (milliseconds since UNIX epoch).
-	• Only `snapshots_queue_dict[symbol]` is used for durable storage.
+	• Only `SNAPSHOTS_QUEUE_DICT[symbol]` is used for durable storage.
 	• `symbol_snapshots_to_render` is ephemeral and used exclusively
 	  for internal diagnostics or FastAPI display.
 	• On failure, reconnects with exponential backoff + jitter.
 	"""
 
-	global latency_dict, median_latency_dict, snapshots_queue_dict
+	global LATENCY_DICT, MEDIAN_LATENCY_DICT, SNAPSHOTS_QUEUE_DICT
 
 	attempt = 0  # Retry counter for reconnects
 
@@ -1360,7 +1410,7 @@ async def put_snapshot() -> None:
 
 		# ⏸ Wait until latency gate is open
 
-		await event_stream_enable.wait()
+		await EVENT_STREAM_ENABLE.wait()
 
 		try:
 
@@ -1397,7 +1447,7 @@ async def put_snapshot() -> None:
 
 						# ✅ Enforce latency gate per-symbol
 
-						if not event_stream_enable.is_set() or not latency_dict[symbol]:
+						if not EVENT_STREAM_ENABLE.is_set() or not LATENCY_DICT[symbol]:
 
 							continue  # Skip if latency is untrusted
 
@@ -1417,7 +1467,7 @@ async def put_snapshot() -> None:
 
 						# 🎯 Estimate event timestamp via median latency compensation
 
-						med_latency = int(median_latency_dict.get(symbol, 0.0))  # in ms
+						med_latency = int(MEDIAN_LATENCY_DICT.get(symbol, 0.0))  # in ms
 						client_time_sec = int(time.time() * 1_000)
 						event_ts = client_time_sec - med_latency  # adjusted event time
 
@@ -1432,7 +1482,7 @@ async def put_snapshot() -> None:
 
 						# 📤 Push to downstream queue for file dump
 
-						await snapshots_queue_dict[symbol].put(snapshot)
+						await SNAPSHOTS_QUEUE_DICT[symbol].put(snapshot)
 
 						# 🧠 Cache to in-memory store (just for debug-purpose rendering)
 
@@ -1440,9 +1490,9 @@ async def put_snapshot() -> None:
 
 						# 🔓 Signal FastAPI readiness after first snapshot
 
-						if not ready_event.is_set():
+						if not READY_EVENT.is_set():
 
-							ready_event.set()
+							READY_EVENT.set()
 
 					except Exception as e:
 
@@ -1491,7 +1541,7 @@ async def dump_snapshot_for_symbol(symbol: str) -> None:
 	"""
 	📤 Per-Symbol Snapshot File Dumper (async, persistent, compressed)
 
-	Continuously consumes snapshots from `snapshots_queue_dict[symbol]`
+	Continuously consumes snapshots from `SNAPSHOTS_QUEUE_DICT[symbol]`
 	and appends them to per-symbol `.jsonl` files partitioned by time.
 	When a UTC day rolls over, triggers merging/compression in a thread.
 
@@ -1504,11 +1554,11 @@ async def dump_snapshot_for_symbol(symbol: str) -> None:
 		- If day changes: start merge thread (with lock protection)
 
 	Internal Structures:
-	• `symbol_to_file_handles[symbol] → (suffix, writer)`
+	• `SYMBOL_TO_FILE_HANDLES[symbol] → (suffix, writer)`
 		↳ Active file writer for the current time window.
-	• `merged_days_set` tracks which UTC days have been merged
+	• `MERGED_DAYS` tracks which UTC days have been merged
 	  to avoid launching redundant threads across symbols.
-	• `MERGE_LOCK` protects access to `merged_days_set` to avoid
+	• `MERGE_LOCKS` protect access to `MERGED_DAYS` to avoid
 	  race conditions in multi-symbol contexts.
 
 	Notes:
@@ -1517,10 +1567,10 @@ async def dump_snapshot_for_symbol(symbol: str) -> None:
 	• Merge is dispatched only once per UTC day
 	"""
 
-	global symbol_to_file_handles, snapshots_queue_dict
-	global event_stream_enable
+	global SYMBOL_TO_FILE_HANDLES, SNAPSHOTS_QUEUE_DICT
+	global EVENT_STREAM_ENABLE
 
-	queue = snapshots_queue_dict[symbol]
+	queue = SNAPSHOTS_QUEUE_DICT[symbol]
 
 	while True:
 
@@ -1539,7 +1589,7 @@ async def dump_snapshot_for_symbol(symbol: str) -> None:
 
 			continue
 
-		if not event_stream_enable.is_set():
+		if not EVENT_STREAM_ENABLE.is_set():
 
 			break
 
@@ -1547,9 +1597,9 @@ async def dump_snapshot_for_symbol(symbol: str) -> None:
 
 		try:
 
-			event_ts_ms = snapshot.get("eventTime", int(time.time() * 1000))
-			suffix = get_file_suffix(SAVE_INTERVAL_MIN, event_ts_ms)
-			day_str = get_date_from_suffix(suffix)
+			event_ts_ms	= snapshot.get("eventTime", int(time.time() * 1000))
+			suffix		= get_file_suffix(SAVE_INTERVAL_MIN, event_ts_ms)
+			day_str		= get_date_from_suffix(suffix)
 
 		except Exception as e:
 
@@ -1584,7 +1634,7 @@ async def dump_snapshot_for_symbol(symbol: str) -> None:
 
 		# ── Retrieve last writer (if any)
 
-		last_suffix, writer = symbol_to_file_handles.get(symbol, (None, None))
+		last_suffix, writer = SYMBOL_TO_FILE_HANDLES.get(symbol, (None, None))
 
 		# ── Spawn merge thread if day has changed and not already merged
 
@@ -1594,11 +1644,21 @@ async def dump_snapshot_for_symbol(symbol: str) -> None:
 
 				last_day = get_date_from_suffix(last_suffix)
 
-				with MERGE_LOCK:
+				with MERGE_LOCKS[symbol]:
 
-					if last_day != day_str and last_day not in merged_days_set:
+					# .....................................................
+					# This block ensures thread-safe execution for
+					# merge operations. The `MERGED_DAYS.add(last_day)`
+					# and `threading.Thread(...)` calls are guaranteed
+					# to execute only once per symbol and day combination.
+					# Even if `merge_all_symbols_for_day` fails, the state
+					# in `MERGED_DAYS` prevents redundant merge attempts
+					# for the same day.
+					# .....................................................
 
-						merged_days_set.add(last_day)
+					if last_day != day_str and last_day not in MERGED_DAYS:
+
+						MERGED_DAYS.add(last_day)
 
 						threading.Thread(
 							target=merge_all_symbols_for_day,
@@ -1657,7 +1717,7 @@ async def dump_snapshot_for_symbol(symbol: str) -> None:
 
 				continue  # Skip this snapshot
 
-			symbol_to_file_handles[symbol] = (suffix, writer)
+			SYMBOL_TO_FILE_HANDLES[symbol] = (suffix, writer)
 
 		# ── Write snapshot as compact JSON line
 
@@ -1676,7 +1736,7 @@ async def dump_snapshot_for_symbol(symbol: str) -> None:
 
 			# Invalidate writer for next iteration
 
-			symbol_to_file_handles.pop(symbol, None)
+			SYMBOL_TO_FILE_HANDLES.pop(symbol, None)
 
 			continue
 
@@ -1708,7 +1768,7 @@ async def lifespan(app):
 
 	for symbol in SYMBOLS:
 
-		suffix_writer = symbol_to_file_handles.get(symbol)
+		suffix_writer = SYMBOL_TO_FILE_HANDLES.get(symbol)
 		
 		if not suffix_writer:
 
@@ -1797,7 +1857,7 @@ async def health_ready():
 
 	try:
 
-		if ready_event.is_set():
+		if READY_EVENT.is_set():
 
 			return {"status": "ready"}
 
@@ -1920,7 +1980,7 @@ async def watchdog_timer(timeout_sec: int) -> None:
 		then triggers profiling shutdown.
 	"""
 
-	global event_stream_enable
+	global EVENT_STREAM_ENABLE
 
 	try:
 
@@ -1931,7 +1991,7 @@ async def watchdog_timer(timeout_sec: int) -> None:
 			f"Initiating shutdown..."
 		)
 
-		event_stream_enable.clear()  # Signal downstream tasks to stop
+		EVENT_STREAM_ENABLE.clear()  # Signal downstream tasks to stop
 
 		try:
 
@@ -2037,7 +2097,7 @@ if __name__ == "__main__":
 
 			# Initialize in-memory structures
 
-			global ready_event
+			global READY_EVENT
 
 			try:
 
@@ -2145,12 +2205,12 @@ if __name__ == "__main__":
 
 			try:
 
-				await ready_event.wait()
+				await READY_EVENT.wait()
 
 			except Exception as e:
 
 				logger.error(
-					f"[main] Error while waiting for ready_event: {e}",
+					f"[main] Error while waiting for READY_EVENT: {e}",
 					exc_info=True
 				)
 
@@ -2188,4 +2248,16 @@ if __name__ == "__main__":
 
 			sys.exit(1)
 
-	asyncio.run(main())
+	try:
+
+		asyncio.run(main())
+
+	except KeyboardInterrupt:
+
+		logger.info("[main] Application terminated by user (Ctrl + C).")
+		sys.exit(0)
+
+	except Exception as e:
+
+		logger.critical(f"[main] Unhandled exception: {e}", exc_info=True)
+		sys.exit(1)
