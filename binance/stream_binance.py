@@ -443,15 +443,17 @@ WS_URL			= f"wss://stream.binance.com:9443/stream?streams={STREAMS_PARAM}"
 # ───────────────────────────────────────────────────────────────────────────────
 # 📈 Latency Measurement Parameters
 # These control how latency is estimated from the @depth stream:
-#   - LATENCY_DEQUE_SIZE: buffer size for per-symbol latency samples
-#   - LATENCY_SAMPLE_MIN: number of samples required before validation
+#   - LATENCY_DEQUE_SIZE:	 buffer size for per-symbol latency samples
+#   - LATENCY_SAMPLE_MIN:	 number of samples required before validation
 #   - LATENCY_THRESHOLD_SEC: max latency allowed for stream readiness
+#   - ASYNC_SLEEP_INTERVAL:  Seconds to sleep in asyncio tasks
 # ───────────────────────────────────────────────────────────────────────────────
 
-LATENCY_DEQUE_SIZE		= int(CONFIG.get("LATENCY_DEQUE_SIZE",		10))
-LATENCY_SAMPLE_MIN		= int(CONFIG.get("LATENCY_SAMPLE_MIN",		10))
-LATENCY_THRESHOLD_SEC	= float(CONFIG.get("LATENCY_THRESHOLD_SEC",	0.5))
-LATENCY_SIGNAL_SLEEP	= float(CONFIG.get("LATENCY_SIGNAL_SLEEP",	0.2))
+LATENCY_DEQUE_SIZE	  = int(CONFIG.get("LATENCY_DEQUE_SIZE",	  10))
+LATENCY_SAMPLE_MIN	  = int(CONFIG.get("LATENCY_SAMPLE_MIN",	  10))
+LATENCY_THRESHOLD_SEC = float(CONFIG.get("LATENCY_THRESHOLD_SEC", 0.5))
+LATENCY_SIGNAL_SLEEP  = float(CONFIG.get("LATENCY_SIGNAL_SLEEP",  0.2))
+ASYNC_SLEEP_INTERVAL  = float(CONFIG.get("LATENCY_GATE_SLEEP",	  1.0))
 
 # ────────────────────────────────────────────────────────────────────────────────────
 # 🔄 WebSocket Ping/Pong Timing (from .conf)
@@ -1159,7 +1161,7 @@ async def gate_streaming_by_latency() -> None:
 				exc_info=True
 			)
 
-			await asyncio.sleep(1)
+			await asyncio.sleep(LATENCY_GATE_SLEEP)
 
 # .............................................................
 
