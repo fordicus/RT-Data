@@ -83,6 +83,16 @@ and does **not require internet access**.
 
 ---
 
+## 🛠️ Development Environment Setup
+
+For detailed instructions on setting up the development environment, including Docker Desktop and VS Code integration for cross-platform workflows, refer to:
+
+📘 [Docker Integration Guide](DOCKER%20INTEGRATION%20GUIDE.md)
+
+This guide provides step-by-step instructions for configuring Windows-based development environments with Ubuntu deployment targets, ensuring consistency and compatibility across platforms.
+
+---
+
 ## 🚀 Final Goal
 
 Deliver a normalized, high-resolution dataset 
