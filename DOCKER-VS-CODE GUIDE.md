@@ -262,5 +262,30 @@ This setup eliminates platform-specific issues and ensures consistent behavior a
 
 ## Author's Personal Note
 
-This document `DOCKER INTEGRATION GUIDE.md` largely owes my personal LaTeX project in Overleaf:
+This document `DOCKER-VS-CODE GUIDE.md` largely owes my personal LaTeX project in Overleaf:
 `_rtdkp_/Reinforcement-Transformer-Docker-Kubernetes-PostgreSQL`.
+
+---
+
+### VS Code Terminal Configuration for Conda Environment
+
+To ensure that the VS Code integrated terminal runs in the intended conda environment, you can define the settings in `.vscode/settings.json` as follows:
+
+```jsonc
+{
+  "python.pythonPath": "${env:USERPROFILE}/anaconda3/envs/binance/bin/python",
+  "terminal.integrated.defaultProfile.windows": "Command Prompt",
+  "terminal.integrated.profiles.windows": {
+    "Command Prompt": {
+      "path": "cmd.exe",
+      "args": ["/K", "conda activate binance"]
+    }
+  }
+}
+```
+
+This configuration ensures that:
+- The Python interpreter used matches the specified conda environment.
+- The integrated terminal automatically activates the `binance` conda environment.
+
+For more details, refer to the file: `<your-repository>\.vscode\settings.json`.
