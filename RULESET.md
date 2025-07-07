@@ -1,4 +1,4 @@
-### RULESET.md — Unified Guidelines (2025-07-06)
+### RULESET.md — Unified Guidelines (2025-07-07)
 
 > **Purpose**  
 > This file serves as a unified and authoritative guideline for code, documents,  
@@ -208,5 +208,3 @@ This creates a trade-off with the advantages of the classification approach.
 > See G-6.
 
 ---
-
-### End of RULESET.md (2025-07-06)

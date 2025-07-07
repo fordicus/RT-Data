@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Binance Dashboard</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: center;
+        }
+        th {
+            background-color: #f4f4f4;
+        }
+        tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+    </style>
+</head>
+<body>
+    <h1>Binance Dashboard</h1>
+    <table id="medLatencyTable">
+        <thead>
+            <tr>
+                <th>Symbol</th>
+                <th>Median Latency (ms)</th>
+            </tr>
+        </thead>
+        <tbody>
+            <!-- Rows will be dynamically added here -->
+        </tbody>
+    </table>
+
+    <script>
+        const ws = new WebSocket("ws://localhost:8080/ws/med_latency");
+
+        ws.onopen = () => {
+            console.log("WebSocket connection established.");
+        };
+
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            const medLatency = data.med_latency;
+
+            const tableBody = document.querySelector("#medLatencyTable tbody");
+            tableBody.innerHTML = ""; // Clear existing rows
+
+            for (const symbol in medLatency) {
+                const row = document.createElement("tr");
+                const symbolCell = document.createElement("td");
+                const latencyCell = document.createElement("td");
+
+                symbolCell.textContent = symbol.toUpperCase();
+                latencyCell.textContent = medLatency[symbol];
+
+                row.appendChild(symbolCell);
+                row.appendChild(latencyCell);
+                tableBody.appendChild(row);
+            }
+        };
+
+        ws.onerror = (error) => {
+            console.error("WebSocket error:", error);
+        };
+
+        ws.onclose = () => {
+            console.log("WebSocket connection closed.");
+        };
+    </script>
+</body>
+</html>

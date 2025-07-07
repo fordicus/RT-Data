@@ -31,8 +31,8 @@ Dependency:
 
 Functionality:
 	Stream Binance depth20 order books (100ms interval) via combined websocket.
-	Maintain top-20 in-memory `symbol_snapshots_to_render` for each symbol.
-	Periodically persist `symbol_snapshots_to_render` to JSONL → zip → aggregate daily.
+	Maintain top-20 in-memory `SYMBOL_SNAPSHOTS_TO_RENDER` for each symbol.
+	Periodically persist `SYMBOL_SNAPSHOTS_TO_RENDER` to JSONL → zip → aggregate daily.
 	Serve REST endpoints for JSON/HTML access and health monitoring.
 
 IO Structure:
@@ -472,28 +472,21 @@ if WS_PING_TIMEOUT  == 0: WS_PING_TIMEOUT  = None
 # ───────────────────────────────────────────────────────────────────────────────
 # 🧠 Runtime Per-Symbol State
 #
-# Maintains:
-#   • LATENCY_DICT: Deque of recent latency samples per symbol
-# 	  (used to compute median)
-#   • MEDIAN_LATENCY_DICT: Cached median latency in milliseconds
-# 	  per symbol
-#   • DEPTH_UPDATE_ID_DICT: Latest `updateId` seen per symbol
-# 	  from diff-depth streams
+# Structures:
+#   • LATENCY_DICT: Tracks recent latency samples per symbol (rolling deque).
+#   • MEDIAN_LATENCY_DICT: Stores median latency (ms) per symbol, updated dynamically.
+#   • DEPTH_UPDATE_ID_DICT: Records the latest `updateId` for each symbol to ensure
+#	 proper sequencing of depth updates.
 #
-# Used to:
-#   - Reject out-of-order updates
-#   - Enable event stream only after latency stabilization
-#   - Apply median latency compensation in absence of
-# 	  server timestamps
+# Usage:
+#   - LATENCY_DICT: Used for latency estimation and validation.
+#   - MEDIAN_LATENCY_DICT: Provides latency compensation for timestamp adjustments.
+#   - DEPTH_UPDATE_ID_DICT: Prevents out-of-order updates from being processed.
 # ───────────────────────────────────────────────────────────────────────────────
 
-LATENCY_DICT:		  Dict[str, Deque[float]] = {}
-MEDIAN_LATENCY_DICT:  Dict[str, float] = {}
-DEPTH_UPDATE_ID_DICT: Dict[str, int] = {}
-	
-# ───────────────────────────────────────────────────────────────────────────────
-# 🔒 Global Event Flags (pre-declared to prevent NameError)
-# ───────────────────────────────────────────────────────────────────────────────
+LATENCY_DICT:		   Dict[str, Deque[float]] = {}
+MEDIAN_LATENCY_DICT:   Dict[str, float] = {}
+DEPTH_UPDATE_ID_DICT:  Dict[str, int] = {}
 
 # ───────────────────────────────────────────────────────────────────────────────
 # 🔒 Global Event Flags (pre-declared to prevent NameError)
@@ -628,7 +621,7 @@ except Exception as e:
 #	 → Per-symbol async queues storing order book snapshots pushed
 #	   by `put_snapshot()` and consumed by `dump_snapshot_for_symbol()`.
 #
-#   symbol_snapshots_to_render: dict[str, dict]
+#   SYMBOL_SNAPSHOTS_TO_RENDER: dict[str, dict]
 #	 → In-memory latest snapshot per symbol for API rendering via FastAPI.
 #	   Used only for testing/debug visualization; not persisted to disk.
 #
@@ -648,7 +641,7 @@ except Exception as e:
 # ───────────────────────────────────────────────────────────────────────────────
 
 SNAPSHOTS_QUEUE_DICT:		dict[str, asyncio.Queue] = {}
-symbol_snapshots_to_render: dict[str, dict] = {}
+SYMBOL_SNAPSHOTS_TO_RENDER: dict[str, dict] = {}
 SYMBOL_TO_FILE_HANDLES:		dict[str, tuple[str, TextIOWrapper]] = {}
 
 # Each symbol has its own threading.Lock to ensure
@@ -694,8 +687,8 @@ def initialize_runtime_state():
 			symbol: asyncio.Queue() for symbol in SYMBOLS
 		})
 
-		symbol_snapshots_to_render.clear()
-		symbol_snapshots_to_render.update({
+		SYMBOL_SNAPSHOTS_TO_RENDER.clear()
+		SYMBOL_SNAPSHOTS_TO_RENDER.update({
 			symbol: {}
 			for symbol in SYMBOLS
 		})
@@ -1385,7 +1378,7 @@ async def put_snapshot() -> None:
 	(`@depth20@100ms`) for all tracked symbols, applies latency compensation, and
 	dispatches each processed snapshot into:
 	• `SNAPSHOTS_QUEUE_DICT[symbol]` — for persistent file logging.
-	• `symbol_snapshots_to_render[symbol]` — for live debug rendering via FastAPI.
+	• `SYMBOL_SNAPSHOTS_TO_RENDER[symbol]` — for live debug rendering via FastAPI.
 
 	Behavior:
 	• Waits for `EVENT_STREAM_ENABLE` to confirm latency quality.
@@ -1399,12 +1392,14 @@ async def put_snapshot() -> None:
 	  is client-side and latency-compensated.
 	• `eventTime` is an `int` (milliseconds since UNIX epoch).
 	• Only `SNAPSHOTS_QUEUE_DICT[symbol]` is used for durable storage.
-	• `symbol_snapshots_to_render` is ephemeral and used exclusively
+	• `SYMBOL_SNAPSHOTS_TO_RENDER` is ephemeral and used exclusively
 	  for internal diagnostics or FastAPI display.
 	• On failure, reconnects with exponential backoff + jitter.
 	"""
 
-	global LATENCY_DICT, MEDIAN_LATENCY_DICT, SNAPSHOTS_QUEUE_DICT
+	global SNAPSHOTS_QUEUE_DICT
+	global LATENCY_DICT, MEDIAN_LATENCY_DICT, SHARED_STATE_DICT
+	global DASHBOARD_PROCESS
 
 	attempt = 0  # Retry counter for reconnects
 
@@ -1488,7 +1483,15 @@ async def put_snapshot() -> None:
 
 						# 🧠 Cache to in-memory store (just for debug-purpose rendering)
 
-						symbol_snapshots_to_render[symbol] = snapshot
+						SYMBOL_SNAPSHOTS_TO_RENDER[symbol] = snapshot
+
+						# 🔄 Update shared memory with med_latency
+
+						if DASHBOARD_PROCESS.is_alive():
+
+							SHARED_STATE_DICT["med_latency"][symbol] = (
+								med_latency
+							)
 
 						# 🔓 Signal FastAPI readiness after first snapshot
 
@@ -1898,11 +1901,11 @@ async def get_order_book(symbol: str):
 
 		symbol = symbol.lower()
 
-		if symbol not in symbol_snapshots_to_render:
+		if symbol not in SYMBOL_SNAPSHOTS_TO_RENDER:
 
 			raise HTTPException(status_code=404, detail="symbol not found")
 
-		return JSONResponse(content=symbol_snapshots_to_render[symbol])
+		return JSONResponse(content=SYMBOL_SNAPSHOTS_TO_RENDER[symbol])
 
 	except Exception as e:
 
@@ -1938,11 +1941,11 @@ async def orderbook_ui(request: Request, symbol: str):
 
 		sym = symbol.lower()
 
-		if sym not in symbol_snapshots_to_render:
+		if sym not in SYMBOL_SNAPSHOTS_TO_RENDER:
 
 			raise HTTPException(status_code=404, detail="symbol not found")
 
-		data = symbol_snapshots_to_render[sym]
+		data = SYMBOL_SNAPSHOTS_TO_RENDER[sym]
 		bids = data["bids"]
 		asks = data["asks"]
 		max_len = max(len(bids), len(asks))  # For consistent rendering in the template
@@ -2084,6 +2087,34 @@ if PROFILE_DURATION > 0:
 	atexit.register(dump_yappi_stats)   # Register dump on shutdown
 
 # ───────────────────────────────────────────────────────────────────────────────
+# 🖥️ Dashboard Process Launcher
+#
+# Purpose:
+#   - Launches the dashboard server as a separate process to ensure
+#	 real-time monitoring of `stream_binance.py` without interfering
+#	 with its main functionality.
+#   - The dashboard server provides WebSocket endpoints for visualizing
+#	 `med_latency` and other runtime metrics.
+#
+# Notes:
+#   - This function is invoked from the main process and uses
+#	 `multiprocessing.Process` to start `stream_binance_utils.dashboard`.
+#   - Ensures separation of concerns between data ingestion and monitoring.
+# ───────────────────────────────────────────────────────────────────────────────
+
+def start_dashboard_server(
+	dashboard_stream_freq,
+	shared_state_dict
+):
+
+	import stream_binance_utils
+
+	stream_binance_utils.dashboard(
+		dashboard_stream_freq,
+		shared_state_dict
+	)
+
+# ───────────────────────────────────────────────────────────────────────────────
 # 🚦 Main Entrypoint & Async Task Orchestration
 # ───────────────────────────────────────────────────────────────────────────────
 
@@ -2092,6 +2123,37 @@ if __name__ == "__main__":
 	import asyncio
 	from uvicorn.config import Config
 	from uvicorn.server import Server
+	from multiprocessing import Process, Manager
+
+	# ───────────────────────────────────────────────────────────────────────────
+	# 🧩 Inter-Process Shared State
+	#
+	#   • SHARED_STATE_DICT:
+	# 		Shared memory dict for real-time Inter-process communication (IPC).
+	#
+	#   • Purpose:
+	#       - Main process: Ingests and processes Binance DOM snapshots.
+	#       - Dashboard process: liveness & performance monitoring (WebSocket).
+	#
+	#   • Separation of concerns, providing non-blocking real-time visualization.
+	# ───────────────────────────────────────────────────────────────────────────
+
+	MANAGER = Manager()
+	SHARED_STATE_DICT = MANAGER.dict({
+		"med_latency": MANAGER.dict()
+	})
+
+	DASHBOARD_PROCESS = Process(
+		target = start_dashboard_server,
+		args   = (
+			float(CONFIG.get("DASHBOARD_STREAM_FREQ", 0.03)),
+			SHARED_STATE_DICT,
+		)
+	)
+
+	DASHBOARD_PROCESS.start()
+
+	# ───────────────────────────────────────────────────────────────────────────
 
 	async def main():
 
@@ -2134,7 +2196,7 @@ if __name__ == "__main__":
 
 				sys.exit(1)
 
-			# Streams and stores depth20@100ms `symbol_snapshots_to_render`
+			# Streams and stores depth20@100ms `SYMBOL_SNAPSHOTS_TO_RENDER`
 
 			try:
 
@@ -2227,7 +2289,14 @@ if __name__ == "__main__":
 					f"\thttp://localhost:8000/orderbook/{SYMBOLS[0]}\n"
 				)
 
-				cfg = Config(app=app, host="0.0.0.0", port=8000, lifespan="off", use_colors=False)
+				cfg = Config(
+					app			= app,
+					host		= "0.0.0.0",
+					port		= 8000,
+					lifespan	= "off",
+					use_colors	= False
+				)
+
 				server = Server(cfg)
 
 				await server.serve()
@@ -2257,9 +2326,19 @@ if __name__ == "__main__":
 	except KeyboardInterrupt:
 
 		logger.info("[main] Application terminated by user (Ctrl + C).")
-		sys.exit(0)
-
+		
 	except Exception as e:
 
 		logger.critical(f"[main] Unhandled exception: {e}", exc_info=True)
 		sys.exit(1)
+
+	finally:
+		
+		if DASHBOARD_PROCESS.is_alive():
+
+			logger.info("[main] Terminating dashboard process...")
+
+			DASHBOARD_PROCESS.terminate()
+			DASHBOARD_PROCESS.join()
+
+			logger.info("[main] Dashboard process terminated.")
