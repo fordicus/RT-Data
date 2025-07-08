@@ -15,16 +15,18 @@
 
 | ID   | Rule                                                                                                                      |
 |------|---------------------------------------------------------------------------------------------------------------------------|
-| G-1  | **Readability first** — Ensure clear structure with ≤ 80 characters per line, including comments and docstrings. Break long lines into multiple shorter ones for better readability. |
-| G-2  | **Precise English Comments only** — All comments must be written in clear, precise English. No other language allowed.    |
+| G1   | **Readability First** — Ensure clear structure with ≤ 80 characters per line, including comments and docstrings. Break long lines into multiple shorter ones for better readability. |
+| G1a  | **Blank Lines for Logical Separation** — Insert a blank line before and after every logical block, loop, branch, or multiline comment. This improves readability and visually separates code sections. |
+| G2   | **Precise English Comments Only** — All comments must be written in clear, precise English. No other language allowed. |
 |      | Comments must be critical, succinct, and technically informative. Explain subtle logic or assumptions inline where needed. |
-| G-3  | **Use tabs, not spaces** — Applies to code, docstrings, Markdown, and LaTeX.                                              |
-| G-4  | **Keep history traceable** — Never alter program logic during reformatting. Use comments and commits to explain intent.  |
-| G-5  | **Output in chat only** — All assistant replies must appear in the chat window unless explicitly asked otherwise.         |
-| G-6  | **Latest upload wins** — Always treat the most recently uploaded file as authoritative.                                   |
-| G-7  | **DO NOT DELETE** — Do not remove any comment or code block marked with this phrase unless it's demonstrably obsolete.    |
-| G-8  | **No Canvas (ChatGPT only)** — Scripts, outputs, and updates must be shown in this chat session, not in canvas panels.    |
-| G-9  | **Strict adherence to rules** — All AI agents must strictly follow the rules outlined in this document when collaborating on code-related tasks. |
+| G3   | **Use Tabs, Not Spaces** — Applies to code, docstrings, Markdown, and LaTeX. |
+| G3a  | **Tabs Only for Indentation** — All indentation must use tabs only. Spaces are not allowed for indentation anywhere in code, comments, or docstrings. |
+| G4   | **Keep History Traceable** — Never alter program logic during reformatting. Use comments and commits to explain intent. |
+| G5   | **Output in Chat Only** — All assistant replies must appear in the chat window unless explicitly asked otherwise. |
+| G6   | **Latest Upload Wins** — Always treat the most recently uploaded file as authoritative. |
+| G7   | **DO NOT DELETE** — Do not remove any comment or code block marked with this phrase unless it's demonstrably obsolete. |
+| G8   | **No Canvas (ChatGPT Only)** — Scripts, outputs, and updates must be shown in this chat session, not in canvas panels. |
+| G9   | **Strict Adherence to Rules** — All AI agents must strictly follow the rules outlined in this document when collaborating on code-related tasks. |
 
 ---
 

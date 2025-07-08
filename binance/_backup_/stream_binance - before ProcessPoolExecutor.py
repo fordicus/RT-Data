@@ -71,6 +71,7 @@ import json, statistics						# Data Processing
 from collections import deque
 from io import TextIOWrapper
 from typing import Dict, Deque
+import atexit								# Exit Hook (for profiler result dump)
 
 # ───────────────────────────────────────────────────────────────────────────────
 # 📝 Logging Configuration: Rotating log file + console output with UTC timestamps
@@ -325,38 +326,29 @@ templates = Jinja2Templates(directory=templates_dir)
 # ───────────────────────────────────────────────────────────────────────────────
 # ⚙️ Configuration Loader (.conf)
 # ───────────────────────────────────────────────────────────────────────────────
-# Loads and parses the unified configuration file shared by both
-# `stream_binance.py` and `get_binance_chart.py`.
+# Shared configuration file used by both `stream_binance.py` and
+# `get_binance_chart.py`, defining key runtime parameters such as:
 #
-# Defines all runtime parameters, including:
-#   • SYMBOLS			→ Binance symbols to stream (e.g., BTCUSDT, ETHUSDT)
-#   • SAVE_INTERVAL_MIN	→ File rotation interval (minutes) for snapshot persistence
-#   • LOB_DIR			→ Output directory for JSONL and ZIP files
-#   • BASE_BACKOFF,
-# 	  MAX_BACKOFF, etc.	→ Retry/backoff strategy for reconnects
-#   • MAX_WORKERS		→ Process pool size for daily merge operations
-#   • DASHBOARD_STREAM_FREQ,
-# 	  MAX_DASHBOARD_CONNECTIONS,
-# 	  etc.				→ WebSocket dashboard limits
+#   • SYMBOLS			  → Binance symbols to stream (e.g., BTCUSDT)
+#   • SAVE_INTERVAL_MIN	→ File rotation interval for snapshot persistence
+#   • LOB_DIR			  → Output directory for JSONL and ZIP files
+#   • BASE_BACKOFF, etc.   → Retry strategy for websocket reconnects
 #
 # 📄 Filename: get_binance_chart.conf
 # Format: Plaintext `KEY=VALUE`, supporting inline `#` comments.
 #
 # ⚠️ IMPORTANT:
-#   - Always loaded via `resource_path()` for compatibility with both
-#	 development (Windows) and production (PyInstaller/Linux) environments.
-#   - When bundled with PyInstaller, the config is extracted to a temp folder
-#	 at runtime (e.g., `/tmp/_MEIxxxx`), resolved via `sys._MEIPASS`.
+# This file is loaded using `resource_path()` to ensure correct resolution
+# under both dev (Windows) and production (PyInstaller/Linux) modes.
+# When bundled with PyInstaller, the config is packaged and extracted to a
+# temp folder at runtime (`/tmp/_MEIxxxx`), resolved via `sys._MEIPASS`.
 #
-# 🛠️ Robustness Notes:
-#   - Loader expects the config file to be present and well-formed.
-#   - If missing or malformed, the application logs an error and exits.
-#   - SYMBOLS=None or missing triggers a fatal runtime error.
-#   - All configuration is centralized here for maintainability and clarity.
-#
-# See also:
-#   - RULESET.md for documentation and code conventions.
-#   - All config-driven parameters are referenced throughout the codebase.
+# 🛠️ NOTE:
+# This loader assumes the config file is always present and correctly formed.
+# If the file is missing or malformed, the APP logs an error but continues.
+# Currently, SYMBOLS=None triggers a runtime failure downstream.
+# Consider fallback defaults or graceful shutdown logic in future revisions
+# if robustness across missing config scenarios becomes important.
 # ───────────────────────────────────────────────────────────────────────────────
 
 CONFIG_PATH = "get_binance_chart.conf"
@@ -569,7 +561,7 @@ def assert_event_flags_initialized():
 try:
 
 	BASE_BACKOFF		= int(CONFIG.get("BASE_BACKOFF", 2))
-	MAX_BACKOFF			= int(CONFIG.get("MAX_BACKOFF", 30))
+	MAX_BACKOFF		 = int(CONFIG.get("MAX_BACKOFF", 30))
 	RESET_CYCLE_AFTER   = int(CONFIG.get("RESET_CYCLE_AFTER", 7))
 	RESET_BACKOFF_LEVEL = int(CONFIG.get("RESET_BACKOFF_LEVEL", 3))
 
@@ -618,26 +610,22 @@ except Exception as e:
 
 # ───────────────────────────────────────────────────────────────────────────────
 # 📦 Runtime Memory Buffers & Async File Handles
-# ───────────────────────────────────────────────────────────────────────────────
-# Maintains all per-symbol runtime state required for streaming, persistence,
-# API rendering, and safe daily merge orchestration.
 #
-# Responsibilities:
-#   • Snapshot ingestion (async queue per symbol, for file persistence)
-#   • API rendering (in-memory latest snapshot for FastAPI endpoints)
-#   • File writing (active file handle per symbol, rotated by time window)
-#   • Daily merge deduplication (tracks merged days per symbol)
-#   • Thread/process safety for merge triggers (per-symbol locks)
+# Maintains symbol-specific runtime state for:
+#   • Snapshot ingestion (queue per symbol)
+#   • API rendering (in-memory latest snapshot)
+#   • File writing (active handle per symbol)
+#   • Daily merge deduplication (date set)
 #
 # Structures:
 #
 #   SNAPSHOTS_QUEUE_DICT: dict[str, asyncio.Queue[dict]]
-#	 → Per-symbol async queues for order book snapshots.
-#	   Populated by `put_snapshot()`, consumed by `symbol_dump_snapshot()`.
+#	 → Per-symbol async queues storing order book snapshots pushed
+#	   by `put_snapshot()` and consumed by `dump_snapshot_for_symbol()`.
 #
 #   SYMBOL_SNAPSHOTS_TO_RENDER: dict[str, dict]
-#	 → In-memory latest snapshot per symbol for FastAPI rendering.
-#	   Used for diagnostics/UI only; not persisted to disk.
+#	 → In-memory latest snapshot per symbol for API rendering via FastAPI.
+#	   Used only for testing/debug visualization; not persisted to disk.
 #
 #   SYMBOL_TO_FILE_HANDLES: dict[str, tuple[str, TextIOWrapper]]
 #	 → Tracks open file writers per symbol:
@@ -645,18 +633,13 @@ except Exception as e:
 #			• last_suffix: str = time suffix like "2025-07-03_15-00"
 #			• writer: open text file handle for appending .jsonl data
 #
-#   MERGED_DAYS: dict[str, set[str]]
-#	 → For each symbol, contains UTC day strings ("YYYY-MM-DD") that have
-#	   already been merged and archived, preventing redundant merge triggers.
+#   MERGED_DAYS: set[str]
+#	 → Contains UTC day strings ("YYYY-MM-DD") that have already been
+#	   merged+compressed to prevent duplicate merge threads.
 #
-#   MERGE_LOCKS: dict[str, threading.Lock]
-#	 → Per-symbol locks to prevent race conditions on `MERGED_DAYS` and
-#	   ensure only one merge process is launched per symbol/day.
-#
-# Notes:
-#   - All structures are (re-)initialized via `initialize_runtime_state()`.
-#   - Thread/process safety is enforced for all merge-related state.
-#   - See also: RULESET.md for code conventions and documentation standards.
+#   MERGE_LOCKS: `threading.Lock` per SYMBOL
+#	 → Prevents race condition on `MERGED_DAYS` during concurrent
+#	   merge launches from multiple symbol writers.
 # ───────────────────────────────────────────────────────────────────────────────
 
 SNAPSHOTS_QUEUE_DICT:		dict[str, asyncio.Queue] = {}
@@ -666,7 +649,7 @@ SYMBOL_TO_FILE_HANDLES:		dict[str, tuple[str, TextIOWrapper]] = {}
 # Each symbol has its own threading.Lock to ensure
 # independent synchronization during merge operations.
 
-MERGED_DAYS: dict[str, set[str]] = {}
+MERGED_DAYS: set[str] = set()
 MERGE_LOCKS: dict[str, threading.Lock] = {
 	symbol: threading.Lock() for symbol in SYMBOLS
 }
@@ -714,9 +697,6 @@ def initialize_runtime_state():
 
 		SYMBOL_TO_FILE_HANDLES.clear()
 		MERGED_DAYS.clear()
-		MERGED_DAYS.update({
-			symbol: set() for symbol in SYMBOLS
-		})
 
 		logger.info("[initialize_runtime_state] Runtime state initialized.")
 
@@ -736,8 +716,8 @@ def initialize_runtime_state():
 # 	  filenames (e.g., '1315' for 13:15 UTC)
 #   • zip_and_remove(...) → Compresses a file into .zip and
 # 	  deletes the original
-#   • symbol_consolidate_a_day(...)
-# 	  → Merges minute-level .zip files a daily archive
+#   • merge_day_zips_to_single_jsonl(...) → Merges minute-level
+# 	  .zip files into daily .jsonl archive
 #
 # Note:
 #   - Merging behavior assumes SAVE_INTERVAL_MIN < 1440
@@ -847,37 +827,29 @@ def zip_and_remove(src_path: str):
 			exc_info=True
 		)
 
-# ───────────────────────────────────────────────────────────────────────────────
-# 🗃️ Per-Symbol Daily Snapshot Consolidation & Archival
-#
-# Merges all per-minute zipped order book snapshots for a given symbol and UTC day
-# into a single `.jsonl` file, then compresses it as a daily archive.
-#
-# Responsibilities:
-#   • Locate all `.zip` files for the symbol/day in the temp directory.
-#   • Unpack and concatenate their contents into a single `.jsonl` file.
-#   • Compress the consolidated `.jsonl` as a single daily `.zip` archive.
-#   • Optionally purge the original temp directory after archiving.
-#
-# Fault Tolerance:
-#   - Gracefully skips missing/corrupted files or directories.
-#   - Logs all errors; never throws to caller.
-#
-# Usage:
-#   - Called via process pool for each symbol/day rollover.
-#   - Ensures efficient long-term storage and fast downstream loading.
-#
-# See also:
-#   - symbol_trigger_merge(), symbol_dump_snapshot()
-#   - RULESET.md for documentation and code conventions.
-# ───────────────────────────────────────────────────────────────────────────────
+# .............................................................
 
-def symbol_consolidate_a_day(
+def merge_day_zips_to_single_jsonl(
 	symbol:	  str,
 	day_str:  str,
 	base_dir: str,
 	purge:	  bool = True
 ):
+
+	"""
+	🗃️ Merge Per-Minute Zips into Single Daily `.jsonl` Archive
+
+	For a given trading `symbol` and `day_str`, this routine locates all `.zip` files
+	under the corresponding temporary directory, unpacks and concatenates their
+	contents into a single `.jsonl` file, then re-compresses it as a single zip archive.
+
+	This consolidation serves long-term archival, reducing file system clutter and
+	enabling efficient downstream loading.
+
+	Fault tolerance: gracefully skips if temp folder or zip files are missing,
+	or if some zips are corrupted or concurrently removed. Logs all errors.
+	Never throws to caller.
+	"""
 
 	# Construct working directories and target paths
 
@@ -896,11 +868,9 @@ def symbol_consolidate_a_day(
 
 	if not os.path.isdir(tmp_dir):
 
-		logger.error(
-			f"[merge_day_zips][{symbol}] "
-			f"Temp dir missing on {day_str}: {tmp_dir}"
+		logger.info(
+			f"[merge_day_zips] Temp dir missing for {symbol} on {day_str}: {tmp_dir}"
 		)
-
 		return
 
 	# List all zipped minute-level files (may be empty)
@@ -911,9 +881,8 @@ def symbol_consolidate_a_day(
 
 	except Exception as e:
 
-		logger.error(
-			f"[merge_day_zips][{symbol}] "
-			f"Failed to list zips in {tmp_dir}: {e}",
+		logger.warning(
+			f"[merge_day_zips] Failed to list zips in {tmp_dir}: {e}",
 			exc_info=True
 		)
 
@@ -921,9 +890,8 @@ def symbol_consolidate_a_day(
 
 	if not zip_files:
 
-		logger.error(
-			f"[merge_day_zips][{symbol}] "
-			f"No zip files to merge on {day_str}."
+		logger.info(
+			f"[merge_day_zips] No zip files to merge for {symbol} on {day_str}."
 		)
 
 		return
@@ -957,8 +925,7 @@ def symbol_consolidate_a_day(
 					except Exception as e:
 
 						logger.error(
-							f"[merge_day_zips][{symbol}] "
-							f"Failed to extract {zip_path}: {e}",
+							f"[merge_day_zips] Failed to extract {zip_path}: {e}",
 							exc_info=True
 						)
 
@@ -967,8 +934,8 @@ def symbol_consolidate_a_day(
 		except Exception as e:
 
 			logger.error(
-				f"[merge_day_zips][{symbol}] "
-				f"Failed to open or write to merged file {merged_path}: {e}",
+				f"[merge_day_zips] Failed to open or "
+				f"write to merged file {merged_path}: {e}",
 				exc_info=True
 
 			)
@@ -979,9 +946,8 @@ def symbol_consolidate_a_day(
 
 			except Exception as close_error:
 				
-				logger.error(
-					f"[merge_day_zips][{symbol}] "
-					f"Failed to close output file: {close_error}",
+				logger.warning(
+					f"[merge_day_zips] Failed to close output file: {close_error}",
 					exc_info=True
 				)
 
@@ -997,9 +963,8 @@ def symbol_consolidate_a_day(
 
 			except Exception as close_error:
 
-				logger.error(
-					f"[merge_day_zips][{symbol}] "
-					f"Failed to close output file: {close_error}",
+				logger.warning(
+					f"[merge_day_zips] Failed to close output file: {close_error}",
 					exc_info=True
 				)
 
@@ -1020,8 +985,7 @@ def symbol_consolidate_a_day(
 		except Exception as e:
 
 			logger.error(
-				f"[merge_day_zips][{symbol}] "
-				f"Failed to compress merged file on {day_str}: {e}",
+				f"[merge_day_zips] Failed to compress merged file for {symbol} on {day_str}: {e}",
 				exc_info=True
 			)
 
@@ -1039,9 +1003,9 @@ def symbol_consolidate_a_day(
 
 		except Exception as e:
 
-			logger.error(
-				f"[merge_day_zips][{symbol}] "
-				f"Failed to remove merged .jsonl on {day_str}: {e}",
+			logger.warning(
+				f"[merge_day_zips] Failed to remove merged .jsonl "
+				f"for {symbol} on {day_str}: {e}",
 				exc_info=True
 			)
 
@@ -1055,17 +1019,16 @@ def symbol_consolidate_a_day(
 
 			except Exception as e:
 
-				logger.error(
-					f"[merge_day_zips][{symbol}] "
-					f"Failed to remove temp dir {tmp_dir}: {e}",
+				logger.warning(
+					f"[merge_day_zips] Failed to remove temp dir {tmp_dir}: {e}",
 					exc_info=True
 				)
 
 	except FileNotFoundError as e:
 
-		logger.error(
-			f"[merge_day_zips][{symbol}] "
-			f"No files found to merge on {day_str}: {e}"
+		logger.warning(
+			f"[merge_day_zips] No files found to merge "
+			f"for {symbol} on {day_str}: {e}"
 		)
 
 		return
@@ -1073,8 +1036,8 @@ def symbol_consolidate_a_day(
 	except Exception as e:
 
 		logger.error(
-			f"[merge_day_zips][{symbol}] "
-			f"Unexpected error merging on {day_str}: {e}",
+			f"[merge_day_zips] Unexpected error "
+			f"merging {symbol} on {day_str}: {e}",
 			exc_info=True
 		)
 
@@ -1153,7 +1116,7 @@ async def gate_streaming_by_latency() -> None:
 
 # .............................................................
 
-async def estimate_latency() -> None:
+async def estimate_latency_via_diff_depth() -> None:
 
 	"""
 	🔁 Latency Estimator via Binance @depth Stream
@@ -1166,7 +1129,7 @@ async def estimate_latency() -> None:
 		latency ≈ client_time_sec - server_time_sec
 
 	Where:
-	- `server_time_sec` is the server-side event timestamp ("E").
+	- `server_time_sec` is the server-side event timestamp (`E`).
 	- `client_time_sec` is the actual receipt time on the local machine.
 	This difference reflects:
 		• Network propagation delay
@@ -1215,7 +1178,7 @@ async def estimate_latency() -> None:
 			) as ws:
 
 				logger.info(
-					f"[estimate_latency] "
+					f"[estimate_latency_via_diff_depth] "
 					f"Connected to:\n{format_ws_url(url, '(@depth)')}\n"
 				)
 
@@ -1242,9 +1205,7 @@ async def estimate_latency() -> None:
 
 						update_id = data.get("u")
 
-						if ((update_id is None) or
-							(update_id <= DEPTH_UPDATE_ID_DICT.get(symbol, 0))
-						):
+						if update_id is None or update_id <= DEPTH_UPDATE_ID_DICT.get(symbol, 0):
 
 							continue  # Duplicate or out-of-order update
 
@@ -1280,14 +1241,14 @@ async def estimate_latency() -> None:
 									EVENT_LATENCY_VALID.set()
 
 									logger.info(
-										"[estimate_latency] "
+										"[estimate_latency_via_diff_depth] "
 										f"Latency OK — all symbols within threshold. "
 										f"Event set."
 									)
 					except Exception as e:
 
 						logger.warning(
-							f"[estimate_latency] "
+							f"[estimate_latency_via_diff_depth] "
 							f"Failed to process message: {e}",
 							exc_info=True
 						)
@@ -1299,7 +1260,7 @@ async def estimate_latency() -> None:
 			reconnect_attempt += 1
 
 			logger.warning(
-				f"[estimate_latency] "
+				f"[estimate_latency_via_diff_depth] "
 				f"WebSocket connection error (attempt {reconnect_attempt}): {e}",
 				exc_info=True
 			)
@@ -1321,7 +1282,7 @@ async def estimate_latency() -> None:
 				reconnect_attempt = RESET_BACKOFF_LEVEL
 
 			logger.warning(
-				f"[estimate_latency] "
+				f"[estimate_latency_via_diff_depth] "
 				f"Retrying in {backoff_sec:.1f} seconds "
 				f"(attempt {reconnect_attempt})..."
 			)
@@ -1331,7 +1292,7 @@ async def estimate_latency() -> None:
 		finally:
 
 			logger.info(
-				f"[estimate_latency] "
+				f"[estimate_latency_via_diff_depth] "
 				f"WebSocket connection closed."
 			)
 
@@ -1364,29 +1325,35 @@ def format_ws_url(url: str, label: str = "") -> str:
 
 # ───────────────────────────────────────────────────────────────────────────────
 # 🧩 Depth20 Snapshot Collector — Streams → Queue Buffer
-#
-# Consumes Binance `@depth20@100ms` WebSocket snapshots for all tracked symbols,
-# applies latency compensation, and dispatches each processed snapshot to:
-#   • SNAPSHOTS_QUEUE_DICT[symbol] — for persistent file logging
-#   • SYMBOL_SNAPSHOTS_TO_RENDER[symbol] — for live debug rendering via FastAPI
-#
-# Responsibilities:
-#   • Waits for EVENT_STREAM_ENABLE to confirm latency quality
-#   • For each stream message:
-#	   - Extracts symbol, bid/ask levels, and last update ID
-#	   - Applies median-latency correction to compute eventTime (ms)
-#	   - Dispatches snapshot to both persistence queue and render cache
-#
-# Notes:
-#   - Binance partial streams like @depth20@100ms lack server-side timestamps ("E");
-#	 all timing is client-side and latency-compensated
-#   - eventTime is an int (milliseconds since UNIX epoch)
-#   - Only SNAPSHOTS_QUEUE_DICT[symbol] is used for durable storage
-#   - SYMBOL_SNAPSHOTS_TO_RENDER is ephemeral, used for diagnostics or FastAPI display
-#   - On failure, reconnects with exponential backoff and jitter
 # ───────────────────────────────────────────────────────────────────────────────
 
 async def put_snapshot() -> None:
+
+	"""
+	🧩 Binance Depth20 Snapshot Collector → Per-Symbol Async Queue + Render Cache
+
+	Continuously consumes top-20 order book snapshots from Binance WebSocket stream
+	(`@depth20@100ms`) for all tracked symbols, applies latency compensation, and
+	dispatches each processed snapshot into:
+	• `SNAPSHOTS_QUEUE_DICT[symbol]` — for persistent file logging.
+	• `SYMBOL_SNAPSHOTS_TO_RENDER[symbol]` — for live debug rendering via FastAPI.
+
+	Behavior:
+	• Waits for `EVENT_STREAM_ENABLE` to confirm latency quality.
+	• For each stream message:
+		- Extracts symbol, bid/ask levels, and last update ID.
+		- Applies median-latency correction to compute `eventTime` (in ms).
+		- Dispatches snapshot to both persistence queue and render cache.
+
+	Notes:
+	• This stream lacks Binance-provided timestamps ("E"); all timing
+	  is client-side and latency-compensated.
+	• `eventTime` is an `int` (milliseconds since UNIX epoch).
+	• Only `SNAPSHOTS_QUEUE_DICT[symbol]` is used for durable storage.
+	• `SYMBOL_SNAPSHOTS_TO_RENDER` is ephemeral and used exclusively
+	  for internal diagnostics or FastAPI display.
+	• On failure, reconnects with exponential backoff + jitter.
+	"""
 
 	global SNAPSHOTS_QUEUE_DICT
 	global LATENCY_DICT, MEDIAN_LATENCY_DICT, SHARED_STATE_DICT
@@ -1484,8 +1451,7 @@ async def put_snapshot() -> None:
 					except Exception as e:
 
 						logger.warning(
-							f"[put_snapshot][{symbol}] "
-							f"Failed to process message: {e}",
+							f"[put_snapshot] Failed to process message: {e}",
 							exc_info=True
 						)
 
@@ -1521,49 +1487,39 @@ async def put_snapshot() -> None:
 			logger.info("[put_snapshot] WebSocket connection closed.")
 
 # ───────────────────────────────────────────────────────────────────────────────
-# 📝 Background Task: Snapshot Persistence & Daily Merge Trigger
-#
-# Handles per-symbol snapshot persistence and triggers daily merge/archival.
-#
-# Responsibilities:
-#   • Consumes snapshots from `SNAPSHOTS_QUEUE_DICT[symbol]` and appends them
-#	 to per-symbol `.jsonl` files, partitioned by time window.
-#   • Rotates file handles when the time window (suffix) changes.
-#   • On UTC day rollover, triggers a merge/archival process for the previous day,
-#	 ensuring only one merge per symbol/day via `MERGED_DAYS` and `MERGE_LOCKS`.
-#
-# Structures:
-#   • `SYMBOL_TO_FILE_HANDLES[symbol]` — Tracks (suffix, writer) for each symbol.
-#   • `MERGED_DAYS[symbol]` — Set of merged days to prevent redundant merges.
-#   • `MERGE_LOCKS[symbol]` — Thread/process lock for safe merge triggering.
-#
-# Notes:
-#   - Runs as an infinite async task per symbol.
-#   - Ensures all data is flushed to disk after each snapshot.
-#   - Merge/archival is dispatched only once per UTC day per symbol.
-#   - See also: RULESET.md for documentation and code conventions.
+# 📝 Background Task: Save to File
 # ───────────────────────────────────────────────────────────────────────────────
 
-def symbol_trigger_merge(symbol, last_day):
+async def dump_snapshot_for_symbol(symbol: str) -> None:
 
-	global MERGE_LOCKS, MERGED_DAYS, MERGE_EXECUTOR
-	global LOB_DIR, PURGE_ON_DATE_CHANGE
+	"""
+	📤 Per-Symbol Snapshot File Dumper (async, persistent, compressed)
 
-	with MERGE_LOCKS[symbol]:
+	Continuously consumes snapshots from `SNAPSHOTS_QUEUE_DICT[symbol]`
+	and appends them to per-symbol `.jsonl` files partitioned by time.
+	When a UTC day rolls over, triggers merging/compression in a thread.
 
-		if last_day not in MERGED_DAYS[symbol]:
+	Behavior:
+	• For each snapshot:
+		- Compute `suffix` (e.g., "1730") and `day_str` (e.g., "2025-07-03")
+		- Ensure directory and file path for current interval exist
+		- Append snapshot to: {symbol}_orderbook_{suffix}.jsonl
+		- If suffix changes: rotate file handle
+		- If day changes: start merge thread (with lock protection)
 
-			MERGED_DAYS[symbol].add(last_day)
+	Internal Structures:
+	• `SYMBOL_TO_FILE_HANDLES[symbol] → (suffix, writer)`
+		↳ Active file writer for the current time window.
+	• `MERGED_DAYS` tracks which UTC days have been merged
+	  to avoid launching redundant threads across symbols.
+	• `MERGE_LOCKS` protect access to `MERGED_DAYS` to avoid
+	  race conditions in multi-symbol contexts.
 
-			MERGE_EXECUTOR.submit(
-				symbol_consolidate_a_day,
-				symbol,
-				last_day,
-				LOB_DIR,
-				PURGE_ON_DATE_CHANGE == 1
-			)
-
-async def symbol_dump_snapshot(symbol: str) -> None:
+	Notes:
+	• Runs forever via `asyncio.create_task(...)`
+	• Flushes every snapshot to prevent memory loss
+	• Merge is dispatched only once per UTC day
+	"""
 
 	global SYMBOL_TO_FILE_HANDLES, SNAPSHOTS_QUEUE_DICT
 	global EVENT_STREAM_ENABLE
@@ -1646,21 +1602,27 @@ async def symbol_dump_snapshot(symbol: str) -> None:
 
 					# .....................................................
 					# This block ensures thread-safe execution for
-					# merge operations. `MERGED_DAYS[symbol].add(last_day)`
+					# merge operations. The `MERGED_DAYS.add(last_day)`
 					# and `threading.Thread(...)` calls are guaranteed
 					# to execute only once per symbol and day combination.
-					# Even if `symbol_consolidate_a_day` fails, 
-					# the state in `MERGED_DAYS[symbol]` prevents redundant
-					# merge attempts for the same day.
+					# Even if `merge_all_symbols_for_day` fails, the state
+					# in `MERGED_DAYS` prevents redundant merge attempts
+					# for the same day.
 					# .....................................................
 
-					if ((last_day != day_str) and 
-						(last_day not in MERGED_DAYS[symbol])
-					):
+					if last_day != day_str and last_day not in MERGED_DAYS:
 
-						MERGED_DAYS[symbol].add(last_day)
+						MERGED_DAYS.add(last_day)
 						
-						symbol_trigger_merge(symbol, last_day)
+						threading.Thread(
+							target = merge_day_zips_to_single_jsonl,
+							args   = (
+								symbol,
+								last_day,
+								LOB_DIR,
+								PURGE_ON_DATE_CHANGE == 1
+							),
+						).start()
 
 		except Exception as e:
 
@@ -1738,50 +1700,24 @@ async def symbol_dump_snapshot(symbol: str) -> None:
 			continue
 
 # ───────────────────────────────────────────────────────────────────────────────
-# 🛑 Graceful Shutdown Handlers (FastAPI Lifespan & Merge Executor)
-#
-# Ensures all background merge processes and file writers are safely closed
-# and all data is flushed to disk on application shutdown.
-#
-# Responsibilities:
-#   • Registers an atexit handler to gracefully shutdown the ProcessPoolExecutor,
-#	 waiting for all merge tasks to complete.
-#   • Implements FastAPI lifespan context to close all open file writers for
-#	 each symbol, guaranteeing no snapshot data loss on exit.
-#
-# Notes:
-#   - Replaces deprecated @APP.on_event("shutdown") with modern lifespan context.
-#   - Guarantees data integrity and resource cleanup across all shutdown scenarios.
-#   - See also: RULESET.md for documentation and code conventions.
+# 🛑 Graceful Shutdown Handler (FastAPI Lifespan)
+# Migrates from deprecated @APP.on_event("shutdown") to lifespan context.
+# Ensures all file writers are closed and data is safely flushed on shutdown.
 # ───────────────────────────────────────────────────────────────────────────────
-
-import atexit
-
-def shutdown_merge_executor():
-
-	global MERGE_EXECUTOR
-
-	try:
-
-		MERGE_EXECUTOR.shutdown(wait=True)
-
-		logger.info(
-			f"[main] MERGE_EXECUTOR shutdown safely complete."
-		)
-
-	except Exception as e:
-
-		logger.error(
-			f"[main] MERGE_EXECUTOR shutdown failed: {e}",
-			exc_info=True
-		)
-
-atexit.register(shutdown_merge_executor)
 
 from contextlib import asynccontextmanager
 
 @asynccontextmanager
 async def lifespan(APP):
+
+	"""
+	FastAPI lifespan handler for graceful shutdown.
+
+	On shutdown, closes all active file writers for each symbol to ensure
+	all snapshot data is flushed and safely written to disk.
+	This prevents data loss in case the application exits before
+	individual file handles are rotated or closed.
+	"""
 
 	# Startup logic (if any) goes here
 
@@ -1817,31 +1753,28 @@ async def lifespan(APP):
 			)
 
 # ───────────────────────────────────────────────────────────────────────────────
-# ⚙️ FastAPI Initialization & Template Binding
-#
-# FastAPI acts as the core runtime backbone for this application.
-# Its presence is structurally required for multiple critical subsystems:
+# ⚙️ FastAPI Initialization + HTML Template Binding
+# ───────────────────────────────────────────────────────────────────────────────
+# FastAPI serves as the **core runtime backbone** for this application.
+# It is not merely optional; several key subsystems depend on it:
 #
 #   1. 📊 Logging Integration:
-#	  - Logging is routed via `uvicorn.error`, managed by FastAPI's ASGI server.
-#	  - Our logger (`logger = logging.getLogger("uvicorn.error")`) is active
-#		and functional as soon as FastAPI is imported, even before APP launch.
+#	  - Logging is routed via `uvicorn.error`, which is managed by FastAPI's ASGI server.
+#	  - This means our logger (`logger = logging.getLogger("uvicorn.error")`) is **active**
+#		and functional even before we explicitly launch the APP, as long as FastAPI is imported.
 #
 #   2. 🌐 REST API Endpoints:
-#	  - Provides health checks, JSON-based order book access, and real-time UI rendering.
+#	  - Used for health checks, JSON-based order book access, and real-time UI rendering.
 #
-#   3. 🧱 HTML UI Layer:
-#	  - Jinja2 template system is integrated via FastAPI for `/orderbook/{symbol}`.
+#   3. 🧱 HTML UI Layer (Optional but Useful):
+#	  - The Jinja2 template system is integrated via FastAPI to serve HTML at `/orderbook/{symbol}`.
 #
-# ⚠️ Removal of FastAPI would break:
-#	  - Logging infrastructure
-#	  - REST endpoints (/health, /state)
-#	  - HTML visualization
+# ⚠️ If FastAPI were removed, the following features would break:
+#	 → Logging infrastructure
+#	 → REST endpoints (/health, /state)
+#	 → HTML visualization
 #
-#   - Even if not all FastAPI features are always used, its presence is mandatory.
-#   - Template directory is resolved via `resource_path()` for PyInstaller compatibility.
-#   - See also: RULESET.md for documentation and code conventions.
-# ───────────────────────────────────────────────────────────────────────────────
+# So although not all FastAPI features are always used, **its presence is structurally required**.
 
 APP = FastAPI(lifespan=lifespan)
 
@@ -2002,11 +1935,11 @@ async def orderbook_ui(request: Request, symbol: str):
 # to connected dashboard clients via WebSocket.
 #
 # Features:
-#   • Accepts WebSocket connections at `/ws/dashboard` (endpoint is extensible).
-#   • Enforces a global concurrent connection limit (`MAX_DASHBOARD_CONNECTIONS`)
-#	 with thread-safe tracking and immediate refusal of excess clients.
+#   • Accepts WebSocket connections at `/ws/dashboard` (extensible endpoint naming).
+#   • Enforces a global concurrent connection limit (`MAX_DASHBOARD_CONNECTIONS`),
+#     with thread-safe tracking and immediate refusal of excess clients.
 #   • Each session is limited to `MAX_DASHBOARD_SESSION_SEC` seconds (from .conf),
-#	 after which the connection is closed gracefully.
+#     after which the connection is closed gracefully.
 #   • Periodically sends a JSON object containing per-symbol median latency.
 #   • Robust to disconnects, task cancellations, and transient errors.
 #   • Implements exponential backoff (from .conf) for repeated connection failures.
@@ -2086,8 +2019,7 @@ async def websocket_dashboard(websocket: WebSocket):
 				import time
 				start_time = time.time()
 
-				# Main data push loop: send metrics until client disconnects, 
-				# error, or session timeout
+				# Main data push loop: send metrics until client disconnects, error, or session timeout
 
 				while True:
 
@@ -2108,13 +2040,8 @@ async def websocket_dashboard(websocket: WebSocket):
 						# Check session duration and close if exceeded
 
 						if time.time() - start_time > MAX_SESSION_SECONDS:
-							await websocket.close(
-								code=1000, reason="Session time limit reached."
-							)
-							logger.info(
-								f"[websocket_dashboard] "
-								f"Session time limit reached, connection closed."
-							)
+							await websocket.close(code=1000, reason="Session time limit reached.")
+							logger.info("[websocket_dashboard] Session time limit reached, connection closed.")
 							break
 
 						# Wait for the configured interval before sending the next update
@@ -2308,15 +2235,9 @@ if PROFILE_DURATION > 0:
 
 if __name__ == "__main__":
 
+	import asyncio
 	from uvicorn.config import Config
 	from uvicorn.server import Server
-	from concurrent.futures import ProcessPoolExecutor
-	import asyncio
-
-	# Use ProcessPoolExecutor for process-based parallelism to minimize GIL impact.
-
-	MAX_WORKERS	   = int(CONFIG.get("MAX_WORKERS", 8))
-	MERGE_EXECUTOR = ProcessPoolExecutor(max_workers=MAX_WORKERS)
 
 	# ───────────────────────────────────────────────────────────────────────────
 
@@ -2350,12 +2271,12 @@ if __name__ == "__main__":
 
 				for symbol in SYMBOLS:
 
-					asyncio.create_task(symbol_dump_snapshot(symbol))
+					asyncio.create_task(dump_snapshot_for_symbol(symbol))
 
 			except Exception as e:
 
 				logger.error(
-					f"[main] Failed to launch symbol_dump_snapshot tasks: {e}",
+					f"[main] Failed to launch dump_snapshot_for_symbol tasks: {e}",
 					exc_info=True
 				)
 
@@ -2380,12 +2301,12 @@ if __name__ == "__main__":
 
 			try:
 
-				asyncio.create_task(estimate_latency())
+				asyncio.create_task(estimate_latency_via_diff_depth())
 
 			except Exception as e:
 
 				logger.error(
-					f"[main] Failed to launch estimate_latency task: {e}",
+					f"[main] Failed to launch estimate_latency_via_diff_depth task: {e}",
 					exc_info=True
 				)
 
