@@ -1,80 +1,142 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Binance Dashboard</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 20px;
-        }
-        table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-        th, td {
-            border: 1px solid #ddd;
-            padding: 8px;
-            text-align: center;
-        }
-        th {
-            background-color: #f4f4f4;
-        }
-        tr:nth-child(even) {
-            background-color: #f9f9f9;
-        }
-    </style>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>Binance Dashboard</title>
+	<style>
+		body {
+			font-family: Arial, sans-serif;
+			margin: 20px;
+		}
+		table {
+			width: 100%;
+			border-collapse: collapse;
+			margin-bottom: 20px;
+		}
+		th, td {
+			border: 1px solid #ddd;
+			padding: 8px;
+			text-align: center;
+		}
+		th {
+			background-color: #f4f4f4;
+		}
+		tr:nth-child(even) {
+			background-color: #f9f9f9;
+		}
+		#lastUpdated {
+			margin-top: 10px;
+			font-size: 14px;
+			color: #555;
+		}
+		.section-title {
+			margin-top: 30px;
+			margin-bottom: 10px;
+			font-size: 18px;
+			font-weight: bold;
+		}
+	</style>
 </head>
 <body>
-    <h1>Binance Dashboard</h1>
-    <table id="medLatencyTable">
-        <thead>
-            <tr>
-                <th>Symbol</th>
-                <th>Median Latency (ms)</th>
-            </tr>
-        </thead>
-        <tbody>
-            <!-- Rows will be dynamically added here -->
-        </tbody>
-    </table>
+	<h1>Binance Dashboard</h1>
+	<div id="lastUpdated">Last Updated: N/A</div>
+	
+	<div class="section-title">Hardware Metrics</div>
+	<table id="hardwareMetricsTable">
+		<thead>
+			<tr>
+				<th>Metric</th>
+				<th>Value</th>
+			</tr>
+		</thead>
+		<tbody>
+			<tr>
+				<td>Network Usage</td>
+				<td id="networkUsage">0 Mbps</td>
+			</tr>
+			<tr>
+				<td>CPU Usage</td>
+				<td id="cpuUsage">0.0%</td>
+			</tr>
+			<tr>
+				<td>Memory Usage</td>
+				<td id="memoryUsage">0.0%</td>
+			</tr>
+			<tr>
+				<td>Storage Usage</td>
+				<td id="storageUsage">0.0%</td>
+			</tr>
+		</tbody>
+	</table>
 
-    <script>
-        const ws = new WebSocket("ws://localhost:8000/ws/dashboard");
+	<div class="section-title">Symbol Metrics</div>
+	<table id="symbolMetricsTable">
+		<thead>
+			<tr>
+				<th>Symbol</th>
+				<th>Median Latency (ms)</th>
+				<th>Flush Interval (ms)</th>
+			</tr>
+		</thead>
+		<tbody>
+			<!-- Rows will be dynamically added here -->
+		</tbody>
+	</table>
 
-        ws.onopen = () => {
-            console.log("WebSocket connection established.");
-        };
+	<script>
+		const ws = new WebSocket("ws://localhost:8000/ws/dashboard");
 
-        ws.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            const medLatency = data.med_latency;
+		ws.onopen = () => {
+			console.log("WebSocket connection established.");
+		};
 
-            const tableBody = document.querySelector("#medLatencyTable tbody");
-            tableBody.innerHTML = ""; // Clear existing rows
+		ws.onmessage = (event) => {
+			const data = JSON.parse(event.data);
+			const medLatency = data.med_latency;
+			const flushInterval = data.flush_interval;
+			const hardware = data.hardware;
+			const lastUpdated = data.last_updated;
 
-            for (const symbol in medLatency) {
-                const row = document.createElement("tr");
-                const symbolCell = document.createElement("td");
-                const latencyCell = document.createElement("td");
+			// Update hardware metrics
+			if (hardware) {
+				document.getElementById("networkUsage").textContent = `${hardware.network_mbps.toFixed(2)} Mbps`;
+				document.getElementById("cpuUsage").textContent = `${hardware.cpu_percent.toFixed(1)}%`;
+				document.getElementById("memoryUsage").textContent = `${hardware.memory_percent.toFixed(1)}%`;
+				document.getElementById("storageUsage").textContent = `${hardware.storage_percent.toFixed(1)}%`;
+			}
 
-                symbolCell.textContent = symbol.toUpperCase();
-                latencyCell.textContent = medLatency[symbol];
+			// Update symbol metrics table
+			const symbolTableBody = document.querySelector("#symbolMetricsTable tbody");
+			symbolTableBody.innerHTML = ""; // Clear existing rows
 
-                row.appendChild(symbolCell);
-                row.appendChild(latencyCell);
-                tableBody.appendChild(row);
-            }
-        };
+			for (const symbol in medLatency) {
+				const row = document.createElement("tr");
+				const symbolCell = document.createElement("td");
+				const latencyCell = document.createElement("td");
+				const flushCell = document.createElement("td");
 
-        ws.onerror = (error) => {
-            console.error("WebSocket error:", error);
-        };
+				symbolCell.textContent = symbol.toUpperCase();
+				latencyCell.textContent = medLatency[symbol];
+				flushCell.textContent = flushInterval[symbol];
 
-        ws.onclose = () => {
-            console.log("WebSocket connection closed.");
-        };
-    </script>
+				row.appendChild(symbolCell);
+				row.appendChild(latencyCell);
+				row.appendChild(flushCell);
+				symbolTableBody.appendChild(row);
+			}
+
+			const formattedTime = new Date(lastUpdated).toISOString().slice(0, 19) + "Z";
+			document.querySelector("#lastUpdated").textContent = `Last Updated: ${formattedTime}`;
+		};
+
+		ws.onerror = (error) => {
+			console.error("WebSocket error:", error);
+		};
+
+		ws.onclose = () => {
+			console.log("WebSocket connection closed.");
+		};
+	</script>
 </body>
 </html>

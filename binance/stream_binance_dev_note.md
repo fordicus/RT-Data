@@ -1,22 +1,11 @@
 # TODO
 
-## **1. 기타 기능 추가**
-- `symbol_dump_snapshot()` 함수의 실제 flush 빈도를 측정하여 모니터링 가능하도록 합니다. 다음의 전역 메모리에 `symbol_dump_snapshot()` 함수가 쓰기 동작을 하고, 대시보드 비동기 루틴이 ws 송출하면 될 것입니다:
-```python
-LATEST_JSON_FLUSH[symbol]   = time.time()
-JSON_FLUSH_INTERVAL[symbol] = time.time() - LATEST_JSON_FLUSH[symbol]
-```
-- 하드웨어 리소스 모니터링 구현:  
-	`cpu_usage`, `memory_usage`, `disk_usage`따위를 `psutil` 라이브러리를 사용하여 구현하고, WebSocket 엔드포인트에서 클라이언트에 전송해야 합니다.
-
-- **대시보드는 외부에서 브라우저를 통해 접근 가능해야 합니다.**
-- 개발 코스트를 최소화하되, 비동기/쓰레드 구현이 효율적이어야합니다.
-- 이제 stream을 구독할 Binance symbol들도 확장을 고려해보세요.
+> 이제 stream을 구독할 Binance symbol들도 확장을 고려해보세요.
 
 ---
-## 참고사항: 성능 최적화 염두에 둘 것
-> - 현재 단계에서는 `uvloop`를 적용하지 않지만, 추후 포팅 가능성을 염두에 두고 설계를 유연하게 유지합니다.  
-> - 데이터 직렬화/역직렬화에 `orjson`을 사용할 수 있도록 준비합니다.
+## 성능 최적화 염두에 둘 것
+> 현재 단계에서는 `uvloop`를 적용하지 않지만, 추후 포팅 가능성을 염두에 두고 설계를 유연하게 유지합니다.  
+> 데이터 직렬화/역직렬화에 `orjson`을 사용할 수 있도록 준비합니다.
 ### Performance Boost Ideas
 Rust로 전체 포팅하지 않고도 Python 환경에서 실질적인 성능 향상을 얻을 수 있는 실용적 엔지니어링 기법들:
 

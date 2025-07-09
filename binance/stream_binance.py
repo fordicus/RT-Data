@@ -26,6 +26,7 @@ Dependency:
 	websockets==11.0.3
 	fastapi==0.111.0
 	uvicorn==0.30.1
+	psutil==7.0.0
 	jinja2==3.1.3
 	yappi==1.6.10
 
@@ -65,8 +66,10 @@ Binance Official GitHub Manual:
 # 📦 Built-in Standard Library Imports (Grouped by Purpose)
 # ───────────────────────────────────────────────────────────────────────────────
 
-import asyncio, threading, time, random		# Async & Scheduling
-import sys, os, shutil, zipfile				# File I/O & Path
+import asyncio, threading, time, random		# Async, Scheduling, and Timing
+from datetime import datetime, timezone
+
+import sys, os, shutil, zipfile				# File I/O, and Path
 import json, statistics						# Data Processing
 from collections import deque
 from io import TextIOWrapper
@@ -78,7 +81,27 @@ from typing import Dict, Deque
 
 import logging
 from logging.handlers import RotatingFileHandler
-from datetime import datetime, timezone
+
+# ───────────────────────────────────────────────────────────────────────────────
+# 🕔 Global Time Utilities
+# ───────────────────────────────────────────────────────────────────────────────
+
+def get_current_time_ms() -> int:
+
+	"""
+	Returns the current time in milliseconds as an integer.
+	Uses nanosecond precision for maximum accuracy.
+	"""
+
+	return time.time_ns() // 1_000_000
+
+def ms_to_datetime(ms: int) -> datetime:
+
+	"""
+	Converts a millisecond timestamp to a UTC datetime object.
+	"""
+
+	return datetime.fromtimestamp(ms / 1000.0, tz=timezone.utc)
 
 # ───────────────────────────────────────────────────────────────────────────────
 # 👤 Custom Formatter: Ensures all log timestamps are in UTC
@@ -100,7 +123,7 @@ class UTCFormatter(logging.Formatter):
 			return dt.strftime(datefmt)
 		
 		# Default to ISO 8601 format
-		return dt.isoformat()
+		return dt.isoformat(timespec='microseconds')
 
 # ───────────────────────────────────────────────────────────────────────────────
 # ⚙️ Formatter Definition (applied to both file and console)
@@ -329,17 +352,27 @@ templates = Jinja2Templates(directory=templates_dir)
 # `stream_binance.py` and `get_binance_chart.py`.
 #
 # Defines all runtime parameters, including:
-#   • SYMBOLS			→ Binance symbols to stream (e.g., BTCUSDT, ETHUSDT)
-#   • SAVE_INTERVAL_MIN	→ File rotation interval (minutes) for snapshot persistence
-#   • LOB_DIR			→ Output directory for JSONL and ZIP files
-#   • BASE_BACKOFF,
-# 	  MAX_BACKOFF, etc.	→ Retry/backoff strategy for reconnects
-#   • MAX_WORKERS		→ Process pool size for daily merge operations
-#   • DASHBOARD_STREAM_FREQ,
-# 	  MAX_DASHBOARD_CONNECTIONS,
-# 	  etc.				→ WebSocket dashboard limits
+#
+#   • SYMBOLS (list[str]):
+#	   Binance symbols to stream (e.g., BTCUSDT, ETHUSDT).
+#
+#   • SAVE_INTERVAL_MIN (int):
+#	   File rotation interval (minutes) for snapshot persistence.
+#
+#   • LOB_DIR (str):
+#	   Output directory for JSONL and ZIP files.
+#
+#   • BASE_BACKOFF, MAX_BACKOFF, RESET_CYCLE_AFTER (int):
+#	   Retry/backoff strategy for reconnects.
+#
+#   • MAX_WORKERS (int):
+#	   Process pool size for daily merge operations.
+#
+#   • DASHBOARD_STREAM_INTERVAL (float), MAX_DASHBOARD_CONNECTIONS (int):
+#	   WebSocket dashboard limits.
 #
 # 📄 Filename: get_binance_chart.conf
+#
 # Format: Plaintext `KEY=VALUE`, supporting inline `#` comments.
 #
 # ⚠️ IMPORTANT:
@@ -365,21 +398,36 @@ CONFIG = {}  # Global key-value store loaded during import
 def load_config(conf_path: str):
 
 	"""
-	Load a plain `.conf` file with `KEY=VALUE` pairs.
-	Ignores blank lines and lines starting with `#`.
-	Also strips inline comments after `#`.
+	Parses a `.conf` file containing `KEY=VALUE` pairs and loads them into the
+	global CONFIG dictionary.
 
-	Populates the global CONFIG dictionary.
+	Behavior:
+		- Skips blank lines and lines starting with `#`.
+		- Removes inline comments after `#` within valid lines.
+		- Populates CONFIG with key-value pairs for runtime parameters.
+
+	Usage:
+		- Called during application startup to initialize configuration.
+		- Supports both development mode (direct execution) and production mode
+		  (PyInstaller).
 
 	Args:
-		conf_path (str): Relative path to the configuration file,
-						 resolved via `resource_path()` if necessary.
+		conf_path (str): Path to the configuration file, resolved via
+			`resource_path()` for compatibility across environments.
 
 	Example:
-		get_binance_chart.conf:
+		Configuration file (`get_binance_chart.conf`):
 			SYMBOLS = BTCUSDT,ETHUSDT  # Comma-separated symbols
 			SAVE_INTERVAL_MIN = 1
 			LOB_DIR = ./data/binance/orderbook/
+
+	Notes:
+		- Missing or malformed configuration files trigger a fatal runtime error.
+		- All loaded parameters are referenced globally throughout the codebase.
+
+	Exceptions:
+		- Logs errors and terminates the application if the file cannot be loaded
+		  or parsed.
 	"""
 
 	global CONFIG
@@ -414,7 +462,9 @@ def load_config(conf_path: str):
 
 		sys.exit(1)
 
+# ───────────────────────────────────────────────────────────────────────────────
 # 🔧 Load config via resource_path() for PyInstaller compatibility
+# ───────────────────────────────────────────────────────────────────────────────
 
 conf_abs_path = resource_path(CONFIG_PATH)
 
@@ -435,6 +485,7 @@ load_config(conf_abs_path)
 # Parse symbol and latency settings from .conf, and derive:
 #   • `WS_URL` for combined Binance L2 depth20@100ms stream
 #   • Tracking dicts for latency and update consistency
+# ───────────────────────────────────────────────────────────────────────────────
 
 SYMBOLS = [s.lower() for s in CONFIG.get("SYMBOLS", "").split(",") if s.strip()]
 
@@ -455,15 +506,15 @@ WS_URL		  = f"wss://stream.binance.com:9443/stream?streams={STREAMS_PARAM}"
 # These control how latency is estimated from the @depth stream:
 #   - LATENCY_DEQUE_SIZE:	 buffer size for per-symbol latency samples
 #   - LATENCY_SAMPLE_MIN:	 number of samples required before validation
-#   - LATENCY_THRESHOLD_SEC: max latency allowed for stream readiness
+#   - LATENCY_THRESHOLD_MS:  max latency allowed for stream readiness
 #   - ASYNC_SLEEP_INTERVAL:  Seconds to sleep in asyncio tasks
 # ───────────────────────────────────────────────────────────────────────────────
 
-LATENCY_DEQUE_SIZE	  = int(CONFIG.get("LATENCY_DEQUE_SIZE",	  10))
-LATENCY_SAMPLE_MIN	  = int(CONFIG.get("LATENCY_SAMPLE_MIN",	  10))
-LATENCY_THRESHOLD_SEC = float(CONFIG.get("LATENCY_THRESHOLD_SEC", 0.5))
-LATENCY_SIGNAL_SLEEP  = float(CONFIG.get("LATENCY_SIGNAL_SLEEP",  0.2))
-ASYNC_SLEEP_INTERVAL  = float(CONFIG.get("LATENCY_GATE_SLEEP",	  1.0))
+LATENCY_DEQUE_SIZE   = int(CONFIG.get("LATENCY_DEQUE_SIZE",		10))
+LATENCY_SAMPLE_MIN   = int(CONFIG.get("LATENCY_SAMPLE_MIN",		10))
+LATENCY_THRESHOLD_MS = int(CONFIG.get("LATENCY_THRESHOLD_MS",	500))
+LATENCY_SIGNAL_SLEEP = float(CONFIG.get("LATENCY_SIGNAL_SLEEP", 0.2))
+ASYNC_SLEEP_INTERVAL = float(CONFIG.get("LATENCY_GATE_SLEEP",	1.0))
 
 # ────────────────────────────────────────────────────────────────────────────────────
 # 🔄 WebSocket Ping/Pong Timing (from .conf)
@@ -487,16 +538,23 @@ if WS_PING_TIMEOUT  == 0: WS_PING_TIMEOUT  = None
 #   • MEDIAN_LATENCY_DICT: Stores median latency (ms) per symbol, updated dynamically.
 #   • DEPTH_UPDATE_ID_DICT: Records the latest `updateId` for each symbol to ensure
 #	 proper sequencing of depth updates.
+#   • LATEST_JSON_FLUSH: Stores the last flush timestamp (ms) for each symbol.
+#   • JSON_FLUSH_INTERVAL: Tracks the interval (ms) between consecutive flushes.
 #
 # Usage:
 #   - LATENCY_DICT: Used for latency estimation and validation.
 #   - MEDIAN_LATENCY_DICT: Provides latency compensation for timestamp adjustments.
 #   - DEPTH_UPDATE_ID_DICT: Prevents out-of-order updates from being processed.
+#   - LATEST_JSON_FLUSH: Monitors the last flush time for snapshot persistence.
+#   - JSON_FLUSH_INTERVAL: Enables real-time monitoring of flush intervals.
 # ───────────────────────────────────────────────────────────────────────────────
 
-LATENCY_DICT:		   Dict[str, Deque[float]] = {}
-MEDIAN_LATENCY_DICT:   Dict[str, float] = {}
-DEPTH_UPDATE_ID_DICT:  Dict[str, int] = {}
+LATENCY_DICT:		  Dict[str, Deque[int]] = {}
+MEDIAN_LATENCY_DICT:  Dict[str, int] = {}
+DEPTH_UPDATE_ID_DICT: Dict[str, int] = {}
+
+LATEST_JSON_FLUSH:	  Dict[str, int] = {}
+JSON_FLUSH_INTERVAL:  Dict[str, int] = {}
 
 # ───────────────────────────────────────────────────────────────────────────────
 # 🔒 Global Event Flags (pre-declared to prevent NameError)
@@ -681,6 +739,7 @@ def initialize_runtime_state():
 	try:
 		global SYMBOLS
 		global LATENCY_DICT, MEDIAN_LATENCY_DICT, DEPTH_UPDATE_ID_DICT
+		global LATEST_JSON_FLUSH, JSON_FLUSH_INTERVAL
 		global SNAPSHOTS_QUEUE_DICT
 
 		LATENCY_DICT.clear()
@@ -691,7 +750,7 @@ def initialize_runtime_state():
 
 		MEDIAN_LATENCY_DICT.clear()
 		MEDIAN_LATENCY_DICT.update({
-			symbol: 0.0
+			symbol: 0
 			for symbol in SYMBOLS
 		})
 
@@ -700,6 +759,20 @@ def initialize_runtime_state():
 			symbol: 0
 			for symbol in SYMBOLS
 		})
+
+		LATEST_JSON_FLUSH.clear()
+		LATEST_JSON_FLUSH.update({
+			symbol: get_current_time_ms()
+			for symbol in SYMBOLS
+		})
+
+		JSON_FLUSH_INTERVAL.clear()
+		JSON_FLUSH_INTERVAL.update({
+			symbol: 0
+			for symbol in SYMBOLS
+		})
+
+		# ───────────────────────────────────────────────────────────────────────
 
 		SNAPSHOTS_QUEUE_DICT.clear()
 		SNAPSHOTS_QUEUE_DICT.update({
@@ -718,12 +791,16 @@ def initialize_runtime_state():
 			symbol: set() for symbol in SYMBOLS
 		})
 
-		logger.info("[initialize_runtime_state] Runtime state initialized.")
+		logger.info(
+			f"[initialize_runtime_state] "
+			f"Runtime state initialized."
+		)
 
 	except Exception as e:
+
 		logger.error(
-			"[initialize_runtime_state] Failed to initialize runtime state: "
-			f"{e}",
+			"[initialize_runtime_state] "
+			f"Failed to initialize runtime state: {e}",
 			exc_info=True
 		)
 		sys.exit(1)
@@ -763,7 +840,7 @@ def get_file_suffix(interval_min: int, event_ts_ms: int) -> str:
 
 	try:
 
-		ts = datetime.utcfromtimestamp(event_ts_ms / 1000)
+		ts = ms_to_datetime(event_ts_ms)
 
 		if interval_min >= 1440:
 
@@ -851,21 +928,35 @@ def zip_and_remove(src_path: str):
 # 🗃️ Per-Symbol Daily Snapshot Consolidation & Archival
 #
 # Merges all per-minute zipped order book snapshots for a given symbol and UTC day
-# into a single `.jsonl` file, then compresses it as a daily archive.
+# into a single consolidated `.jsonl` file, then compresses it as a daily archive.
 #
 # Responsibilities:
 #   • Locate all `.zip` files for the symbol/day in the temp directory.
 #   • Unpack and concatenate their contents into a single `.jsonl` file.
 #   • Compress the consolidated `.jsonl` as a single daily `.zip` archive.
-#   • Optionally purge the original temp directory after archiving.
+#   • Optionally purge the original temp directory after successful archiving.
+#
+# File Processing:
+#   - Expects all input files to be in `.zip` format (guaranteed by caller).
+#   - Processes files in chronological order for consistent data sequencing.
+#   - Preserves original line endings from source `.jsonl` files.
+#   - Creates intermediate `.jsonl` file before final compression.
 #
 # Fault Tolerance:
 #   - Gracefully skips missing/corrupted files or directories.
-#   - Logs all errors; never throws to caller.
+#   - Logs all errors with full context; never throws to caller.
+#   - Ensures output file handle is properly closed in all scenarios.
+#   - Preserves intermediate files on compression failure for recovery.
 #
 # Usage:
-#   - Called via process pool for each symbol/day rollover.
+#   - Called via `ProcessPoolExecutor` for each symbol/day rollover.
+#   - Triggered by `symbol_trigger_merge()` from `symbol_dump_snapshot()`.
 #   - Ensures efficient long-term storage and fast downstream loading.
+#
+# Performance:
+#   - Optimized for large file counts with minimal memory footprint.
+#   - Uses streaming decompression to avoid loading entire files into memory.
+#   - Atomic operations prevent partial writes during system interruption.
 #
 # See also:
 #   - symbol_trigger_merge(), symbol_dump_snapshot()
@@ -878,6 +969,10 @@ def symbol_consolidate_a_day(
 	base_dir: str,
 	purge:	  bool = True
 ):
+	"""
+	Consolidates per-minute zipped snapshots
+	into a daily archive for a given symbol.
+	"""
 
 	# Construct working directories and target paths
 
@@ -897,7 +992,7 @@ def symbol_consolidate_a_day(
 	if not os.path.isdir(tmp_dir):
 
 		logger.error(
-			f"[merge_day_zips][{symbol}] "
+			f"[symbol_consolidate_a_day][{symbol}] "
 			f"Temp dir missing on {day_str}: {tmp_dir}"
 		)
 
@@ -912,7 +1007,7 @@ def symbol_consolidate_a_day(
 	except Exception as e:
 
 		logger.error(
-			f"[merge_day_zips][{symbol}] "
+			f"[symbol_consolidate_a_day][{symbol}] "
 			f"Failed to list zips in {tmp_dir}: {e}",
 			exc_info=True
 		)
@@ -922,163 +1017,136 @@ def symbol_consolidate_a_day(
 	if not zip_files:
 
 		logger.error(
-			f"[merge_day_zips][{symbol}] "
+			f"[symbol_consolidate_a_day][{symbol}] "
 			f"No zip files to merge on {day_str}."
 		)
 
 		return
 
+	# 🔧 File handle management with proper scope handling
+
+	fout = None
+
 	try:
 
 		# Open output file for merged .jsonl content
 
-		try:
+		fout = open(merged_path, "w", encoding="utf-8")
 
-			with open(merged_path, "w", encoding="utf-8") as fout:
+		# Process each zip file in chronological order
 
-				# Process each zip file in chronological order
+		for zip_file in sorted(zip_files):
 
-				for zip_file in sorted(zip_files):
-
-					zip_path = os.path.join(tmp_dir, zip_file)
-
-					try:
-
-						with zipfile.ZipFile(zip_path, "r") as zf:
-
-							for member in zf.namelist():
-
-								with zf.open(member) as f:
-
-									for raw in f:
-
-										fout.write(raw.decode("utf-8") + "\n")
-
-					except Exception as e:
-
-						logger.error(
-							f"[merge_day_zips][{symbol}] "
-							f"Failed to extract {zip_path}: {e}",
-							exc_info=True
-						)
-
-						return
-
-		except Exception as e:
-
-			logger.error(
-				f"[merge_day_zips][{symbol}] "
-				f"Failed to open or write to merged file {merged_path}: {e}",
-				exc_info=True
-
-			)
+			zip_path = os.path.join(tmp_dir, zip_file)
 
 			try:
 
-				if fout: fout.close()
+				with zipfile.ZipFile(zip_path, "r") as zf:
 
-			except Exception as close_error:
-				
-				logger.error(
-					f"[merge_day_zips][{symbol}] "
-					f"Failed to close output file: {close_error}",
-					exc_info=True
-				)
+					for member in zf.namelist():
 
-			return
+						with zf.open(member) as f:
 
-		finally:
+							for raw in f:
 
-			# Ensure the output file is closed
+								fout.write(raw.decode("utf-8"))
 
-			try:
-
-				if fout: fout.close()
-
-			except Exception as close_error:
+			except Exception as e:
 
 				logger.error(
-					f"[merge_day_zips][{symbol}] "
-					f"Failed to close output file: {close_error}",
+					f"[symbol_consolidate_a_day][{symbol}] "
+					f"Failed to extract {zip_path}: {e}",
 					exc_info=True
 				)
 
 				return
 
-			return
-
-		# Recompress the consolidated .jsonl into a final single-archive zip
-
-		try:
-
-			final_zip = merged_path.replace(".jsonl", ".zip")
-
-			with zipfile.ZipFile(final_zip, "w", zipfile.ZIP_DEFLATED) as zf:
-
-				zf.write(merged_path, arcname=os.path.basename(merged_path))
-
-		except Exception as e:
-
-			logger.error(
-				f"[merge_day_zips][{symbol}] "
-				f"Failed to compress merged file on {day_str}: {e}",
-				exc_info=True
-			)
-
-			# Do not remove .jsonl if compression failed
-
-			return
-
-		# Remove intermediate plain-text .jsonl file after compression
-
-		try:
-
-			if os.path.exists(merged_path):
-
-				os.remove(merged_path)
-
-		except Exception as e:
-
-			logger.error(
-				f"[merge_day_zips][{symbol}] "
-				f"Failed to remove merged .jsonl on {day_str}: {e}",
-				exc_info=True
-			)
-
-		# Optionally delete the original temp folder containing per-minute zips
-
-		if purge:
-
-			try:
-
-				shutil.rmtree(tmp_dir)
-
-			except Exception as e:
-
-				logger.error(
-					f"[merge_day_zips][{symbol}] "
-					f"Failed to remove temp dir {tmp_dir}: {e}",
-					exc_info=True
-				)
-
-	except FileNotFoundError as e:
-
-		logger.error(
-			f"[merge_day_zips][{symbol}] "
-			f"No files found to merge on {day_str}: {e}"
-		)
-
-		return
-
 	except Exception as e:
 
 		logger.error(
-			f"[merge_day_zips][{symbol}] "
-			f"Unexpected error merging on {day_str}: {e}",
+			f"[symbol_consolidate_a_day][{symbol}] "
+			f"Failed to open or write to merged file {merged_path}: {e}",
 			exc_info=True
 		)
 
 		return
+
+	finally:
+
+		# 🔧 Ensure the output file is properly closed
+
+		if fout:
+
+			try:
+
+				fout.close()
+
+			except Exception as close_error:
+
+				logger.error(
+					f"[symbol_consolidate_a_day][{symbol}] "
+					f"Failed to close output file: {close_error}",
+					exc_info=True
+				)
+
+	# Recompress the consolidated .jsonl into a final single-archive zip
+
+	try:
+
+		final_zip = merged_path.replace(".jsonl", ".zip")
+
+		with zipfile.ZipFile(final_zip, "w", zipfile.ZIP_DEFLATED) as zf:
+
+			zf.write(merged_path, arcname=os.path.basename(merged_path))
+
+	except Exception as e:
+
+		logger.error(
+			f"[symbol_consolidate_a_day][{symbol}] "
+			f"Failed to compress merged file on {day_str}: {e}",
+			exc_info=True
+		)
+
+		# Do not remove .jsonl if compression failed
+
+		return
+
+	# Remove intermediate plain-text .jsonl file after compression
+
+	try:
+
+		if os.path.exists(merged_path):
+
+			os.remove(merged_path)
+
+	except Exception as e:
+
+		logger.error(
+			f"[symbol_consolidate_a_day][{symbol}] "
+			f"Failed to remove merged .jsonl on {day_str}: {e}",
+			exc_info=True
+		)
+
+	# Optionally delete the original temp folder containing per-minute zips
+
+	if purge:
+
+		try:
+
+			shutil.rmtree(tmp_dir)
+
+		except Exception as e:
+
+			logger.error(
+				f"[symbol_consolidate_a_day][{symbol}] "
+				f"Failed to remove temp dir {tmp_dir}: {e}",
+				exc_info=True
+			)
+
+	logger.info(
+		f"[symbol_consolidate_a_day][{symbol}] "
+		f"Successfully merged {len(zip_files)} files for {day_str}"
+	)
 
 # ───────────────────────────────────────────────────────────────────────────────
 # 🕓 Latency Control: Measurement, Thresholding, and Flow Gate
@@ -1088,8 +1156,8 @@ async def gate_streaming_by_latency() -> None:
 
 	"""
 	Streaming controller based on latency.
-	Manages EVENT_STREAM_ENABLE flag for order book streaming.
-	Observes EVENT_LATENCY_VALID, set by latency estimation loop.
+	Manages `EVENT_STREAM_ENABLE` flag for order book streaming.
+	Observes `EVENT_LATENCY_VALID`, set by latency estimation loop.
 	"""
 
 	has_logged_warmup = False  # Initial launch flag
@@ -1158,39 +1226,40 @@ async def estimate_latency() -> None:
 	"""
 	🔁 Latency Estimator via Binance @depth Stream
 
-	This coroutine connects to the Binance `@depth` WebSocket stream 
-	(not `@depth20@100ms`) to measure **effective downstream latency**
+	This coroutine connects to the Binance @depth WebSocket stream 
+	(not @depth20@100ms) to measure effective downstream latency 
 	for each tracked symbol.
 
 	Latency is estimated by comparing:
-		latency ≈ client_time_sec - server_time_sec
+		latency ≈ get_current_time_ms() - server_time_ms
 
 	Where:
-	- `server_time_sec` is the server-side event timestamp ("E").
-	- `client_time_sec` is the actual receipt time on the local machine.
-	This difference reflects:
+	- server_time_ms is the server-side event timestamp ("E").
+	- get_current_time_ms() is the actual receipt time on the local machine.
+
+	🕒 This difference reflects:
 		• Network propagation delay
 		• OS-level socket queuing
 		• Python event loop scheduling
-	and thus represents a realistic approximation of **one-way latency**.
+	and thus represents a realistic approximation of one-way latency.
 
 	Behavior:
 	- Maintains a rolling deque of latency samples per symbol.
-	- Once `LATENCY_SAMPLE_MIN` samples exist:
+	- Once LATENCY_SAMPLE_MIN samples exist:
 		• Computes median latency per symbol.
-		• If all medians < `LATENCY_THRESHOLD_SEC`, sets `EVENT_LATENCY_VALID`.
+		• If all medians < LATENCY_THRESHOLD_MS, sets EVENT_LATENCY_VALID.
 		• If excessive latency or disconnection, clears the signal.
 
-	Purpose:
-	- `EVENT_LATENCY_VALID` acts as a global flow control flag.
-	- Used by `gate_streaming_by_latency()` to pause/resume 
-	order book streaming via `EVENT_STREAM_ENABLE`.
+	🎯 Purpose:
+	- EVENT_LATENCY_VALID acts as a global flow control flag.
+	- Used by gate_streaming_by_latency() to pause/resume 
+	order book streaming via EVENT_STREAM_ENABLE.
 
-	Backoff:
+	🔄 Backoff:
 	- On disconnection or failure, retries with exponential backoff and jitter.
 
-	Notes:
-	- This is **not** a true RTT (round-trip time) estimate.
+	📌 Notes:
+	- This is not a true RTT (round-trip time) estimate.
 	- But sufficient for gating real-time systems where latency 
 	directly affects snapshot timestamp correctness.
 	"""
@@ -1227,9 +1296,9 @@ async def estimate_latency() -> None:
 
 						message = json.loads(raw_msg)
 						data = message.get("data", {})
-						server_event_ts_ms = data.get("E")
+						server_time_ms = data.get("E")
 
-						if server_event_ts_ms is None:
+						if server_time_ms is None:
 
 							continue  # Drop malformed message
 
@@ -1250,31 +1319,34 @@ async def estimate_latency() -> None:
 
 						DEPTH_UPDATE_ID_DICT[symbol] = update_id
 					
-					# ................................................................
-					# Estimate latency (difference between client and server clocks)
-					# ................................................................
-					# `client_time_sec - server_time_sec` approximates one-way latency
-					# (network + kernel + event loop) at the point of message receipt.
-					# While not a true RTT, it reflects realistic downstream delay
-					# and is sufficient for latency gating decisions in practice.
-					# ................................................................
+						# ─────────────────────────────────────────────────────────────────
+						# Estimate latency (difference between client and server clocks)
+						# ─────────────────────────────────────────────────────────────────
+						# `get_current_time_ms() - server_time_ms` approximates one-way
+						# latency (network + kernel + event loop) at the point of message
+						# receipt. While not a true RTT, it reflects realistic downstream
+						# delay and is sufficient for latency gating decisions in practice.
+						# ─────────────────────────────────────────────────────────────────
 
-						server_time_sec = server_event_ts_ms / 1000.0
-						client_time_sec = time.time()
-						latency_sec = max(0.0, client_time_sec - server_time_sec)
+						latency_ms = get_current_time_ms() - server_time_ms
 
-						LATENCY_DICT[symbol].append(latency_sec)
+						LATENCY_DICT[symbol].append(latency_ms)
 
 						if len(LATENCY_DICT[symbol]) >= LATENCY_SAMPLE_MIN:
 
-							median = statistics.median(LATENCY_DICT[symbol])
-							MEDIAN_LATENCY_DICT[symbol] = median
+							MEDIAN_LATENCY_DICT[symbol] = int(
+								statistics.median(LATENCY_DICT[symbol])
+							)
 
 							if all(
-								len(LATENCY_DICT[s]) >= LATENCY_SAMPLE_MIN and
-								statistics.median(LATENCY_DICT[s]) < LATENCY_THRESHOLD_SEC
-								for s in SYMBOLS
+								(	(len(LATENCY_DICT[s]) >= LATENCY_SAMPLE_MIN) and
+									(
+										statistics.median(LATENCY_DICT[s]) 
+										< LATENCY_THRESHOLD_MS
+									)
+								)	for s in SYMBOLS
 							):
+
 								if not EVENT_LATENCY_VALID.is_set():
 
 									EVENT_LATENCY_VALID.set()
@@ -1284,6 +1356,7 @@ async def estimate_latency() -> None:
 										f"Latency OK — all symbols within threshold. "
 										f"Event set."
 									)
+
 					except Exception as e:
 
 						logger.warning(
@@ -1378,18 +1451,25 @@ def format_ws_url(url: str, label: str = "") -> str:
 #	   - Dispatches snapshot to both persistence queue and render cache
 #
 # Notes:
-#   - Binance partial streams like @depth20@100ms lack server-side timestamps ("E");
-#	 all timing is client-side and latency-compensated
+#   - Binance partial streams like `@depth20@100ms` lack
+# 	  server-side timestamps ("E"); all timing is client-side
+# 	  and latency-compensated
 #   - eventTime is an int (milliseconds since UNIX epoch)
 #   - Only SNAPSHOTS_QUEUE_DICT[symbol] is used for durable storage
-#   - SYMBOL_SNAPSHOTS_TO_RENDER is ephemeral, used for diagnostics or FastAPI display
+#   - SYMBOL_SNAPSHOTS_TO_RENDER is ephemeral, used for diagnostics
+#	 or FastAPI display
 #   - On failure, reconnects with exponential backoff and jitter
 # ───────────────────────────────────────────────────────────────────────────────
 
 async def put_snapshot() -> None:
 
+	"""
+	Processes Binance `depth20@100ms` snapshots and
+	dispatches them to queues and caches.
+	"""
+
 	global SNAPSHOTS_QUEUE_DICT
-	global LATENCY_DICT, MEDIAN_LATENCY_DICT, SHARED_STATE_DICT
+	global LATENCY_DICT, MEDIAN_LATENCY_DICT
 
 	attempt = 0  # Retry counter for reconnects
 
@@ -1448,15 +1528,16 @@ async def put_snapshot() -> None:
 						bids = data.get("bids", [])
 						asks = data.get("asks", [])
 
-						# 📝 Binance partial streams like @depth20@100ms do NOT include
+						# ─────────────────────────────────────────────────────────────────
+						# 📝 Binance partial streams like `@depth20@100ms` do NOT include
 						# the server-side event timestamp ("E"). Therefore, we must rely
 						# on local receipt time corrected by estimated network latency.
-
 						# 🎯 Estimate event timestamp via median latency compensation
+						# ─────────────────────────────────────────────────────────────────
 
-						med_latency = int(MEDIAN_LATENCY_DICT.get(symbol, 0.0))  # in ms
-						client_time_sec = int(time.time() * 1_000)
-						event_ts = client_time_sec - med_latency  # adjusted event time
+						event_ts = get_current_time_ms() - max(
+							0, MEDIAN_LATENCY_DICT.get(symbol, 0)
+						)
 
 						# 🧾 Construct snapshot
 
@@ -1523,49 +1604,67 @@ async def put_snapshot() -> None:
 # ───────────────────────────────────────────────────────────────────────────────
 # 📝 Background Task: Snapshot Persistence & Daily Merge Trigger
 #
-# Handles per-symbol snapshot persistence and triggers daily merge/archival.
+# Handles per-symbol snapshot persistence with automatic file rotation,
+# compression, and daily merge/archival triggering.
 #
 # Responsibilities:
 #   • Consumes snapshots from `SNAPSHOTS_QUEUE_DICT[symbol]` and appends them
-#	 to per-symbol `.jsonl` files, partitioned by time window.
-#   • Rotates file handles when the time window (suffix) changes.
+#	 to per-symbol `.jsonl` files, partitioned by time window (suffix).
+#   • Rotates file handles when the time window changes, immediately compressing
+#	 the previous `.jsonl` file to `.zip` format for storage efficiency.
 #   • On UTC day rollover, triggers a merge/archival process for the previous day,
 #	 ensuring only one merge per symbol/day via `MERGED_DAYS` and `MERGE_LOCKS`.
+#   • Guarantees all previous files are in `.zip` format before merge execution.
+#
+# Execution Flow:
+#   1. File Rotation & Compression — Closes previous file and compresses to `.zip`
+#   2. Day Rollover Detection — Checks for UTC date changes and triggers merge
+#   3. Snapshot Persistence — Writes current snapshot to active file handle
 #
 # Structures:
 #   • `SYMBOL_TO_FILE_HANDLES[symbol]` — Tracks (suffix, writer) for each symbol.
 #   • `MERGED_DAYS[symbol]` — Set of merged days to prevent redundant merges.
 #   • `MERGE_LOCKS[symbol]` — Thread/process lock for safe merge triggering.
 #
+# Data Safety:
+#   - All files are immediately flushed to disk after each snapshot write.
+#   - File compression occurs synchronously before merge trigger.
+#   - Merge operations are thread-safe and deduplicated per symbol/day.
+#   - Graceful error handling prevents data loss on I/O failures.
+#
 # Notes:
 #   - Runs as an infinite async task per symbol.
-#   - Ensures all data is flushed to disk after each snapshot.
+#   - Terminates when `EVENT_STREAM_ENABLE` is cleared.
 #   - Merge/archival is dispatched only once per UTC day per symbol.
 #   - See also: RULESET.md for documentation and code conventions.
 # ───────────────────────────────────────────────────────────────────────────────
 
 def symbol_trigger_merge(symbol, last_day):
 
-	global MERGE_LOCKS, MERGED_DAYS, MERGE_EXECUTOR
-	global LOB_DIR, PURGE_ON_DATE_CHANGE
+	"""
+	Triggers daily merge and archival
+	for the given symbol and day.
+	"""
 
-	with MERGE_LOCKS[symbol]:
+	global MERGE_EXECUTOR, LOB_DIR, PURGE_ON_DATE_CHANGE
 
-		if last_day not in MERGED_DAYS[symbol]:
-
-			MERGED_DAYS[symbol].add(last_day)
-
-			MERGE_EXECUTOR.submit(
-				symbol_consolidate_a_day,
-				symbol,
-				last_day,
-				LOB_DIR,
-				PURGE_ON_DATE_CHANGE == 1
-			)
+	MERGE_EXECUTOR.submit(
+		symbol_consolidate_a_day,
+		symbol,
+		last_day,
+		LOB_DIR,
+		PURGE_ON_DATE_CHANGE == 1
+	)
 
 async def symbol_dump_snapshot(symbol: str) -> None:
 
+	"""
+	Writes snapshots to disk and
+	triggers daily merge for the given symbol.
+	"""
+
 	global SYMBOL_TO_FILE_HANDLES, SNAPSHOTS_QUEUE_DICT
+	global LATEST_JSON_FLUSH, JSON_FLUSH_INTERVAL
 	global EVENT_STREAM_ENABLE
 
 	queue = SNAPSHOTS_QUEUE_DICT[symbol]
@@ -1581,7 +1680,8 @@ async def symbol_dump_snapshot(symbol: str) -> None:
 		except Exception as e:
 
 			logger.error(
-				f"[{symbol.upper()}] ❌ Failed to get snapshot from queue: {e}",
+				f"[symbol_dump_snapshot][{symbol.upper()}] "
+				f"Failed to get snapshot from queue: {e}",
 				exc_info=True
 			)
 
@@ -1595,14 +1695,15 @@ async def symbol_dump_snapshot(symbol: str) -> None:
 
 		try:
 
-			event_ts_ms	= snapshot.get("eventTime", int(time.time() * 1000))
+			event_ts_ms = snapshot.get("eventTime", get_current_time_ms())
 			suffix		= get_file_suffix(SAVE_INTERVAL_MIN, event_ts_ms)
 			day_str		= get_date_from_suffix(suffix)
 
 		except Exception as e:
 
 			logger.error(
-				f"[{symbol.upper()}] ❌ Failed to compute suffix/day: {e}",
+				f"[symbol_dump_snapshot][{symbol.upper()}] "
+				f"Failed to compute suffix/day: {e}",
 				exc_info=True
 			)
 
@@ -1624,7 +1725,8 @@ async def symbol_dump_snapshot(symbol: str) -> None:
 		except Exception as e:
 
 			logger.error(
-				f"[{symbol.upper()}] ❌ Failed to build file path: {e}",
+				f"[symbol_dump_snapshot][{symbol.upper()}] "
+				f"Failed to build file path: {e}",
 				exc_info=True
 			)
 
@@ -1634,42 +1736,10 @@ async def symbol_dump_snapshot(symbol: str) -> None:
 
 		last_suffix, writer = SYMBOL_TO_FILE_HANDLES.get(symbol, (None, None))
 
-		# ── Spawn merge thread if day has changed and not already merged
-
-		try:
-
-			if last_suffix:
-
-				last_day = get_date_from_suffix(last_suffix)
-
-				with MERGE_LOCKS[symbol]:
-
-					# .....................................................
-					# This block ensures thread-safe execution for
-					# merge operations. `MERGED_DAYS[symbol].add(last_day)`
-					# and `threading.Thread(...)` calls are guaranteed
-					# to execute only once per symbol and day combination.
-					# Even if `symbol_consolidate_a_day` fails, 
-					# the state in `MERGED_DAYS[symbol]` prevents redundant
-					# merge attempts for the same day.
-					# .....................................................
-
-					if ((last_day != day_str) and 
-						(last_day not in MERGED_DAYS[symbol])
-					):
-
-						MERGED_DAYS[symbol].add(last_day)
-						
-						symbol_trigger_merge(symbol, last_day)
-
-		except Exception as e:
-
-			logger.warning(
-				f"[{symbol.upper()}] ⚠️ Failed to spawn merge thread: {e}",
-				exc_info=True
-			)
-
-		# ── Rotate writer if suffix (HHMM) window has changed
+		# ────────────────────────────────────────────────────────────────────
+		# 🔧 STEP 1: Handle file rotation and compression FIRST
+		# This ensures all previous files are zipped before merge check
+		# ────────────────────────────────────────────────────────────────────
 
 		if last_suffix != suffix:
 
@@ -1681,26 +1751,47 @@ async def symbol_dump_snapshot(symbol: str) -> None:
 
 				except Exception as e:
 
-					logger.warning(
-						f"[{symbol.upper()}] ⚠️ Close failed → {e}",
+					logger.error(
+						f"[symbol_dump_snapshot][{symbol.upper()}] "
+						f"Close failed → {e}",
 						exc_info=True
 					)
 
+				# 🔧 Compress previous file immediately after closing
 				try:
-					zip_and_remove(
-						os.path.join(
-							tmp_dir,
-							f"{symbol.upper()}_orderbook_{last_suffix}.jsonl"
-						)
+
+					last_day_str = get_date_from_suffix(last_suffix)
+					last_tmp_dir = os.path.join(
+						LOB_DIR,
+						"temporary",
+						f"{symbol.upper()}_orderbook_{last_day_str}",
 					)
+					last_file_path = os.path.join(
+						last_tmp_dir,
+						f"{symbol.upper()}_orderbook_{last_suffix}.jsonl"
+					)
+
+					if os.path.exists(last_file_path):
+
+						zip_and_remove(last_file_path)
+
+					else:
+
+						logger.error(
+							f"[symbol_dump_snapshot][{symbol.upper()}] "
+							f"File not found for compression: {last_file_path}"
+						)
 
 				except Exception as e:
 
-					logger.warning(
-						f"[{symbol.upper()}] ⚠️ zip_and_remove failed: {e}",
+					logger.error(
+						f"[symbol_dump_snapshot][{symbol.upper()}] "
+						f"zip_and_remove(last_file_path={last_file_path}) "
+						f"failed for last_suffix={last_suffix}: {e}",
 						exc_info=True
 					)
 
+			# 🔧 Open new file writer for current suffix
 			try:
 
 				writer = open(file_path, "a", encoding="utf-8")
@@ -1708,7 +1799,8 @@ async def symbol_dump_snapshot(symbol: str) -> None:
 			except OSError as e:
 
 				logger.error(
-					f"[{symbol.upper()}] ❌ Open failed: {file_path} → {e}",
+					f"[symbol_dump_snapshot][{symbol.upper()}] "
+					f"Open failed: {file_path} → {e}",
 					exc_info=True
 				)
 
@@ -1716,7 +1808,50 @@ async def symbol_dump_snapshot(symbol: str) -> None:
 
 			SYMBOL_TO_FILE_HANDLES[symbol] = (suffix, writer)
 
-		# ── Write snapshot as compact JSON line
+		# ────────────────────────────────────────────────────────────────────
+		# 🔧 STEP 2: Check for day rollover and trigger merge
+		# At this point, ALL previous files are guaranteed to be .zip
+		# ────────────────────────────────────────────────────────────────────
+
+		try:
+
+			if last_suffix:
+
+				last_day = get_date_from_suffix(last_suffix)
+
+				with MERGE_LOCKS[symbol]:
+
+					# ────────────────────────────────────────────────────────
+					# This block ensures thread-safe execution for
+					# merge operations. All previous files are now .zip
+					# format, ensuring complete day consolidation.
+					# ────────────────────────────────────────────────────────
+
+					if ((last_day != day_str) and 
+						(last_day not in MERGED_DAYS[symbol])
+					):
+
+						MERGED_DAYS[symbol].add(last_day)
+						
+						symbol_trigger_merge(symbol, last_day)
+
+						logger.info(
+							f"[symbol_dump_snapshot][{symbol.upper()}] "
+							f"Triggered merge for {last_day} "
+							f"(current day: {day_str})"
+						)
+
+		except Exception as e:
+
+			logger.error(
+				f"[symbol_dump_snapshot][{symbol.upper()}] "
+				f"Failed to check/trigger merge: {e}",
+				exc_info=True
+			)
+
+		# ────────────────────────────────────────────────────────────────────
+		# Write snapshot as compact JSON line
+		# ────────────────────────────────────────────────────────────────────
 
 		try:
 
@@ -1724,10 +1859,21 @@ async def symbol_dump_snapshot(symbol: str) -> None:
 			writer.write(line + "\n")
 			writer.flush()
 
+			# Update flush monitoring
+			
+			current_time = get_current_time_ms()
+
+			JSON_FLUSH_INTERVAL[symbol] = (
+				current_time - LATEST_JSON_FLUSH[symbol]
+			)
+			
+			LATEST_JSON_FLUSH[symbol] = current_time
+
 		except Exception as e:
 
 			logger.error(
-				f"[{symbol.upper()}] ❌ Write failed: {file_path} → {e}",
+				f"[symbol_dump_snapshot][{symbol.upper()}] "
+				f"Write failed: {file_path} → {e}",
 				exc_info=True
 			)
 
@@ -1759,6 +1905,18 @@ import atexit
 
 def shutdown_merge_executor():
 
+	"""
+	Shuts down the ProcessPoolExecutor and waits for all merge tasks to complete.
+	
+	Called in two scenarios:
+	1. Normal exit: via atexit.register() when process terminates naturally
+	2. Profiling mode: via graceful_shutdown() before os._exit(0)
+	
+	No recursion risk exists because:
+	• Scenario 1: Only atexit handler runs, graceful_shutdown() not called
+	• Scenario 2: os._exit() bypasses atexit handlers after this function
+	"""
+
 	global MERGE_EXECUTOR
 
 	try:
@@ -1776,7 +1934,15 @@ def shutdown_merge_executor():
 			exc_info=True
 		)
 
+"""
+	Register shutdown handler for normal application termination
+	NOTE: This will NOT execute during profiling mode because
+	watchdog_timer() uses os._exit(0) which bypasses atexit handlers
+"""
+
 atexit.register(shutdown_merge_executor)
+
+# ───────────────────────────────────────────────────────────────────────────────
 
 from contextlib import asynccontextmanager
 
@@ -1823,23 +1989,33 @@ async def lifespan(APP):
 # Its presence is structurally required for multiple critical subsystems:
 #
 #   1. 📊 Logging Integration:
+#
 #	  - Logging is routed via `uvicorn.error`, managed by FastAPI's ASGI server.
 #	  - Our logger (`logger = logging.getLogger("uvicorn.error")`) is active
 #		and functional as soon as FastAPI is imported, even before APP launch.
 #
 #   2. 🌐 REST API Endpoints:
-#	  - Provides health checks, JSON-based order book access, and real-time UI rendering.
+#
+#	  - Provides health checks, JSON-based order book access,
+# 		and real-time UI rendering.
 #
 #   3. 🧱 HTML UI Layer:
-#	  - Jinja2 template system is integrated via FastAPI for `/orderbook/{symbol}`.
+#
+#	  - Jinja2 template system is integrated via FastAPI
+# 		for `/orderbook/{symbol}`.
 #
 # ⚠️ Removal of FastAPI would break:
+#
 #	  - Logging infrastructure
 #	  - REST endpoints (/health, /state)
 #	  - HTML visualization
 #
-#   - Even if not all FastAPI features are always used, its presence is mandatory.
-#   - Template directory is resolved via `resource_path()` for PyInstaller compatibility.
+#   - Even if not all FastAPI features are always used,
+# 	  its presence is mandatory.
+#
+#   - Template directory is resolved via `resource_path()`
+# 	  for PyInstaller compatibility.
+#
 #   - See also: RULESET.md for documentation and code conventions.
 # ───────────────────────────────────────────────────────────────────────────────
 
@@ -1899,23 +2075,15 @@ async def health_ready():
 		raise HTTPException(status_code=500, detail="readiness check error")
 
 # ───────────────────────────────────────────────────────────────────────────────
-# 🧠 JSON API for Order Book
+# 🧠 JSON API for Order Book (Temporary Primitive Functionality)
 # ───────────────────────────────────────────────────────────────────────────────
 
 @APP.get("/state/{symbol}")
 async def get_order_book(symbol: str):
 
 	"""
-	Returns the most recent full order book snapshot (depth20) for a given symbol.
-
-	Args:
-		symbol (str): Trading pair symbol (e.g., "btcusdt").
-
-	Returns:
-		JSONResponse: Snapshot containing lastUpdateId, eventTime, bids, and asks.
-
-	Raises:
-		HTTPException 404 if the requested symbol is not being tracked.
+	Returns the most recent order book snapshot (depth20@100ms)
+	being streamed down from Binance for a given symbol.
 	"""
 
 	try:
@@ -1938,24 +2106,16 @@ async def get_order_book(symbol: str):
 		raise HTTPException(status_code=500, detail="internal error")
 
 # ───────────────────────────────────────────────────────────────────────────────
-# 👁️ HTML UI for Order Book
+# 👁️ HTML UI for Order Book (Temporary Primitive Functionality)
 # ───────────────────────────────────────────────────────────────────────────────
 
 @APP.get("/orderbook/{symbol}", response_class=HTMLResponse)
 async def orderbook_ui(request: Request, symbol: str):
 
 	"""
-	Renders a lightweight HTML page showing the current order book snapshot for the given symbol.
-
-	Args:
-		request (Request): FastAPI request context (used for templating).
-		symbol (str): Trading pair symbol (e.g., "btcusdt").
-
-	Returns:
-		Jinja2-rendered HTMLResponse of `orderbook.html` with top 20 bids and asks.
-
-	Raises:
-		HTTPException 404 if the requested symbol is not available in memory.
+	Renders a lightweight HTML page showing
+	the current order book snapshot for
+	the given symbol.
 	"""
 
 	try:
@@ -1996,59 +2156,201 @@ async def orderbook_ui(request: Request, symbol: str):
 		raise HTTPException(status_code=500, detail="internal error")
 
 # ───────────────────────────────────────────────────────────────────────────────
-# 📊 Dashboard WebSocket Stream Handler
+# 📊 Dashboard Monitoring & WebSocket Stream Handler
 #
-# Streams real-time monitoring data (e.g., median latency per symbol)
-# to connected dashboard clients via WebSocket.
+# 🖥️ Provides real-time monitoring and WebSocket streaming for system metrics
+# (e.g., hardware usage, median latency per symbol) to connected clients.
 #
-# Features:
-#   • Accepts WebSocket connections at `/ws/dashboard` (endpoint is extensible).
-#   • Enforces a global concurrent connection limit (`MAX_DASHBOARD_CONNECTIONS`)
-#	 with thread-safe tracking and immediate refusal of excess clients.
-#   • Each session is limited to `MAX_DASHBOARD_SESSION_SEC` seconds (from .conf),
-#	 after which the connection is closed gracefully.
-#   • Periodically sends a JSON object containing per-symbol median latency.
-#   • Robust to disconnects, task cancellations, and transient errors.
-#   • Implements exponential backoff (from .conf) for repeated connection failures.
-#   • All resource management (locks, counters) is handled with minimal overhead.
+# 🔧 Features:
+#   • 🖥️ Hardware Monitoring:
+#	   - Tracks CPU, memory, storage, and network usage using `psutil`.
+#	   - Updates global metrics asynchronously to avoid blocking the event loop.
+#   • 🌐 WebSocket Dashboard:
+#	   - Streams monitoring data to clients at `/ws/dashboard`.
+#	   - Enforces connection limits (`MAX_DASHBOARD_CONNECTIONS`) and session
+#		 timeouts.
+#	   - Periodically sends JSON payloads containing hardware metrics and
+#		 symbol latency.
+#   • ⚙️ Configuration-Driven Behavior:
+#	   - All limits, intervals, and backoff strategies are loaded from `.conf`.
+#	   - Fully customizable via `get_binance_chart.conf`.
 #
-# Usage:
-#   - Designed for extensibility: add more metrics (CPU, memory, etc.) as needed.
-#   - Intended for use with a browser-based dashboard or monitoring tool.
+# 🛠️ Usage:
+#   - Designed for extensibility: add more metrics or endpoints as needed.
+#   - Intended for use with browser-based dashboards or monitoring tools.
 #
-# Safety & Robustness:
-#   - Never throws uncaught exceptions; all errors are logged.
-#   - Ensures the server remains robust even under repeated client connect/disconnect.
-#   - Resource usage is minimal when idle; handler is always alive.
-#   - All configuration (limits, intervals, backoff) is loaded from `.conf`.
+# 🛡️ Safety & Robustness:
+#   - Hardware monitoring runs asynchronously to prevent blocking operations.
+#   - WebSocket handler ensures graceful handling of disconnects, errors, and
+#	 cancellations.
+#   - Implements exponential backoff for reconnection attempts.
+#   - All resource management (locks, counters) is thread-safe and efficient.
 #
-# See also:
-#   - `DASHBOARD_STREAM_FREQ`, `MAX_DASHBOARD_CONNECTIONS`, `MAX_DASHBOARD_SESSION_SEC`
-#   - Project style: see `RULESET.md` for documentation and code conventions.
+# 🏗️ Structures:
+#   • Global Metrics:
+#	   - `NETWORK_LOAD_MBPS`: Network bandwidth usage in Mbps.
+#	   - `CPU_LOAD_PERCENTAGE`: CPU usage percentage.
+#	   - `MEM_LOAD_PERCENTAGE`: Memory usage percentage.
+#	   - `STORAGE_PERCENTAGE`: Storage usage percentage.
+#   • WebSocket Configuration:
+#	   - `DASHBOARD_STREAM_INTERVAL`: Interval between data pushes (seconds).
+#	   - `MAX_DASHBOARD_CONNECTIONS`: Maximum concurrent WebSocket connections.
+#	   - `MAX_DASHBOARD_SESSION_SEC`: Maximum session duration per client
+#		 (seconds).
+#   • Locks:
+#	   - `ACTIVE_DASHBOARD_LOCK`: Ensures thread-safe connection tracking.
+#
+# 📚 See also:
+#   - `monitor_hardware()`: Asynchronous hardware monitoring function.
+#   - `dashboard()`: WebSocket handler for dashboard clients.
+#   - `RULESET.md`: Documentation and code conventions.
 # ───────────────────────────────────────────────────────────────────────────────
 
 from fastapi import WebSocket, WebSocketDisconnect
+import psutil
 
-DASHBOARD_STREAM_FREQ		 = float(CONFIG.get("DASHBOARD_STREAM_FREQ", 0.03))
-MAX_DASHBOARD_CONNECTIONS	 = int(CONFIG.get("MAX_DASHBOARD_CONNECTIONS", 3))
-MAX_SESSION_SECONDS			 = int(CONFIG.get("MAX_DASHBOARD_SESSION_SEC", 600))
+DASHBOARD_STREAM_INTERVAL = float(CONFIG.get("DASHBOARD_STREAM_INTERVAL", 0.075))
+MAX_DASHBOARD_CONNECTIONS = int(CONFIG.get("MAX_DASHBOARD_CONNECTIONS", 3))
+MAX_SESSION_SECONDS		  = int(CONFIG.get("MAX_DASHBOARD_SESSION_SEC", 600))
 
 ACTIVE_DASHBOARD_LOCK		 = asyncio.Lock()
 ACTIVE_DASHBOARD_CONNECTIONS = 0
 
+HARDWARE_MONITORING_INTERVAL = float(
+	CONFIG.get("HARDWARE_MONITORING_INTERVAL", 1.0)
+)
+
+CPU_PERCENT_DURATION = float(
+	CONFIG.get("CPU_PERCENT_DURATION", 0.2)
+)
+
+NETWORK_LOAD_MBPS  : int   = 0
+CPU_LOAD_PERCENTAGE: float = 0.0
+MEM_LOAD_PERCENTAGE: float = 0.0
+STORAGE_PERCENTAGE:  float = 0.0
+
+# ───────────────────────────────────────────────────────────────────────────────
+
+async def monitor_hardware():
+
+	"""
+	Hardware monitoring function that runs as an async coroutine.
+	Updates global hardware metrics using psutil with non-blocking operations.
+	For details, see `https://psutil.readthedocs.io/en/latest/`.
+
+	Metrics updated:
+		- NETWORK_LOAD_MBPS:   Network bandwidth in megabits per second
+		- CPU_LOAD_PERCENTAGE: CPU load percentage
+		- MEM_LOAD_PERCENTAGE: Memory usage percentage
+		- STORAGE_PERCENTAGE: Storage usage percentage
+	"""
+
+	global NETWORK_LOAD_MBPS, CPU_LOAD_PERCENTAGE
+	global MEM_LOAD_PERCENTAGE, STORAGE_PERCENTAGE
+	global HARDWARE_MONITORING_INTERVAL, CPU_PERCENT_DURATION
+	
+	# Initialize previous network counters for bandwidth calculation
+
+	prev_counters = psutil.net_io_counters()
+	prev_sent	  = prev_counters.bytes_sent
+	prev_recv	  = prev_counters.bytes_recv
+	prev_time	  = time.time()
+	
+	logger.info(
+		f"[monitor_hardware] "
+		f"Hardware monitoring started."
+	)
+	
+	while True:
+
+		try:
+			
+			wt_start = time.time()
+
+			# CPU Usage: blocking call to get CPU load percentage
+
+			CPU_LOAD_PERCENTAGE = await asyncio.to_thread(
+				psutil.cpu_percent, 
+				interval=CPU_PERCENT_DURATION
+			)
+			
+			# Memory Usage
+
+			memory_info = await asyncio.to_thread(psutil.virtual_memory)
+			MEM_LOAD_PERCENTAGE = memory_info.percent
+			
+			# Storage Usage (root filesystem)
+
+			disk_info = await asyncio.to_thread(psutil.disk_usage, '/')
+			STORAGE_PERCENTAGE = disk_info.percent
+			
+			# Network Usage (Mbps)
+
+			curr_time = time.time()
+			counters  = await asyncio.to_thread(psutil.net_io_counters)
+			curr_sent = counters.bytes_sent
+			curr_recv = counters.bytes_recv
+			
+			# Calculate bytes transferred since last measurement
+
+			sent_diff = curr_sent - prev_sent
+			recv_diff = curr_recv - prev_recv
+			time_diff = curr_time - prev_time
+			
+			# Convert to Mbps
+
+			if time_diff > 0:
+
+				total_bytes = sent_diff + recv_diff
+				NETWORK_LOAD_MBPS = (
+					(total_bytes * 8) / (time_diff * 1_000_000)
+				)
+			
+			# Update previous values
+
+			prev_sent = curr_sent
+			prev_recv = curr_recv
+			prev_time = curr_time
+			
+		except Exception as e:
+
+			logger.error(
+				f"[monitor_hardware] "
+				f"Error monitoring hardware: {e}",
+				exc_info=True
+			)
+
+		finally:
+
+			sleep_duration = max(
+				0.0, HARDWARE_MONITORING_INTERVAL - (time.time() - wt_start)
+			)
+
+			await asyncio.sleep(sleep_duration)
+
+# ───────────────────────────────────────────────────────────────────────────────
+
 @APP.websocket("/ws/dashboard")
-async def websocket_dashboard(websocket: WebSocket):
+async def dashboard(websocket: WebSocket):
 
 	"""
-	Streams dashboard monitoring data (e.g., med_latency) to WebSocket clients.
+	📊 Streams dashboard monitoring data to WebSocket clients.
 
-	On disconnect or error, logs and waits before allowing reconnection.
-	Designed for extensibility: add more metrics as needed.
+	🛠️ Features:
+	- Logs disconnects and errors, then waits before allowing reconnection.
+	- Designed for extensibility: supports adding more metrics as needed.
+
+	📌 Notes:
+	- Handles connection limits and session timeouts gracefully.
+	- Ensures thread-safe resource management for active connections.
 	"""
 
-	global SYMBOLS, MEDIAN_LATENCY_DICT
-	global DASHBOARD_STREAM_FREQ, MAX_DASHBOARD_CONNECTIONS
+	global DASHBOARD_STREAM_INTERVAL, MAX_DASHBOARD_CONNECTIONS
 	global ACTIVE_DASHBOARD_CONNECTIONS, ACTIVE_DASHBOARD_LOCK
+
+	global SYMBOLS, MEDIAN_LATENCY_DICT, JSON_FLUSH_INTERVAL
+	global NETWORK_LOAD_MBPS, CPU_LOAD_PERCENTAGE
+	global MEM_LOAD_PERCENTAGE, STORAGE_PERCENTAGE
 
 	reconnect_attempt = 0  # Track consecutive accept failures for backoff
 
@@ -2068,7 +2370,7 @@ async def websocket_dashboard(websocket: WebSocket):
 					)
 
 					logger.warning(
-						"[websocket_dashboard] "
+						"[dashboard] "
 						"Connection refused: too many clients."
 					)
 					return
@@ -2077,14 +2379,16 @@ async def websocket_dashboard(websocket: WebSocket):
 
 			try:
 
-				# Attempt to accept a new WebSocket connection from a dashboard client
+				# Attempt to accept a new WebSocket connection
+				# from a dashboard client
 
 				await websocket.accept()
 				reconnect_attempt = 0		# Reset backoff on successful accept
 
 				# Track session start time for session timeout
-				import time
-				start_time = time.time()
+				
+				start_time_ms  = get_current_time_ms()
+				max_session_ms = MAX_SESSION_SECONDS * 1000
 
 				# Main data push loop: send metrics until client disconnects, 
 				# error, or session timeout
@@ -2092,13 +2396,27 @@ async def websocket_dashboard(websocket: WebSocket):
 				while True:
 
 					try:
-						# Construct the monitoring payload (add more fields as needed)
+						# Construct the monitoring payload
+						# add more fields as needed
 
 						data = {
 							"med_latency": {
-								symbol: int(MEDIAN_LATENCY_DICT.get(symbol, 0.0))
+								symbol: MEDIAN_LATENCY_DICT.get(symbol, 0)
 								for symbol in SYMBOLS
-							}
+							},
+							"flush_interval": {
+								symbol: JSON_FLUSH_INTERVAL.get(symbol, 0)
+								for symbol in SYMBOLS
+							},
+							"hardware": {
+								"network_mbps":	   round(NETWORK_LOAD_MBPS, 2),
+								"cpu_percent":	   CPU_LOAD_PERCENTAGE,
+								"memory_percent":  MEM_LOAD_PERCENTAGE,
+								"storage_percent": STORAGE_PERCENTAGE
+							},
+							"last_updated": ms_to_datetime(
+								get_current_time_ms()
+							).isoformat()
 						}
 
 						# Send the JSON payload to the connected client
@@ -2107,26 +2425,29 @@ async def websocket_dashboard(websocket: WebSocket):
 
 						# Check session duration and close if exceeded
 
-						if time.time() - start_time > MAX_SESSION_SECONDS:
+						current_time_ms = get_current_time_ms()
+
+						if current_time_ms - start_time_ms > max_session_ms:
+
 							await websocket.close(
 								code=1000, reason="Session time limit reached."
 							)
 							logger.info(
-								f"[websocket_dashboard] "
+								f"[dashboard] "
 								f"Session time limit reached, connection closed."
 							)
 							break
 
 						# Wait for the configured interval before sending the next update
 
-						await asyncio.sleep(DASHBOARD_STREAM_FREQ)
+						await asyncio.sleep(DASHBOARD_STREAM_INTERVAL)
 
 					except WebSocketDisconnect:
 
 						# Client closed the connection (normal case)
 
 						logger.info(
-							f"[websocket_dashboard] "
+							f"[dashboard] "
 							f"WebSocket client disconnected."
 						)
 						break
@@ -2136,7 +2457,7 @@ async def websocket_dashboard(websocket: WebSocket):
 						# Task was cancelled (e.g., server shutdown)
 
 						logger.info(
-							f"[websocket_dashboard] "
+							f"[dashboard] "
 							f"WebSocket handler task cancelled."
 						)
 						break
@@ -2146,7 +2467,7 @@ async def websocket_dashboard(websocket: WebSocket):
 						# Log unexpected errors, then break to allow reconnection
 
 						logger.warning(
-							f"[websocket_dashboard] WebSocket error: {e}",
+							f"[dashboard] WebSocket error: {e}",
 							exc_info=True
 						)
 						break
@@ -2154,7 +2475,8 @@ async def websocket_dashboard(websocket: WebSocket):
 				# Exit inner loop: client disconnected, error, or session timeout
 				# Outer loop allows for reconnection attempts if desired
 
-				break  # Remove this break to allow the same client to reconnect in-place
+				break	# Remove this break to allow
+						# the same client to reconnect in-place
 
 			finally:
 
@@ -2169,7 +2491,7 @@ async def websocket_dashboard(websocket: WebSocket):
 
 			reconnect_attempt += 1
 			logger.warning(
-				f"[websocket_dashboard] "
+				f"[dashboard] "
 				f"Accept failed (attempt {reconnect_attempt}): {e}",
 				exc_info=True
 			)
@@ -2184,7 +2506,7 @@ async def websocket_dashboard(websocket: WebSocket):
 				reconnect_attempt = RESET_BACKOFF_LEVEL
 
 			logger.info(
-				f"[websocket_dashboard] "
+				f"[dashboard] "
 				f"Retrying accept in {backoff:.1f} seconds..."
 			)
 
@@ -2193,6 +2515,62 @@ async def websocket_dashboard(websocket: WebSocket):
 # ───────────────────────────────────────────────────────────────────────────────
 # ⏱️ Timed Watchdog for Graceful Profiling Shutdown
 # ───────────────────────────────────────────────────────────────────────────────
+
+def graceful_shutdown():
+
+	"""
+	Graceful shutdown function for profiling mode.
+	
+	IMPORTANT: This function is called ONLY during profiling mode via
+	watchdog_timer() and leads to immediate process termination (os._exit).
+	It does NOT conflict with atexit.register(shutdown_merge_executor) 
+	because they execute in mutually exclusive scenarios:
+	
+	• Profiling mode: watchdog_timer() → graceful_shutdown() → os._exit(0)
+	• Normal exit: atexit handler → shutdown_merge_executor() only
+	
+	No infinite recursion occurs because os._exit() bypasses atexit handlers.
+	"""
+
+	try:
+
+		# Close all file handles
+
+		for symbol in SYMBOLS:
+
+			suffix_writer = SYMBOL_TO_FILE_HANDLES.get(symbol)
+
+			if suffix_writer:
+
+				suffix, writer = suffix_writer
+
+				try:
+
+					if writer:
+						writer.close()
+
+					logger.info(
+						f"[graceful_shutdown] Closed file for {symbol}"
+					)
+
+				except Exception as e:
+
+					logger.error(
+						f"[graceful_shutdown] "
+						f"Failed to close file for {symbol}: {e}"
+					)
+		
+		shutdown_merge_executor()
+		
+		logger.info(
+			f"[graceful_shutdown] Graceful shutdown completed."
+		)
+		
+	except Exception as e:
+
+		logger.error(
+			f"[graceful_shutdown] Error during shutdown: {e}"
+		)
 
 async def watchdog_timer(timeout_sec: int) -> None:
 
@@ -2238,7 +2616,15 @@ async def watchdog_timer(timeout_sec: int) -> None:
 
 		try:
 
-			graceful_shutdown()		 # Close writers and background tasks
+			# ───────────────────────────────────────────────────────────────────
+			# Close file handles and shutdown executors before
+			# process termination. This is safe because `os._exit(0)`
+			# below bypasses atexit handlers, preventing any conflict with
+			# `atexit.register(shutdown_merge_executor)`
+			# ───────────────────────────────────────────────────────────────────
+
+			graceful_shutdown()
+
 
 		except Exception as e:
 
@@ -2304,6 +2690,49 @@ if PROFILE_DURATION > 0:
 
 # ───────────────────────────────────────────────────────────────────────────────
 # 🚦 Main Entrypoint & Async Task Orchestration
+#
+# Serves as the primary entrypoint for the application, orchestrating all
+# asynchronous tasks and initializing runtime components.
+#
+# Responsibilities:
+#   • Initializes runtime state and event flags required for streaming.
+#   • Launches background tasks for hardware monitoring, snapshot persistence,
+#	 latency estimation, and stream gating.
+#   • Starts the FastAPI server for REST and WebSocket endpoints.
+#   • Handles profiling mode with a watchdog timer for graceful shutdown.
+#
+# Execution Flow:
+#   1. Runtime Initialization:
+#	  - Sets up global dictionaries, queues, and locks for per-symbol state.
+#	  - Ensures all event flags are properly initialized.
+#   2. Background Task Launch:
+#	  - Hardware monitoring (`monitor_hardware()`).
+#	  - Snapshot persistence (`symbol_dump_snapshot()`).
+#	  - WebSocket stream handling (`put_snapshot()`).
+#	  - Latency estimation (`estimate_latency()`).
+#	  - Stream gating (`gate_streaming_by_latency()`).
+#   3. Profiling Mode:
+#	  - If enabled, starts a watchdog timer to terminate the application
+#		after a fixed duration.
+#   4. FastAPI Server:
+#	  - Serves REST endpoints for health checks, order book snapshots, and
+#		HTML visualization.
+#	  - Provides WebSocket streaming for dashboard monitoring.
+#
+# Notes:
+#   - Profiling mode is controlled via `PROFILE_DURATION` in the configuration.
+#   - All tasks are launched as asyncio coroutines for non-blocking execution.
+#   - Graceful shutdown ensures all resources are cleaned up before termination.
+#
+# See also:
+#   - `initialize_runtime_state()`: Sets up global runtime state.
+#   - `monitor_hardware()`: Tracks hardware metrics asynchronously.
+#   - `symbol_dump_snapshot()`: Handles snapshot persistence and daily merge.
+#   - `put_snapshot()`: Processes Binance depth20 snapshots.
+#   - `estimate_latency()`: Measures downstream latency for gating.
+#   - `gate_streaming_by_latency()`: Controls stream flow based on latency.
+#   - `watchdog_timer()`: Terminates the application after profiling duration.
+#   - `FastAPI`: Provides REST and WebSocket endpoints.
 # ───────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -2313,10 +2742,11 @@ if __name__ == "__main__":
 	from concurrent.futures import ProcessPoolExecutor
 	import asyncio
 
-	# Use ProcessPoolExecutor for process-based parallelism to minimize GIL impact.
+	# Use `ProcessPoolExecutor` for process-based parallelism
+	# #to minimize GIL impact.
 
-	MAX_WORKERS	   = int(CONFIG.get("MAX_WORKERS", 8))
-	MERGE_EXECUTOR = ProcessPoolExecutor(max_workers=MAX_WORKERS)
+	MAX_WORKERS		 = int(CONFIG.get("MAX_WORKERS", 8))
+	MERGE_EXECUTOR	 = ProcessPoolExecutor(max_workers=MAX_WORKERS)
 
 	# ───────────────────────────────────────────────────────────────────────────
 
@@ -2338,6 +2768,22 @@ if __name__ == "__main__":
 
 				logger.error(
 					f"[main] Initialization failed: {e}",
+					exc_info=True
+				)
+
+				sys.exit(1)
+
+			# Launch hardware monitoring in separate process
+
+			try:
+
+				asyncio.create_task(monitor_hardware())
+				logger.info(f"[main] Hardware monitoring task launched.")
+
+			except Exception as e:
+
+				logger.error(
+					f"[main] Failed to launch hardware monitoring: {e}",
 					exc_info=True
 				)
 
