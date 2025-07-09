@@ -1,6 +1,6 @@
 ### ✅ TODO
 
-1. **Post Mobile 메일 확인**
+1. **Post Mobile 메일 확인 & 안드레아**
 
    * 받은 편지함에서 Post Mobile 관련 메일 확인하기
 
