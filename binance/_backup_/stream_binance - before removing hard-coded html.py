@@ -244,25 +244,21 @@ try:
 	logger.addHandler(file_handler)
 	logger.addHandler(console_handler)
 
-	# Set specific loggers to WARNING level
-
-	for name in ["fastapi", "uvicorn", "uvicorn.error", "uvicorn.access"]:
-		
-		specific_logger = logging.getLogger(name)
-		specific_logger.setLevel(logging.WARNING)
-		specific_logger.propagate = True
-
-	# Ensure other third-party loggers propagate
-	# to root and remain INFO level
+	# Ensure third-party loggers propagate to root
 
 	for name in [
 		"websockets",
 		"websockets.server",
 		"websockets.client",
+		"uvicorn",
+		"uvicorn.error",
+		"uvicorn.access",
+		"fastapi",
 		"starlette",
 		"asyncio",
 		"concurrent.futures"
 	]:
+
 		individual_logger = logging.getLogger(name)
 		individual_logger.propagate = True
 		individual_logger.setLevel(logging.INFO)
@@ -2010,50 +2006,38 @@ from contextlib import asynccontextmanager
 @asynccontextmanager
 async def lifespan(APP):
 
-	try:
+	# Startup logic (if any) goes here
 
-		# Startup logic (if any) goes here
+	yield
 
-		yield
+	# Shutdown logic: close all file writers
 
-	except KeyboardInterrupt:
+	for symbol in SYMBOLS:
 
-		logger.info("[lifespan] Application terminated by user (Ctrl + C).")
+		suffix_writer = SYMBOL_TO_FILE_HANDLES.get(symbol)
+		
+		if not suffix_writer:
 
-	except Exception as e:
+			continue  # No writer was created for this symbol
 
-		logger.error(f"[lifespan] Unhandled exception: {e}", exc_info=True)
+		suffix, writer = suffix_writer
 
-	finally:
+		try:
 
-		# Shutdown logic: close all file writers
+			if writer:
 
-		for symbol in SYMBOLS:
+				writer.close()
 
-			suffix_writer = SYMBOL_TO_FILE_HANDLES.get(symbol)
+			logger.info(
+				f"[shutdown] Closed file for {symbol} (suffix: {suffix})"
+			)
+
+		except Exception as e:
 			
-			if not suffix_writer:
-
-				continue  # No writer was created for this symbol
-
-			suffix, writer = suffix_writer
-
-			try:
-
-				if writer:
-
-					writer.close()
-
-				logger.info(
-					f"[shutdown] Closed file for {symbol} (suffix: {suffix})"
-				)
-
-			except Exception as e:
-				
-				logger.error(
-					f"[shutdown] Failed to close file for {symbol}: {e}",
-					exc_info=True
-				)
+			logger.error(
+				f"[shutdown] Failed to close file for {symbol}: {e}",
+				exc_info=True
+			)
 
 # ───────────────────────────────────────────────────────────────────────────────
 # ⚙️ FastAPI Initialization & Template Binding
@@ -2236,22 +2220,173 @@ async def orderbook_ui(request: Request, symbol: str):
 async def dashboard_page(request: Request):
 	"""Dashboard HTML 페이지 서빙"""
 	try:
-		# HTML 파일 경로를 resource_path를 통해 가져오기
-		html_path = resource_path("stream_binance_dashboard.html")
+		# stream_binance_dashboard.html 내용을 읽어서 반환
+		dashboard_html = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>Binance Dashboard</title>
+	<style>
+		body {
+			font-family: Arial, sans-serif;
+			margin: 20px;
+		}
+		table {
+			width: 100%;
+			border-collapse: collapse;
+			margin-bottom: 20px;
+		}
+		th, td {
+			border: 1px solid #ddd;
+			padding: 8px;
+			text-align: center;
+		}
+		th {
+			background-color: #f4f4f4;
+		}
+		tr:nth-child(even) {
+			background-color: #f9f9f9;
+		}
+		#lastUpdated {
+			margin-top: 10px;
+			font-size: 14px;
+			color: #555;
+		}
+		.section-title {
+			margin-top: 30px;
+			margin-bottom: 10px;
+			font-size: 18px;
+			font-weight: bold;
+		}
+	</style>
+</head>
+<body>
+	<h1>Binance Dashboard</h1>
+	<div id="lastUpdated">Last Updated: N/A</div>
+	
+	<div class="section-title">Hardware Metrics</div>
+	<table id="hardwareMetricsTable">
+		<thead>
+			<tr>
+				<th>Metric</th>
+				<th>Value</th>
+			</tr>
+		</thead>
+		<tbody>
+			<tr>
+				<td>Network Usage</td>
+				<td id="networkUsage">0 Mbps</td>
+			</tr>
+			<tr>
+				<td>CPU Usage</td>
+				<td id="cpuUsage">0.0%</td>
+			</tr>
+			<tr>
+				<td>Memory Usage</td>
+				<td id="memoryUsage">0.0%</td>
+			</tr>
+			<tr>
+				<td>Storage Usage</td>
+				<td id="storageUsage">0.0%</td>
+			</tr>
+			<tr>
+				<td>GC Time Cost</td>
+				<td id="gcTimeCost">0.0 (us)</td>
+			</tr>
+		</tbody>
+	</table>
 
-		if not os.path.exists(html_path):
-			logger.error(f"[dashboard_page] HTML file not found: {html_path}")
-			raise HTTPException(status_code=500, detail="Dashboard HTML file missing")
+	<div class="section-title">Symbol Metrics</div>
+	<table id="symbolMetricsTable">
+		<thead>
+			<tr>
+				<th>Symbol</th>
+				<th>Median Latency (ms)</th>
+				<th>Flush Interval (ms)</th>
+				<th id="queueSizeHeader">Queue Size (Total: 0)</th>
+			</tr>
+		</thead>
+		<tbody>
+			<!-- Rows will be dynamically added here -->
+		</tbody>
+	</table>
 
-		# HTML 파일 읽기
-		with open(html_path, "r", encoding="utf-8") as f:
-			dashboard_html = f.read()
+	<script>
+		const ws = new WebSocket("ws://localhost:8000/ws/dashboard");
 
+		ws.onopen = () => {
+			console.log("WebSocket connection established.");
+		};
+
+		ws.onmessage = (event) => {
+			const data = JSON.parse(event.data);
+
+			// Update GC Time Cost
+			if (data.gc_time_cost_ms !== undefined) {
+				document.getElementById("gcTimeCost").textContent = `${data.gc_time_cost_ms.toFixed(2)} ms`;
+			}
+
+			const medLatency = data.med_latency;
+			const flushInterval = data.flush_interval;
+			const queueSize = data.queue_size;
+			const queueSizeTotal = data.queue_size_total;
+			const hardware = data.hardware;
+			const lastUpdated = data.last_updated;
+
+			// Update hardware metrics
+			if (hardware) {
+				document.getElementById("networkUsage").textContent = `${hardware.network_mbps.toFixed(2)} Mbps`;
+				document.getElementById("cpuUsage").textContent = `${hardware.cpu_percent.toFixed(1)}%`;
+				document.getElementById("memoryUsage").textContent = `${hardware.memory_percent.toFixed(1)}%`;
+				document.getElementById("storageUsage").textContent = `${hardware.storage_percent.toFixed(1)}%`;
+			}
+
+			// Update symbol metrics table
+			const symbolTableBody = document.querySelector("#symbolMetricsTable tbody");
+			symbolTableBody.innerHTML = ""; // Clear existing rows
+
+			for (const symbol in medLatency) {
+				const row = document.createElement("tr");
+				const symbolCell = document.createElement("td");
+				const latencyCell = document.createElement("td");
+				const flushCell = document.createElement("td");
+				const queueCell = document.createElement("td");
+
+				symbolCell.textContent = symbol.toUpperCase();
+				latencyCell.textContent = medLatency[symbol];
+				flushCell.textContent = flushInterval[symbol];
+				queueCell.textContent = queueSize ? queueSize[symbol] : 0;
+
+				row.appendChild(symbolCell);
+				row.appendChild(latencyCell);
+				row.appendChild(flushCell);
+				row.appendChild(queueCell);
+				symbolTableBody.appendChild(row);
+			}
+
+			document.getElementById("queueSizeHeader").textContent = `Queue Size (Total: ${queueSizeTotal ?? 0})`;
+
+			const formattedTime = new Date(lastUpdated).toISOString().slice(0, 19) + "Z";
+			document.querySelector("#lastUpdated").textContent = `Last Updated: ${formattedTime}`;
+		};
+
+		ws.onerror = (error) => {
+			console.error("WebSocket error:", error);
+		};
+
+		ws.onclose = () => {
+			console.log("WebSocket connection closed.");
+		};
+	</script>
+</body>
+</html>
+		"""
 		return HTMLResponse(content=dashboard_html)
-
 	except Exception as e:
 		logger.error(f"[dashboard_page] Failed to serve dashboard: {e}", exc_info=True)
-		raise HTTPException(status_code=500, detail="Internal server error")
+		raise HTTPException(status_code=500, detail="internal error")
 
 # ───────────────────────────────────────────────────────────────────────────────
 # 📊 Dashboard Monitoring & WebSocket Stream Handler
@@ -3093,12 +3228,9 @@ if __name__ == "__main__":
 				cfg = Config(
 					app			= APP,
 					host		= "0.0.0.0",
-					port		= 8000,			# todo: avoid hardcoding
-					lifespan	= "on",
-					use_colors	= True,
-					log_level	= "warning",
-					workers		= MAX_WORKERS,
-					loop		= "asyncio",	# todo: `uvicorn` if Linux
+					port		= 8000,
+					lifespan	= "auto",
+					use_colors	= False
 				)
 
 				server = Server(cfg)

@@ -67,6 +67,10 @@
 				<td>Storage Usage</td>
 				<td id="storageUsage">0.0%</td>
 			</tr>
+			<tr>
+				<td>GC Time Cost</td>
+				<td id="gcTimeCost">0.0 (us)</td>
+			</tr>
 		</tbody>
 	</table>
 
@@ -86,7 +90,7 @@
 	</table>
 
 	<script>
-		const ws = new WebSocket("ws://localhost:8000/ws/dashboard");
+		const ws = new WebSocket(`ws://${window.location.host}/ws/dashboard`);
 
 		ws.onopen = () => {
 			console.log("WebSocket connection established.");
@@ -94,6 +98,12 @@
 
 		ws.onmessage = (event) => {
 			const data = JSON.parse(event.data);
+
+			// Update GC Time Cost
+			if (data.gc_time_cost_ms !== undefined) {
+				document.getElementById("gcTimeCost").textContent = `${data.gc_time_cost_ms.toFixed(2)} ms`;
+			}
+
 			const medLatency = data.med_latency;
 			const flushInterval = data.flush_interval;
             const queueSize = data.queue_size;
@@ -104,9 +114,9 @@
 			// Update hardware metrics
 			if (hardware) {
 				document.getElementById("networkUsage").textContent = `${hardware.network_mbps.toFixed(2)} Mbps`;
-				document.getElementById("cpuUsage").textContent = `${hardware.cpu_percent.toFixed(1)}%`;
-				document.getElementById("memoryUsage").textContent = `${hardware.memory_percent.toFixed(1)}%`;
-				document.getElementById("storageUsage").textContent = `${hardware.storage_percent.toFixed(1)}%`;
+				document.getElementById("cpuUsage").textContent = `${hardware.cpu_percent.toFixed(2)}%`;
+				document.getElementById("memoryUsage").textContent = `${hardware.memory_percent.toFixed(2)}%`;
+				document.getElementById("storageUsage").textContent = `${hardware.storage_percent.toFixed(2)}%`;
 			}
 
 			// Update symbol metrics table

@@ -40,7 +40,7 @@ COPY . .
 # Run PyInstaller to produce a single self-contained Linux executable
 # Embeds HTML templates and configuration file via --add-data flags.
 # The --onefile option bundles everything; --clean removes temporary files.
-RUN pyinstaller --onefile --clean --noconfirm --log-level=ERROR --hidden-import=jinja2 --add-data templates:templates --add-data get_binance_chart.conf:. stream_binance.py
+RUN pyinstaller --onefile --clean --noconfirm --log-level=ERROR --hidden-import=jinja2 --add-data templates:templates --add-data get_binance_chart.conf:. --add-data stream_binance_dashboard.html:. stream_binance.py
 
 # Default command prints completion message; binary is available under /app/dist/stream_binance
 CMD ["echo", "Build complete! Find binary in /app/dist"]
