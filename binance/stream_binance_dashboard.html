@@ -77,6 +77,7 @@
 				<th>Symbol</th>
 				<th>Median Latency (ms)</th>
 				<th>Flush Interval (ms)</th>
+				<th id="queueSizeHeader">Queue Size (Total: 0)</th>
 			</tr>
 		</thead>
 		<tbody>
@@ -95,6 +96,8 @@
 			const data = JSON.parse(event.data);
 			const medLatency = data.med_latency;
 			const flushInterval = data.flush_interval;
+            const queueSize = data.queue_size;
+            const queueSizeTotal = data.queue_size_total;
 			const hardware = data.hardware;
 			const lastUpdated = data.last_updated;
 
@@ -115,16 +118,21 @@
 				const symbolCell = document.createElement("td");
 				const latencyCell = document.createElement("td");
 				const flushCell = document.createElement("td");
+                const queueCell = document.createElement("td");
 
 				symbolCell.textContent = symbol.toUpperCase();
 				latencyCell.textContent = medLatency[symbol];
 				flushCell.textContent = flushInterval[symbol];
+				queueCell.textContent = queueSize ? queueSize[symbol] : 0;
 
 				row.appendChild(symbolCell);
 				row.appendChild(latencyCell);
 				row.appendChild(flushCell);
+				row.appendChild(queueCell);
 				symbolTableBody.appendChild(row);
 			}
+
+			document.getElementById("queueSizeHeader").textContent = `Queue Size (Total: ${queueSizeTotal ?? 0})`;
 
 			const formattedTime = new Date(lastUpdated).toISOString().slice(0, 19) + "Z";
 			document.querySelector("#lastUpdated").textContent = `Last Updated: ${formattedTime}`;

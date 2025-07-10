@@ -103,6 +103,59 @@ def ms_to_datetime(ms: int) -> datetime:
 
 	return datetime.fromtimestamp(ms / 1000.0, tz=timezone.utc)
 
+class NanoTimer:
+
+	"""
+	A class for high-precision timing using nanoseconds.
+	Provides methods to record a start time (tick) and calculate
+	the elapsed time in seconds (tock).
+	"""
+
+	def __init__(self, reset_on_instantiation: bool = True):
+
+		self.start_time_ns = (
+			time.time_ns() if reset_on_instantiation else None
+		)
+
+	def tick(self):
+		
+		self.start_time_ns = time.time_ns()
+
+	def tock(self) -> float:
+
+		"""
+		Calculates the elapsed time in seconds since the last tick.
+
+		Returns:
+			float: Elapsed time in seconds.
+		Raises:
+			ValueError: If tick() has not been called before tock().
+		"""
+
+		if self.start_time_ns is None:
+
+			raise ValueError("tick() must be called before tock().")
+
+		elapsed_ns = time.time_ns() - self.start_time_ns
+
+		return elapsed_ns / 1_000_000_000.0
+
+	def __enter__(self):
+
+		"""Automatically starts the timer when entering the context."""
+
+		self.tick()
+
+		return self
+
+	def __exit__(self, exc_type, exc_value, traceback):
+
+		"""Handles cleanup when exiting the context."""
+
+		elapsed_time = self.tock()
+
+		print(f"Elapsed time: {elapsed_time:.6f} seconds")
+
 # ───────────────────────────────────────────────────────────────────────────────
 # 👤 Custom Formatter: Ensures all log timestamps are in UTC
 # ───────────────────────────────────────────────────────────────────────────────
@@ -693,6 +746,10 @@ except Exception as e:
 #	 → Per-symbol async queues for order book snapshots.
 #	   Populated by `put_snapshot()`, consumed by `symbol_dump_snapshot()`.
 #
+#   SNAPSHOTS_QUEUE_MAX: int
+#	 → Maximum size of each per-symbol snapshot queue.
+#	   Controls the buffer limit for in-memory order book snapshots.
+#
 #   SYMBOL_SNAPSHOTS_TO_RENDER: dict[str, dict]
 #	 → In-memory latest snapshot per symbol for FastAPI rendering.
 #	   Used for diagnostics/UI only; not persisted to disk.
@@ -721,6 +778,8 @@ SNAPSHOTS_QUEUE_DICT:		dict[str, asyncio.Queue] = {}
 SYMBOL_SNAPSHOTS_TO_RENDER: dict[str, dict] = {}
 SYMBOL_TO_FILE_HANDLES:		dict[str, tuple[str, TextIOWrapper]] = {}
 
+SNAPSHOTS_QUEUE_MAX = int(CONFIG.get("SNAPSHOTS_QUEUE_MAX",	100))
+
 # Each symbol has its own threading.Lock to ensure
 # independent synchronization during merge operations.
 
@@ -740,7 +799,7 @@ def initialize_runtime_state():
 		global SYMBOLS
 		global LATENCY_DICT, MEDIAN_LATENCY_DICT, DEPTH_UPDATE_ID_DICT
 		global LATEST_JSON_FLUSH, JSON_FLUSH_INTERVAL
-		global SNAPSHOTS_QUEUE_DICT
+		global SNAPSHOTS_QUEUE_DICT, SNAPSHOTS_QUEUE_MAX
 
 		LATENCY_DICT.clear()
 		LATENCY_DICT.update({
@@ -776,7 +835,8 @@ def initialize_runtime_state():
 
 		SNAPSHOTS_QUEUE_DICT.clear()
 		SNAPSHOTS_QUEUE_DICT.update({
-			symbol: asyncio.Queue() for symbol in SYMBOLS
+			symbol: asyncio.Queue(maxsize=SNAPSHOTS_QUEUE_MAX)
+			for symbol in SYMBOLS
 		})
 
 		SYMBOL_SNAPSHOTS_TO_RENDER.clear()
@@ -963,6 +1023,7 @@ def zip_and_remove(src_path: str):
 #   - RULESET.md for documentation and code conventions.
 # ───────────────────────────────────────────────────────────────────────────────
 
+# @profile
 def symbol_consolidate_a_day(
 	symbol:	  str,
 	day_str:  str,
@@ -974,184 +1035,188 @@ def symbol_consolidate_a_day(
 	into a daily archive for a given symbol.
 	"""
 
-	# Construct working directories and target paths
+	with NanoTimer() as timer:
 
-	tmp_dir = os.path.join(
-		base_dir,
-		"temporary",
-		f"{symbol.upper()}_orderbook_{day_str}"
-	)
+		# Construct working directories and target paths
 
-	merged_path = os.path.join(
-		base_dir,
-		f"{symbol.upper()}_orderbook_{day_str}.jsonl"
-	)
-
-	# Abort early if directory is missing (no data captured for this day)
-
-	if not os.path.isdir(tmp_dir):
-
-		logger.error(
-			f"[symbol_consolidate_a_day][{symbol}] "
-			f"Temp dir missing on {day_str}: {tmp_dir}"
+		tmp_dir = os.path.join(
+			base_dir,
+			"temporary",
+			f"{symbol.upper()}_orderbook_{day_str}"
 		)
 
-		return
-
-	# List all zipped minute-level files (may be empty)
-
-	try:
-
-		zip_files = [f for f in os.listdir(tmp_dir) if f.endswith(".zip")]
-
-	except Exception as e:
-
-		logger.error(
-			f"[symbol_consolidate_a_day][{symbol}] "
-			f"Failed to list zips in {tmp_dir}: {e}",
-			exc_info=True
+		merged_path = os.path.join(
+			base_dir,
+			f"{symbol.upper()}_orderbook_{day_str}.jsonl"
 		)
 
-		return
+		# Abort early if directory is missing (no data captured for this day)
 
-	if not zip_files:
+		if not os.path.isdir(tmp_dir):
 
-		logger.error(
-			f"[symbol_consolidate_a_day][{symbol}] "
-			f"No zip files to merge on {day_str}."
-		)
+			logger.error(
+				f"[symbol_consolidate_a_day][{symbol.upper()}] "
+				f"Temp dir missing on {day_str}: {tmp_dir}"
+			)
 
-		return
+			return
 
-	# 🔧 File handle management with proper scope handling
-
-	fout = None
-
-	try:
-
-		# Open output file for merged .jsonl content
-
-		fout = open(merged_path, "w", encoding="utf-8")
-
-		# Process each zip file in chronological order
-
-		for zip_file in sorted(zip_files):
-
-			zip_path = os.path.join(tmp_dir, zip_file)
-
-			try:
-
-				with zipfile.ZipFile(zip_path, "r") as zf:
-
-					for member in zf.namelist():
-
-						with zf.open(member) as f:
-
-							for raw in f:
-
-								fout.write(raw.decode("utf-8"))
-
-			except Exception as e:
-
-				logger.error(
-					f"[symbol_consolidate_a_day][{symbol}] "
-					f"Failed to extract {zip_path}: {e}",
-					exc_info=True
-				)
-
-				return
-
-	except Exception as e:
-
-		logger.error(
-			f"[symbol_consolidate_a_day][{symbol}] "
-			f"Failed to open or write to merged file {merged_path}: {e}",
-			exc_info=True
-		)
-
-		return
-
-	finally:
-
-		# 🔧 Ensure the output file is properly closed
-
-		if fout:
-
-			try:
-
-				fout.close()
-
-			except Exception as close_error:
-
-				logger.error(
-					f"[symbol_consolidate_a_day][{symbol}] "
-					f"Failed to close output file: {close_error}",
-					exc_info=True
-				)
-
-	# Recompress the consolidated .jsonl into a final single-archive zip
-
-	try:
-
-		final_zip = merged_path.replace(".jsonl", ".zip")
-
-		with zipfile.ZipFile(final_zip, "w", zipfile.ZIP_DEFLATED) as zf:
-
-			zf.write(merged_path, arcname=os.path.basename(merged_path))
-
-	except Exception as e:
-
-		logger.error(
-			f"[symbol_consolidate_a_day][{symbol}] "
-			f"Failed to compress merged file on {day_str}: {e}",
-			exc_info=True
-		)
-
-		# Do not remove .jsonl if compression failed
-
-		return
-
-	# Remove intermediate plain-text .jsonl file after compression
-
-	try:
-
-		if os.path.exists(merged_path):
-
-			os.remove(merged_path)
-
-	except Exception as e:
-
-		logger.error(
-			f"[symbol_consolidate_a_day][{symbol}] "
-			f"Failed to remove merged .jsonl on {day_str}: {e}",
-			exc_info=True
-		)
-
-	# Optionally delete the original temp folder containing per-minute zips
-
-	if purge:
+		# List all zipped minute-level files (may be empty)
 
 		try:
 
-			shutil.rmtree(tmp_dir)
+			zip_files = [f for f in os.listdir(tmp_dir) if f.endswith(".zip")]
 
 		except Exception as e:
 
 			logger.error(
-				f"[symbol_consolidate_a_day][{symbol}] "
-				f"Failed to remove temp dir {tmp_dir}: {e}",
+				f"[symbol_consolidate_a_day][{symbol.upper()}] "
+				f"Failed to list zips in {tmp_dir}: {e}",
 				exc_info=True
 			)
 
-	logger.info(
-		f"[symbol_consolidate_a_day][{symbol}] "
-		f"Successfully merged {len(zip_files)} files for {day_str}"
-	)
+			return
+
+		if not zip_files:
+
+			logger.error(
+				f"[symbol_consolidate_a_day][{symbol.upper()}] "
+				f"No zip files to merge on {day_str}."
+			)
+
+			return
+
+		# 🔧 File handle management with proper scope handling
+
+		fout = None
+
+		try:
+
+			# Open output file for merged .jsonl content
+
+			fout = open(merged_path, "w", encoding="utf-8")
+
+			# Process each zip file in chronological order
+
+			for zip_file in sorted(zip_files):
+
+				zip_path = os.path.join(tmp_dir, zip_file)
+
+				try:
+
+					with zipfile.ZipFile(zip_path, "r") as zf:
+
+						for member in zf.namelist():
+
+							with zf.open(member) as f:
+
+								for raw in f:
+
+									fout.write(raw.decode("utf-8"))
+
+				except Exception as e:
+
+					logger.error(
+						f"[symbol_consolidate_a_day][{symbol.upper()}] "
+						f"Failed to extract {zip_path}: {e}",
+						exc_info=True
+					)
+
+					return
+
+		except Exception as e:
+
+			logger.error(
+				f"[symbol_consolidate_a_day][{symbol.upper()}] "
+				f"Failed to open or write to merged file {merged_path}: {e}",
+				exc_info=True
+			)
+
+			return
+
+		finally:
+
+			# 🔧 Ensure the output file is properly closed
+
+			if fout:
+
+				try:
+
+					fout.close()
+
+				except Exception as close_error:
+
+					logger.error(
+						f"[symbol_consolidate_a_day][{symbol.upper()}] "
+						f"Failed to close output file: {close_error}",
+						exc_info=True
+					)
+
+		# Recompress the consolidated .jsonl into a final single-archive zip
+
+		try:
+
+			final_zip = merged_path.replace(".jsonl", ".zip")
+
+			with zipfile.ZipFile(final_zip, "w", zipfile.ZIP_DEFLATED) as zf:
+
+				zf.write(merged_path, arcname=os.path.basename(merged_path))
+
+		except Exception as e:
+
+			logger.error(
+				f"[symbol_consolidate_a_day][{symbol.upper()}] "
+				f"Failed to compress merged file on {day_str}: {e}",
+				exc_info=True
+			)
+
+			# Do not remove .jsonl if compression failed
+
+			return
+
+		# Remove intermediate plain-text .jsonl file after compression
+
+		try:
+
+			if os.path.exists(merged_path):
+
+				os.remove(merged_path)
+
+		except Exception as e:
+
+			logger.error(
+				f"[symbol_consolidate_a_day][{symbol.upper()}] "
+				f"Failed to remove merged .jsonl on {day_str}: {e}",
+				exc_info=True
+			)
+
+		# Optionally delete the original temp folder containing per-minute zips
+
+		if purge:
+
+			try:
+
+				shutil.rmtree(tmp_dir)
+
+			except Exception as e:
+
+				logger.error(
+					f"[symbol_consolidate_a_day][{symbol.upper()}] "
+					f"Failed to remove temp dir {tmp_dir}: {e}",
+					exc_info=True
+				)
+
+		logger.info(
+			f"[symbol_consolidate_a_day][{symbol.upper()}] "
+			f"Successfully merged {len(zip_files)} files for {day_str}"
+			f"(took {timer.tock():.5f} sec)."
+		)
 
 # ───────────────────────────────────────────────────────────────────────────────
 # 🕓 Latency Control: Measurement, Thresholding, and Flow Gate
 # ───────────────────────────────────────────────────────────────────────────────
 
+# @profile
 async def gate_streaming_by_latency() -> None:
 
 	"""
@@ -1179,7 +1244,7 @@ async def gate_streaming_by_latency() -> None:
 				logger.info(
 					"[gate_streaming_by_latency] "
 					f"Latency normalized. "
-					f"Enable order book stream."
+					f"Enable order book stream.\n"
 				)
 
 				EVENT_STREAM_ENABLE.set()
@@ -1191,7 +1256,7 @@ async def gate_streaming_by_latency() -> None:
 
 					logger.info(
 						f"[gate_streaming_by_latency] "
-						f"Warming up latency measurements..."
+						f"Warming up latency measurements...\n"
 					)
 
 					has_logged_warmup = True
@@ -1221,6 +1286,7 @@ async def gate_streaming_by_latency() -> None:
 
 # .............................................................
 
+# @profile
 async def estimate_latency() -> None:
 
 	"""
@@ -1461,6 +1527,7 @@ def format_ws_url(url: str, label: str = "") -> str:
 #   - On failure, reconnects with exponential backoff and jitter
 # ───────────────────────────────────────────────────────────────────────────────
 
+# @profile
 async def put_snapshot() -> None:
 
 	"""
@@ -1656,6 +1723,7 @@ def symbol_trigger_merge(symbol, last_day):
 		PURGE_ON_DATE_CHANGE == 1
 	)
 
+# @profile
 async def symbol_dump_snapshot(symbol: str) -> None:
 
 	"""
@@ -1838,7 +1906,7 @@ async def symbol_dump_snapshot(symbol: str) -> None:
 						logger.info(
 							f"[symbol_dump_snapshot][{symbol.upper()}] "
 							f"Triggered merge for {last_day} "
-							f"(current day: {day_str})"
+							f"(current day: {day_str})."
 						)
 
 		except Exception as e:
@@ -2156,54 +2224,179 @@ async def orderbook_ui(request: Request, symbol: str):
 		raise HTTPException(status_code=500, detail="internal error")
 
 # ───────────────────────────────────────────────────────────────────────────────
+# EXPERIMENTAL: EXTERNAL DASHBOARD SERVICE
+# ───────────────────────────────────────────────────────────────────────────────
+
+@APP.get("/dashboard", response_class=HTMLResponse)
+async def dashboard_page(request: Request):
+    """Dashboard HTML 페이지 서빙"""
+    try:
+        # stream_binance_dashboard.html 내용을 읽어서 반환
+        dashboard_html = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Binance Dashboard</title>
+    <!-- 기존 stream_binance_dashboard.html의 스타일 그대로 -->
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: center; }
+        th { background-color: #f4f4f4; }
+        tr:nth-child(even) { background-color: #f9f9f9; }
+        #lastUpdated { margin-top: 10px; font-size: 14px; color: #555; }
+        .section-title { margin-top: 30px; margin-bottom: 10px; font-size: 18px; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <h1>Binance Dashboard</h1>
+    <div id="lastUpdated">Last Updated: N/A</div>
+    
+    <div class="section-title">Hardware Metrics</div>
+    <table id="hardwareMetricsTable">
+        <thead>
+            <tr><th>Metric</th><th>Value</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>Network Usage</td><td id="networkUsage">0 Mbps</td></tr>
+            <tr><td>CPU Usage</td><td id="cpuUsage">0.0%</td></tr>
+            <tr><td>Memory Usage</td><td id="memoryUsage">0.0%</td></tr>
+            <tr><td>Storage Usage</td><td id="storageUsage">0.0%</td></tr>
+        </tbody>
+    </table>
+
+    <div class="section-title">Symbol Metrics</div>
+    <table id="symbolMetricsTable">
+        <thead>
+            <tr>
+                <th>Symbol</th>
+                <th>Median Latency (ms)</th>
+                <th>Flush Interval (ms)</th>
+                <th id="queueSizeHeader">Queue Size (Total: 0)</th>
+            </tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+
+    <script>
+        // 현재 호스트를 자동으로 감지
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const host = window.location.host;
+        const ws = new WebSocket(`${protocol}//${host}/ws/dashboard`);
+
+        ws.onopen = () => console.log("WebSocket connection established.");
+
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            const medLatency = data.med_latency;
+            const flushInterval = data.flush_interval;
+            const queueSize = data.queue_size;
+            const queueSizeTotal = data.queue_size_total;
+            const hardware = data.hardware;
+            const lastUpdated = data.last_updated;
+
+            // Hardware metrics 업데이트
+            if (hardware) {
+                document.getElementById("networkUsage").textContent = `${hardware.network_mbps.toFixed(2)} Mbps`;
+                document.getElementById("cpuUsage").textContent = `${hardware.cpu_percent.toFixed(1)}%`;
+                document.getElementById("memoryUsage").textContent = `${hardware.memory_percent.toFixed(1)}%`;
+                document.getElementById("storageUsage").textContent = `${hardware.storage_percent.toFixed(1)}%`;
+            }
+
+            // Symbol metrics 업데이트
+            const symbolTableBody = document.querySelector("#symbolMetricsTable tbody");
+            symbolTableBody.innerHTML = "";
+
+            for (const symbol in medLatency) {
+                const row = document.createElement("tr");
+                const symbolCell = document.createElement("td");
+                const latencyCell = document.createElement("td");
+                const flushCell = document.createElement("td");
+                const queueCell = document.createElement("td");
+
+                symbolCell.textContent = symbol.toUpperCase();
+                latencyCell.textContent = medLatency[symbol];
+                flushCell.textContent = flushInterval[symbol];
+                queueCell.textContent = queueSize ? queueSize[symbol] : 0;
+
+                row.appendChild(symbolCell);
+                row.appendChild(latencyCell);
+                row.appendChild(flushCell);
+                row.appendChild(queueCell);
+                symbolTableBody.appendChild(row);
+            }
+
+            document.getElementById("queueSizeHeader").textContent = `Queue Size (Total: ${queueSizeTotal ?? 0})`;
+
+            const formattedTime = new Date(lastUpdated).toISOString().slice(0, 19) + "Z";
+            document.querySelector("#lastUpdated").textContent = `Last Updated: ${formattedTime}`;
+        };
+
+        ws.onerror = (error) => console.error("WebSocket error:", error);
+        ws.onclose = () => console.log("WebSocket connection closed.");
+    </script>
+</body>
+</html>
+        """
+        return HTMLResponse(content=dashboard_html)
+    except Exception as e:
+        logger.error(f"[dashboard_page] Failed to serve dashboard: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="internal error")
+
+# ───────────────────────────────────────────────────────────────────────────────
 # 📊 Dashboard Monitoring & WebSocket Stream Handler
 #
-# 🖥️ Provides real-time monitoring and WebSocket streaming for system metrics
-# (e.g., hardware usage, median latency per symbol) to connected clients.
+# Provides real-time monitoring and WebSocket streaming for system metrics,
+# such as hardware usage and median latency per symbol, to connected clients.
 #
-# 🔧 Features:
-#   • 🖥️ Hardware Monitoring:
-#	   - Tracks CPU, memory, storage, and network usage using `psutil`.
-#	   - Updates global metrics asynchronously to avoid blocking the event loop.
-#   • 🌐 WebSocket Dashboard:
-#	   - Streams monitoring data to clients at `/ws/dashboard`.
-#	   - Enforces connection limits (`MAX_DASHBOARD_CONNECTIONS`) and session
-#		 timeouts.
-#	   - Periodically sends JSON payloads containing hardware metrics and
-#		 symbol latency.
-#   • ⚙️ Configuration-Driven Behavior:
-#	   - All limits, intervals, and backoff strategies are loaded from `.conf`.
-#	   - Fully customizable via `get_binance_chart.conf`.
+# Features:
+#	• Hardware Monitoring:
+#		- Tracks CPU, memory, storage, and network usage using `psutil`.
+#		- Updates global metrics asynchronously to avoid blocking the event loop.
 #
-# 🛠️ Usage:
-#   - Designed for extensibility: add more metrics or endpoints as needed.
-#   - Intended for use with browser-based dashboards or monitoring tools.
+#	• WebSocket Dashboard:
+#		- Streams monitoring data to clients at `/ws/dashboard`.
+#		- Enforces connection limits (`MAX_DASHBOARD_CONNECTIONS`)
+#		  and session timeouts.
+#		- Periodically sends JSON payloads with hardware metrics and
+#		  symbol latency.
 #
-# 🛡️ Safety & Robustness:
-#   - Hardware monitoring runs asynchronously to prevent blocking operations.
-#   - WebSocket handler ensures graceful handling of disconnects, errors, and
-#	 cancellations.
-#   - Implements exponential backoff for reconnection attempts.
-#   - All resource management (locks, counters) is thread-safe and efficient.
+#	• Configuration-Driven:
+#		- All limits, intervals, and backoff strategies are loaded from `.conf`.
+#		- Fully customizable via `get_binance_chart.conf`.
 #
-# 🏗️ Structures:
-#   • Global Metrics:
-#	   - `NETWORK_LOAD_MBPS`: Network bandwidth usage in Mbps.
-#	   - `CPU_LOAD_PERCENTAGE`: CPU usage percentage.
-#	   - `MEM_LOAD_PERCENTAGE`: Memory usage percentage.
-#	   - `STORAGE_PERCENTAGE`: Storage usage percentage.
-#   • WebSocket Configuration:
-#	   - `DASHBOARD_STREAM_INTERVAL`: Interval between data pushes (seconds).
-#	   - `MAX_DASHBOARD_CONNECTIONS`: Maximum concurrent WebSocket connections.
-#	   - `MAX_DASHBOARD_SESSION_SEC`: Maximum session duration per client
-#		 (seconds).
-#   • Locks:
-#	   - `ACTIVE_DASHBOARD_LOCK`: Ensures thread-safe connection tracking.
+# Usage:
+#	- Designed for extensibility: add more metrics or endpoints as needed.
+#	- Intended for browser-based dashboards or monitoring tools.
 #
-# 📚 See also:
-#   - `monitor_hardware()`: Asynchronous hardware monitoring function.
-#   - `dashboard()`: WebSocket handler for dashboard clients.
-#   - `RULESET.md`: Documentation and code conventions.
+# Safety & Robustness:
+#	- Hardware monitoring runs asynchronously to prevent blocking.
+#	- WebSocket handler ensures graceful handling of disconnects,
+#	  errors, and cancellations.
+#	- Implements exponential backoff for reconnection attempts.
+#	- All resource management (locks, counters) is thread-safe.
+#
+# Structures:
+#	• Global Metrics:
+#		- NETWORK_LOAD_MBPS: Network bandwidth usage in Mbps.
+#		- CPU_LOAD_PERCENTAGE: CPU usage percentage.
+#		- MEM_LOAD_PERCENTAGE: Memory usage percentage.
+#		- STORAGE_PERCENTAGE: Storage usage percentage.
+#
+#	• WebSocket Configuration:
+#		- DASHBOARD_STREAM_INTERVAL: Interval between data pushes (seconds).
+#		- MAX_DASHBOARD_CONNECTIONS: Max concurrent WebSocket connections.
+#		- MAX_DASHBOARD_SESSION_SEC: Max session duration per client (seconds).
+#
+#	• Locks:
+#		- ACTIVE_DASHBOARD_LOCK: Ensures thread-safe connection tracking.
+#
+# See also:
+#	- monitor_hardware(): Asynchronous hardware monitoring function.
+#	- dashboard(): WebSocket handler for dashboard clients.
+#	- RULESET.md: Documentation and code conventions.
 # ───────────────────────────────────────────────────────────────────────────────
 
 from fastapi import WebSocket, WebSocketDisconnect
@@ -2211,7 +2404,7 @@ import psutil
 
 DASHBOARD_STREAM_INTERVAL = float(CONFIG.get("DASHBOARD_STREAM_INTERVAL", 0.075))
 MAX_DASHBOARD_CONNECTIONS = int(CONFIG.get("MAX_DASHBOARD_CONNECTIONS", 3))
-MAX_SESSION_SECONDS		  = int(CONFIG.get("MAX_DASHBOARD_SESSION_SEC", 600))
+MAX_DASHBOARD_SESSION_SEC = int(CONFIG.get("MAX_DASHBOARD_SESSION_SEC", 1800))
 
 ACTIVE_DASHBOARD_LOCK		 = asyncio.Lock()
 ACTIVE_DASHBOARD_CONNECTIONS = 0
@@ -2229,8 +2422,11 @@ CPU_LOAD_PERCENTAGE: float = 0.0
 MEM_LOAD_PERCENTAGE: float = 0.0
 STORAGE_PERCENTAGE:  float = 0.0
 
+DESIRED_MAX_SYS_MEM_LOAD = float(CONFIG.get("DESIRED_MAX_SYS_MEM_LOAD", 85.0))
+
 # ───────────────────────────────────────────────────────────────────────────────
 
+# @profile
 async def monitor_hardware():
 
 	"""
@@ -2245,9 +2441,12 @@ async def monitor_hardware():
 		- STORAGE_PERCENTAGE: Storage usage percentage
 	"""
 
+	import gc
+
 	global NETWORK_LOAD_MBPS, CPU_LOAD_PERCENTAGE
 	global MEM_LOAD_PERCENTAGE, STORAGE_PERCENTAGE
 	global HARDWARE_MONITORING_INTERVAL, CPU_PERCENT_DURATION
+	global DESIRED_MAX_SYS_MEM_LOAD
 	
 	# Initialize previous network counters for bandwidth calculation
 
@@ -2311,6 +2510,27 @@ async def monitor_hardware():
 			prev_sent = curr_sent
 			prev_recv = curr_recv
 			prev_time = curr_time
+
+			# ──────────────── GC Trigger Logic ────────────────
+
+			if MEM_LOAD_PERCENTAGE > DESIRED_MAX_SYS_MEM_LOAD:
+
+				logger.warning(
+					f"[monitor_hardware]\n"
+					f"\t  {MEM_LOAD_PERCENTAGE:.2f}% (MEM_LOAD_PERCENTAGE)\n"
+					f"\t> {DESIRED_MAX_SYS_MEM_LOAD:.2f}% (DESIRED_MAX_SYS_MEM_LOAD).\n"
+					f"\tTriggering async gc.collect()..."
+				)
+
+				with NanoTimer() as timer:
+
+					await asyncio.to_thread(gc.collect)
+					
+					logger.info(
+						f"[monitor_hardware] "
+						f"gc.collect() completed in "
+						f"{timer.tock():.5f} seconds."
+					)
 			
 		except Exception as e:
 
@@ -2330,6 +2550,7 @@ async def monitor_hardware():
 
 # ───────────────────────────────────────────────────────────────────────────────
 
+# @profile
 @APP.websocket("/ws/dashboard")
 async def dashboard(websocket: WebSocket):
 
@@ -2388,8 +2609,12 @@ async def dashboard(websocket: WebSocket):
 				# Track session start time for session timeout
 				
 				start_time_ms  = get_current_time_ms()
-				max_session_ms = MAX_SESSION_SECONDS * 1000
-
+				
+				max_session_ms = (
+					MAX_DASHBOARD_SESSION_SEC * 1000 if MAX_DASHBOARD_SESSION_SEC > 0
+					else None
+				)
+				
 				# Main data push loop: send metrics until client disconnects, 
 				# error, or session timeout
 
@@ -2408,6 +2633,14 @@ async def dashboard(websocket: WebSocket):
 								symbol: JSON_FLUSH_INTERVAL.get(symbol, 0)
 								for symbol in SYMBOLS
 							},
+							"queue_size": {
+								symbol: SNAPSHOTS_QUEUE_DICT[symbol].qsize()
+								for symbol in SYMBOLS
+							},
+							"queue_size_total": sum(
+								SNAPSHOTS_QUEUE_DICT[symbol].qsize()
+								for symbol in SYMBOLS
+							),
 							"hardware": {
 								"network_mbps":	   round(NETWORK_LOAD_MBPS, 2),
 								"cpu_percent":	   CPU_LOAD_PERCENTAGE,
@@ -2423,20 +2656,19 @@ async def dashboard(websocket: WebSocket):
 
 						await websocket.send_json(data)
 
-						# Check session duration and close if exceeded
-
-						current_time_ms = get_current_time_ms()
-
-						if current_time_ms - start_time_ms > max_session_ms:
-
-							await websocket.close(
-								code=1000, reason="Session time limit reached."
-							)
-							logger.info(
-								f"[dashboard] "
-								f"Session time limit reached, connection closed."
-							)
-							break
+						# Check session duration only if MAX_DASHBOARD_SESSION_SEC > 0
+						
+						if max_session_ms is not None:
+							
+							current_time_ms = get_current_time_ms()
+							
+							if current_time_ms - start_time_ms > max_session_ms:
+								
+								await websocket.close(
+									code=1000, reason="Session time limit reached."
+								)
+								
+								break
 
 						# Wait for the configured interval before sending the next update
 
@@ -2904,7 +3136,7 @@ if __name__ == "__main__":
 					app			= APP,
 					host		= "0.0.0.0",
 					port		= 8000,
-					lifespan	= "off",
+					lifespan	= "auto",
 					use_colors	= False
 				)
 
@@ -2946,3 +3178,4 @@ if __name__ == "__main__":
 	finally:
 		
 		pass
+
