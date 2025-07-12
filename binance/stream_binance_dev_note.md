@@ -101,9 +101,9 @@ DuckDNS 대시보드에 IPv4와 IPv6 각각의 공인 주소를 입력해야 합
 - IPv6: `2a?2:1?10:90?2:6?00:c8e:c??e:??af:cd??`
 
 ### 1.x. 대시보드 접근
-- http://localhost:8000/dashboard		(프로그램 실행 중인 컴퓨터에서)
-- http://192.168.1.107/dashboard		(홈서버 가동중 동일 라우터 네트워크에서)
-- http://c01hyka.duckdns.org/dashboard	(외부)
+- http://localhost:8000/dashboard		at the development computer
+- http://192.168.1.107/dashboard		at the script running server (internal)
+- http://c01hyka.duckdns.org/dashboard	at the script running server (external)
 
 ## 4. (선택사항) HTTPS 적용
 ```bash

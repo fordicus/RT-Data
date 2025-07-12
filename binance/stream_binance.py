@@ -615,7 +615,7 @@ JSON_FLUSH_INTERVAL:  Dict[str, int] = {}
 # 	if modularization/multi-instance is needed
 # ───────────────────────────────────────────────────────────────────────────────
 
-READY_EVENT:		 asyncio.Event
+EVENT_1ST_SNAPSHOT:	 asyncio.Event
 EVENT_LATENCY_VALID: asyncio.Event
 EVENT_STREAM_ENABLE: asyncio.Event
 
@@ -630,10 +630,10 @@ def initialize_event_flags():
 
 	try:
 
-		global READY_EVENT, EVENT_LATENCY_VALID, EVENT_STREAM_ENABLE
+		global EVENT_1ST_SNAPSHOT, EVENT_LATENCY_VALID, EVENT_STREAM_ENABLE
 		global EVENT_FLAGS_INITIALIZED
 
-		READY_EVENT = asyncio.Event()
+		EVENT_1ST_SNAPSHOT = asyncio.Event()
 		EVENT_LATENCY_VALID = asyncio.Event()
 		EVENT_STREAM_ENABLE = asyncio.Event()
 
@@ -1496,171 +1496,186 @@ def format_ws_url(url: str, label: str = "") -> str:
 
 	return formatted
 
-# ───────────────────────────────────────────────────────────────────────────────
-# 🧩 Depth20 Snapshot Collector — Streams → Queue Buffer
-#
-# Consumes Binance `@depth20@100ms` WebSocket snapshots for all tracked symbols,
-# applies latency compensation, and dispatches each processed snapshot to:
-#   • SNAPSHOTS_QUEUE_DICT[symbol] — for persistent file logging
-#   • SYMBOL_SNAPSHOTS_TO_RENDER[symbol] — for live debug rendering via FastAPI
-#
-# Responsibilities:
-#   • Waits for EVENT_STREAM_ENABLE to confirm latency quality
-#   • For each stream message:
-#	   - Extracts symbol, bid/ask levels, and last update ID
-#	   - Applies median-latency correction to compute eventTime (ms)
-#	   - Dispatches snapshot to both persistence queue and render cache
-#
-# Notes:
-#   - Binance partial streams like `@depth20@100ms` lack
-# 	  server-side timestamps ("E"); all timing is client-side
-# 	  and latency-compensated
-#   - eventTime is an int (milliseconds since UNIX epoch)
-#   - Only SNAPSHOTS_QUEUE_DICT[symbol] is used for durable storage
-#   - SYMBOL_SNAPSHOTS_TO_RENDER is ephemeral, used for diagnostics
-#	 or FastAPI display
-#   - On failure, reconnects with exponential backoff and jitter
-# ───────────────────────────────────────────────────────────────────────────────
-
 async def put_snapshot() -> None:
 
-	"""
-	Processes Binance `depth20@100ms` snapshots and
-	dispatches them to queues and caches.
-	"""
+	""" ————————————————————————————————————————————————————————————————
+	CORE FUNCTIONALITY:
+		await SNAPSHOTS_QUEUE_DICT[symbol].put(snapshot)
+	————————————————————————————————————————————————————————————————————
+	HINT:
+		asyncio.Queue(maxsize=SNAPSHOTS_QUEUE_MAX)
+	————————————————————————————————————————————————————————————————————
+	GLOBAL VARIABLES:
+		WRITE:
+			SNAPSHOTS_QUEUE_DICT:		dict[str, asyncio.Queue]
+			SYMBOL_SNAPSHOTS_TO_RENDER: dict[str, dict]
+			EVENT_1ST_SNAPSHOT:			asyncio.Event
+		READ:
+			LATENCY_GATE:
+				EVENT_STREAM_ENABLE:	asyncio.Event
+				LATENCY_DICT:			Dict[str, Deque[int]]
+				MEDIAN_LATENCY_DICT:	Dict[str, int]
+			WEBSOCKETS:
+				WS_URL, WS_PING_INTERVAL, WS_PING_TIMEOUT
+				MAX_BACKOFF, BASE_BACKOFF,
+				RESET_CYCLE_AFTER, RESET_BACKOFF_LEVEL
+			LOGICAL:
+				SYMBOLS
+	———————————————————————————————————————————————————————————————— """
 
-	global SNAPSHOTS_QUEUE_DICT
-	global LATENCY_DICT, MEDIAN_LATENCY_DICT
-
-	attempt = 0  # Retry counter for reconnects
+	ws_retry_cnt = 0
 
 	while True:
 
-		# ⏸ Wait until latency gate is open
+		symbol = "UNKNOWN"
 
 		await EVENT_STREAM_ENABLE.wait()
 
 		try:
 
-			# 🔌 Connect to Binance combined stream (depth20@100ms)
-
-			async with websockets.connect(
-				WS_URL,
+			async with websockets.connect(WS_URL,
 				ping_interval = WS_PING_INTERVAL,
 				ping_timeout  = WS_PING_TIMEOUT
 			) as ws:
 
 				logger.info(
-					f"[put_snapshot] "
-					f"Connected to:\n{format_ws_url(WS_URL, '(depth20@100ms)')}\n"
+					f"[put_snapshot] Connected to:\n"
+					f"{format_ws_url(WS_URL, '(depth20@100ms)')}\n"
 				)
 				
-				attempt = 0  # Reset retry count
-
-				# 🔄 Process stream messages
+				ws_retry_cnt = 0
 
 				async for raw in ws:
 
 					try:
 
-						# 📦 Parse WebSocket message
-
-						msg = json.loads(raw)
+						msg	   = json.loads(raw)
 						stream = msg.get("stream", "")
 						symbol = stream.split("@", 1)[0].lower()
 
+						del stream
+
 						if symbol not in SYMBOLS:
+							continue
 
-							continue  # Skip unexpected symbols
-
-						# ✅ Enforce latency gate per-symbol
-
-						if not EVENT_STREAM_ENABLE.is_set() or not LATENCY_DICT[symbol]:
-
-							continue  # Skip if latency is untrusted
+						if ((not EVENT_STREAM_ENABLE.is_set()) or
+							(not LATENCY_DICT[symbol])):
+							continue
 
 						data = msg.get("data", {})
+
+						del msg
+
 						last_update = data.get("lastUpdateId")
-
 						if last_update is None:
-
-							continue  # Ignore malformed updates
+							del last_update
+							continue
 
 						bids = data.get("bids", [])
 						asks = data.get("asks", [])
 
-						# ─────────────────────────────────────────────────────────────────
-						# 📝 Binance partial streams like `@depth20@100ms` do NOT include
-						# the server-side event timestamp ("E"). Therefore, we must rely
-						# on local receipt time corrected by estimated network latency.
-						# 🎯 Estimate event timestamp via median latency compensation
-						# ─────────────────────────────────────────────────────────────────
+						del data
 
-						event_ts = get_current_time_ms() - max(
-							0, MEDIAN_LATENCY_DICT.get(symbol, 0)
-						)
-
-						# 🧾 Construct snapshot
+						# ──────────────────────────────────────────────────
+						# Binance partial streams like `@depth20@100ms`
+						# do NOT include the server-side event timestamp
+						# ("E"). Thus, we must rely on local receipt time
+						# corrected by estimated network latency.
+						# ──────────────────────────────────────────────────
 
 						snapshot = {
 							"lastUpdateId": last_update,
-							"eventTime": event_ts,
+							"eventTime": (get_current_time_ms() - max(
+								0, MEDIAN_LATENCY_DICT.get(symbol, 0)
+							)),
 							"bids": [[float(p), float(q)] for p, q in bids],
 							"asks": [[float(p), float(q)] for p, q in asks],
 						}
 
-						# 📤 Push to downstream queue for file dump
+						del last_update, bids, asks
 
+						# ──────────────────────────────────────────────────
+						# `.qsize()` is less than or equal to one almost
+						# surely, meaning that `SNAPSHOTS_QUEUE_DICT` is
+						# being quickly consumed via `.get()`.
+						# ──────────────────────────────────────────────────
+						
 						await SNAPSHOTS_QUEUE_DICT[symbol].put(snapshot)
 
-						# 🧠 Cache to in-memory store (just for debug-purpose rendering)
+						if not EVENT_1ST_SNAPSHOT.is_set():
+							EVENT_1ST_SNAPSHOT.set()
+
+						# ──────────────────────────────────────────────────
+						# Currently, `SYMBOL_SNAPSHOTS_TO_RENDER` is
+						# referenced nowhere almost surely:
+						# 	no potential of memory issue
+						# ──────────────────────────────────────────────────
 
 						SYMBOL_SNAPSHOTS_TO_RENDER[symbol] = snapshot
 
-						# 🔓 Signal FastAPI readiness after first snapshot
-
-						if not READY_EVENT.is_set():
-
-							READY_EVENT.set()
+						del snapshot
 
 					except Exception as e:
 
+						if 'symbol' not in locals():
+							symbol = "UNKNOWN"
+
 						logger.warning(
-							f"[put_snapshot][{symbol}] "
+							f"[put_snapshot][{symbol.upper()}] "
 							f"Failed to process message: {e}",
 							exc_info=True
 						)
 
-						continue
+						del e
+						continue	# flow control does not skip `finally``
+
+					finally:
+
+						del symbol
 
 		except Exception as e:
 
-			# ⚠️ On error: log and retry with backoff
+			ws_retry_cnt += 1
 
-			attempt += 1
+			if 'symbol' not in locals():
+				symbol = "UNKNOWN"
 
 			logger.warning(
-				f"[put_snapshot] WebSocket error (attempt {attempt}): {e}",
+				f"[put_snapshot][{symbol.upper()}] "
+				f"WebSocket error "
+				f"(ws_retry_cnt {ws_retry_cnt}): {e}",
 				exc_info=True
 			)
 
-			backoff = min(
-				MAX_BACKOFF, BASE_BACKOFF * (2 ** attempt)
+			backoff = min(MAX_BACKOFF,
+				BASE_BACKOFF * (2 ** ws_retry_cnt)
 			) + random.uniform(0, 1)
 
-			if attempt > RESET_CYCLE_AFTER:
-
-				attempt = RESET_BACKOFF_LEVEL
+			if ws_retry_cnt > RESET_CYCLE_AFTER:
+				ws_retry_cnt = RESET_BACKOFF_LEVEL
 
 			logger.warning(
-				f"[put_snapshot] Retrying in {backoff:.1f} seconds..."
+				f"[put_snapshot][{symbol.upper()}] "
+				f"Retrying in {backoff:.1f} seconds..."
 			)
 
 			await asyncio.sleep(backoff)
 
+			del e, backoff
+
 		finally:
 
-			logger.info("[put_snapshot] WebSocket connection closed.")
+			if 'symbol' not in locals():
+				symbol = "UNKNOWN"
+
+			logger.info(
+				f"[put_snapshot][{symbol.upper()}] "
+				f"WebSocket connection closed."
+			)
+
+			del ws, symbol	# explicitly being deleted
+		
+	del ws_retry_cnt
 
 # ───────────────────────────────────────────────────────────────────────────────
 # 📝 Background Task: Snapshot Persistence & Daily Merge Trigger
@@ -2132,7 +2147,7 @@ async def health_ready():
 
 	try:
 
-		if READY_EVENT.is_set():
+		if EVENT_1ST_SNAPSHOT.is_set():
 
 			return {"status": "ready"}
 
@@ -2329,7 +2344,7 @@ NETWORK_LOAD_MBPS:		int   = 0
 CPU_LOAD_PERCENTAGE:	float = 0.0
 MEM_LOAD_PERCENTAGE:	float = 0.0
 STORAGE_PERCENTAGE:		float = 0.0
-GC_TIME_COST_MS:		float = 0.0
+GC_TIME_COST_MS:		float = -0.0
 
 GC_INTERVAL_SEC = float(
 	CONFIG.get("GC_INTERVAL_SEC", 60.0)
@@ -2340,39 +2355,25 @@ DESIRED_MAX_SYS_MEM_LOAD = float(
 )
 
 # ───────────────────────────────────────────────────────────────────────────────
-
-async def periodic_gc():
-
-	import gc
-
-	global GC_INTERVAL_SEC, GC_TIME_COST_MS, EVENT_STREAM_ENABLE
-
-	await EVENT_STREAM_ENABLE.wait()
-
-	while True:
-
-		try:
-
-			with NanoTimer() as timer:
-
-				await asyncio.to_thread(gc.collect)
-
-				GC_TIME_COST_MS = (
-					timer.tock() * 1_000.0
-				)
-
-		except Exception as e:
-
-			logger.error(
-				f"[periodic_gc] "
-				f"Error during gc.collect(): {e}",
-				exc_info=True
-			)
-
-		finally:
-
-			await asyncio.sleep(GC_INTERVAL_SEC)
-
+# async def periodic_gc():
+	# import gc
+	# global GC_INTERVAL_SEC, GC_TIME_COST_MS, EVENT_STREAM_ENABLE
+	# await EVENT_STREAM_ENABLE.wait()
+	# while True:
+		# try:
+			# with NanoTimer() as timer:
+				# await asyncio.to_thread(gc.collect)
+				# GC_TIME_COST_MS = (
+					# timer.tock() * 1_000.0
+				# )
+		# except Exception as e:
+			# logger.error(
+				# f"[periodic_gc] "
+				# f"Error during gc.collect(): {e}",
+				# exc_info=True
+			# )
+		# finally:
+			# await asyncio.sleep(GC_INTERVAL_SEC)
 # ───────────────────────────────────────────────────────────────────────────────
 
 async def monitor_hardware():
@@ -2927,7 +2928,7 @@ if __name__ == "__main__":
 
 			# Initialize in-memory structures
 
-			global READY_EVENT
+			global EVENT_1ST_SNAPSHOT
 
 			try:
 
@@ -2945,23 +2946,18 @@ if __name__ == "__main__":
 				sys.exit(1)
 
 			# Launch a periodic garbage collection coroutine
-
-			try:
-
-				asyncio.create_task(periodic_gc())
-				logger.info(
-					f"[main] periodic_gc task launched "
-					f"(every {GC_INTERVAL_SEC:.1f}s)."
-				)
-
-			except Exception as e:
-
-				logger.error(
-					f"[main] Failed to launch periodic_gc: {e}",
-					exc_info=True
-				)
-
-				sys.exit(1)
+			# try:
+				# asyncio.create_task(periodic_gc())
+				# logger.info(
+					# f"[main] periodic_gc task launched "
+					# f"(every {GC_INTERVAL_SEC:.1f}s)."
+				# )
+			# except Exception as e:
+				# logger.error(
+					# f"[main] Failed to launch periodic_gc: {e}",
+					# exc_info=True
+				# )
+				# sys.exit(1)
 
 			# Launch hardware monitoring in a coroutine
 
@@ -3070,12 +3066,12 @@ if __name__ == "__main__":
 
 			try:
 
-				await READY_EVENT.wait()
+				await EVENT_1ST_SNAPSHOT.wait()
 
 			except Exception as e:
 
 				logger.error(
-					f"[main] Error while waiting for READY_EVENT: {e}",
+					f"[main] Error while waiting for EVENT_1ST_SNAPSHOT: {e}",
 					exc_info=True
 				)
 
@@ -3140,3 +3136,30 @@ if __name__ == "__main__":
 		
 		pass
 
+""" ————————————————————————————————————————————————————————————————————————————
+
+Infinite Coroutines in the Main Process:
+
+	SNAPSHOT:
+		✅ async def put_snapshot() -> None
+		🕔 async def symbol_dump_snapshot(symbol: str) -> None
+
+	LATENCY:
+		async def estimate_latency() -> None
+		async def gate_streaming_by_latency() -> None
+
+	DASHBOARD:
+		async def dashboard(websocket: WebSocket)
+		async def monitor_hardware()
+
+	DEPRECATED:
+		async def periodic_gc()
+
+————————————————————————————————————————————————————————————————————————————————
+
+Dashboard URLs:
+- http://localhost:8000/dashboard		dev pc
+- http://192.168.1.107/dashboard		server (internal access)
+- http://c01hyka.duckdns.org/dashboard	server (external access)
+
+———————————————————————————————————————————————————————————————————————————— """
