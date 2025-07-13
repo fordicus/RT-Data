@@ -5,7 +5,9 @@ async def put_snapshot() -> None:
 		await SNAPSHOTS_QUEUE_DICT[symbol].put(snapshot)
 	————————————————————————————————————————————————————————————————————
 	HINT:
-		asyncio.Queue(maxsize=SNAPSHOTS_QUEUE_MAX)
+		1. asyncio.Queue(maxsize=SNAPSHOTS_QUEUE_MAX)
+		2. KYC (Know-Your-Cycle) protocol:
+			`del local`: refcount ↓, GC runs sooner
 	————————————————————————————————————————————————————————————————————
 	CREATION:
 		if __name__ == "__main__":

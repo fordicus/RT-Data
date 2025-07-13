@@ -1503,7 +1503,9 @@ async def put_snapshot() -> None:
 		await SNAPSHOTS_QUEUE_DICT[symbol].put(snapshot)
 	————————————————————————————————————————————————————————————————————
 	HINT:
-		asyncio.Queue(maxsize=SNAPSHOTS_QUEUE_MAX)
+		1. asyncio.Queue(maxsize=SNAPSHOTS_QUEUE_MAX)
+		2. KYC (Know-Your-Cycle) protocol:
+			`del local`: refcount ↓, GC runs sooner
 	————————————————————————————————————————————————————————————————————
 	GLOBAL VARIABLES:
 		WRITE:
@@ -1726,28 +1728,58 @@ def symbol_trigger_merge(symbol, last_day):
 
 	MERGE_EXECUTOR.submit(
 		symbol_consolidate_a_day,
-		symbol,
-		last_day,
+		# pickle(symbol, last_day)
+		symbol, last_day,
 		LOB_DIR,
 		PURGE_ON_DATE_CHANGE == 1
 	)
 
 async def symbol_dump_snapshot(symbol: str) -> None:
 
-	"""
-	Writes snapshots to disk and
-	triggers daily merge for the given symbol.
-	"""
+	""" ————————————————————————————————————————————————————————————————
+	CORE FUNCTIONALITY:
+		TO BE WRITTEN
+	————————————————————————————————————————————————————————————————————
+	GLOBAL VARIABLES:
+		READ:
+			SNAPSHOTS_QUEUE_DICT:	dict[str, asyncio.Queue]
+			EVENT_STREAM_ENABLE:	asyncio.Event
+			LOB_DIR:				str
+		WRITE:
+			JSON_FLUSH_INTERVAL:	Dict[str, int]
+		READ & WRITE:
+			SYMBOL_TO_FILE_HANDLES: dict[str, tuple[str, TextIOWrapper]]
+			LATEST_JSON_FLUSH:		Dict[str, int]
+	————————————————————————————————————————————————————————————————————
+	HINT:
+		KYC (Know-Your-Cycle) protocol:
+		`del local`: refcount ↓, GC runs sooner
+	———————————————————————————————————————————————————————————————— """
 
-	global SYMBOL_TO_FILE_HANDLES, SNAPSHOTS_QUEUE_DICT
-	global LATEST_JSON_FLUSH, JSON_FLUSH_INTERVAL
-	global EVENT_STREAM_ENABLE
+	def safe_close_file(f: TextIOWrapper):
+		""" ————————————————————————————————————————————————————————————
+		# from io import TextIOWrapper
+		#	if 'file' in locals():
+		#		safe_close_file(file)
+		#		del file
+		———————————————————————————————————————————————————————————— """
+		if f is not None and hasattr(f, 'close'):
+			try:
+				f.close()
+			except Exception:
+				pass
+
+	def pop_and_close_handle(
+		handles: dict[str, tuple[str, TextIOWrapper]], symbol: str
+	):
+		tup = handles.pop(symbol, None)
+		if tup is not None:
+			safe_close_file(tup[1])
 
 	queue = SNAPSHOTS_QUEUE_DICT[symbol]
+	symbol_upper = symbol.upper()
 
 	while True:
-
-		# Block until new snapshot is received
 
 		try:
 
@@ -1756,133 +1788,162 @@ async def symbol_dump_snapshot(symbol: str) -> None:
 		except Exception as e:
 
 			logger.error(
-				f"[symbol_dump_snapshot][{symbol.upper()}] "
+				f"[symbol_dump_snapshot][{symbol_upper}] "
 				f"Failed to get snapshot from queue: {e}",
 				exc_info=True
 			)
 
+			if 'snapshot' in locals(): del snapshot
+			del e
 			continue
 
 		if not EVENT_STREAM_ENABLE.is_set():
-
-			break
-
-		# ── Compute suffix (time block) and day string (UTC)
+			continue
 
 		try:
 
-			event_ts_ms = snapshot.get("eventTime", get_current_time_ms())
-			suffix		= get_file_suffix(SAVE_INTERVAL_MIN, event_ts_ms)
-			day_str		= get_date_from_suffix(suffix)
+			suffix = get_file_suffix(
+				SAVE_INTERVAL_MIN,
+				snapshot.get(
+					"eventTime",
+					get_current_time_ms()
+				)
+			)
+
+			day_str = get_date_from_suffix(suffix)
 
 		except Exception as e:
 
 			logger.error(
-				f"[symbol_dump_snapshot][{symbol.upper()}] "
+				f"[symbol_dump_snapshot][{symbol_upper}] "
 				f"Failed to compute suffix/day: {e}",
 				exc_info=True
 			)
 
+			_locals_ = locals()
+			for var in ['suffix', 'day_str']:
+				if var in _locals_: del _locals_[var]
+			del _locals_, e
 			continue
 
-		# ── Build filename and full path
+		# ── Build file name and full path
 
 		try:
 
-			filename = f"{symbol.upper()}_orderbook_{suffix}.jsonl"
-			tmp_dir = os.path.join(
-				LOB_DIR,
-				"temporary",
-				f"{symbol.upper()}_orderbook_{day_str}",
+			filename = f"{symbol_upper}_orderbook_{suffix}.jsonl"
+			tmp_dir = os.path.join(LOB_DIR, "temporary",
+				f"{symbol_upper}_orderbook_{day_str}",
 			)
 			os.makedirs(tmp_dir, exist_ok=True)
 			file_path = os.path.join(tmp_dir, filename)
 
+			del filename, tmp_dir
+
 		except Exception as e:
 
 			logger.error(
-				f"[symbol_dump_snapshot][{symbol.upper()}] "
+				f"[symbol_dump_snapshot][{symbol_upper}] "
 				f"Failed to build file path: {e}",
 				exc_info=True
 			)
 
+			_locals_ = locals()
+			for var in [
+				'file_path', 'filename', 'tmp_dir', 'suffix', 'day_str'
+			]:
+				if var in _locals_: del _locals_[var]
+			del _locals_, e
 			continue
 
-		# ── Retrieve last writer (if any)
-
-		last_suffix, writer = SYMBOL_TO_FILE_HANDLES.get(symbol, (None, None))
-
 		# ────────────────────────────────────────────────────────────────────
-		# 🔧 STEP 1: Handle file rotation and compression FIRST
-		# This ensures all previous files are zipped before merge check
+		# STEP 1
+		# 	zip_and_remove(last_file_path)
+		#	json_writer = open(file_path, "a", encoding="utf-8")
 		# ────────────────────────────────────────────────────────────────────
+
+		last_suffix, json_writer = SYMBOL_TO_FILE_HANDLES.get(
+			symbol, (None, None))
 
 		if last_suffix != suffix:
 
-			if writer:
+			if json_writer:
 
-				try:
-
-					writer.close()
+				try: json_writer.close()
 
 				except Exception as e:
 
-					logger.error(
-						f"[symbol_dump_snapshot][{symbol.upper()}] "
-						f"Close failed → {e}",
+					logger.error(f"[symbol_dump_snapshot]"
+						f"[{symbol_upper}] Close failed → {e}",
 						exc_info=True
 					)
+					del e
 
-				# 🔧 Compress previous file immediately after closing
+				finally:
+					
+					if 'json_writer' in locals():
+						safe_close_file(json_writer)
+						del json_writer
+
 				try:
 
-					last_day_str = get_date_from_suffix(last_suffix)
-					last_tmp_dir = os.path.join(
-						LOB_DIR,
-						"temporary",
-						f"{symbol.upper()}_orderbook_{last_day_str}",
-					)
 					last_file_path = os.path.join(
-						last_tmp_dir,
-						f"{symbol.upper()}_orderbook_{last_suffix}.jsonl"
+						os.path.join(
+							LOB_DIR, "temporary",
+							f"{symbol_upper}_orderbook_"
+							f"{get_date_from_suffix(last_suffix)}",
+						),
+						f"{symbol_upper}_orderbook_{last_suffix}.jsonl"
 					)
 
-					if os.path.exists(last_file_path):
+					does_last_file_exist = os.path.exists(last_file_path)
+
+					if does_last_file_exist:
 
 						zip_and_remove(last_file_path)
 
 					else:
 
 						logger.error(
-							f"[symbol_dump_snapshot][{symbol.upper()}] "
-							f"File not found for compression: {last_file_path}"
+							f"[symbol_dump_snapshot][{symbol_upper}] "
+							f"File not found for compression: "
+							f"{last_file_path}"
 						)
+
+					del last_file_path, does_last_file_exist
 
 				except Exception as e:
 
 					logger.error(
-						f"[symbol_dump_snapshot][{symbol.upper()}] "
+						f"[symbol_dump_snapshot][{symbol_upper}] "
 						f"zip_and_remove(last_file_path={last_file_path}) "
 						f"failed for last_suffix={last_suffix}: {e}",
 						exc_info=True
 					)
 
-			# 🔧 Open new file writer for current suffix
-			try:
+					if 'last_file_path' in locals(): del last_file_path
+					del e
 
-				writer = open(file_path, "a", encoding="utf-8")
+			try: 
+				
+				json_writer = open(
+					file_path, "a", encoding="utf-8"
+				)	# for the current snapshot
 
 			except OSError as e:
 
 				logger.error(
-					f"[symbol_dump_snapshot][{symbol.upper()}] "
+					f"[symbol_dump_snapshot][{symbol_upper}] "
 					f"Open failed: {file_path} → {e}",
 					exc_info=True
 				)
 
-				continue  # Skip this snapshot
+				_locals_ = locals()
+				for var in ['file_path', 'last_suffix', 'json_writer']:
+					if var in _locals_: del _locals_[var]
+				del _locals_, e
+				continue
 
-			SYMBOL_TO_FILE_HANDLES[symbol] = (suffix, writer)
+			SYMBOL_TO_FILE_HANDLES[symbol] = (suffix, json_writer)
 
 		# ────────────────────────────────────────────────────────────────────
 		# 🔧 STEP 2: Check for day rollover and trigger merge
@@ -1912,31 +1973,38 @@ async def symbol_dump_snapshot(symbol: str) -> None:
 						symbol_trigger_merge(symbol, last_day)
 
 						logger.info(
-							f"[symbol_dump_snapshot][{symbol.upper()}] "
+							f"[symbol_dump_snapshot][{symbol_upper}] "
 							f"Triggered merge for {last_day} "
 							f"(current day: {day_str})."
 						)
 
+						del last_day
+
 		except Exception as e:
 
 			logger.error(
-				f"[symbol_dump_snapshot][{symbol.upper()}] "
+				f"[symbol_dump_snapshot][{symbol_upper}] "
 				f"Failed to check/trigger merge: {e}",
 				exc_info=True
 			)
 
-		# ────────────────────────────────────────────────────────────────────
-		# Write snapshot as compact JSON line
-		# ────────────────────────────────────────────────────────────────────
+			if 'last_day' in locals(): del last_day
+			del e
+			continue
+
+		finally:
+
+			del day_str, last_suffix
 
 		try:
 
-			line = json.dumps(snapshot, separators=(",", ":"))
-			writer.write(line + "\n")
-			writer.flush()
+			json_writer.write(
+				json.dumps(snapshot, 
+					separators=(",", ":")
+				) + "\n"
+			)
+			json_writer.flush()
 
-			# Update flush monitoring
-			
 			current_time = get_current_time_ms()
 
 			JSON_FLUSH_INTERVAL[symbol] = (
@@ -1945,19 +2013,36 @@ async def symbol_dump_snapshot(symbol: str) -> None:
 			
 			LATEST_JSON_FLUSH[symbol] = current_time
 
+			del current_time
+
 		except Exception as e:
 
 			logger.error(
-				f"[symbol_dump_snapshot][{symbol.upper()}] "
+				f"[symbol_dump_snapshot][{symbol_upper}] "
 				f"Write failed: {file_path} → {e}",
 				exc_info=True
 			)
 
-			# Invalidate writer for next iteration
+			try:
 
-			SYMBOL_TO_FILE_HANDLES.pop(symbol, None)
+				# Invalidate `json_writer` for next iteratio
+				pop_and_close_handle(SYMBOL_TO_FILE_HANDLES, symbol)
 
+			except Exception:
+				pass
+
+			if 'current_time' in locals(): del current_time
+			del e
 			continue
+
+		finally:
+
+			_locals_ = locals()
+			for var in ['snapshot', 'file_path']:
+				if var in _locals_: del _locals_[var]
+			del _locals_
+
+	del queue, symbol_upper
 
 # ───────────────────────────────────────────────────────────────────────────────
 # 🛑 Graceful Shutdown Handlers (FastAPI Lifespan & Merge Executor)
@@ -3143,10 +3228,12 @@ Infinite Coroutines in the Main Process:
 	SNAPSHOT:
 		✅ async def put_snapshot() -> None
 		🕔 async def symbol_dump_snapshot(symbol: str) -> None
+		- `symbol_dump_snapshot` is I/O-bound: async co-routine
 
 	LATENCY:
 		async def estimate_latency() -> None
 		async def gate_streaming_by_latency() -> None
+		- refactor as logical threads
 
 	DASHBOARD:
 		async def dashboard(websocket: WebSocket)
