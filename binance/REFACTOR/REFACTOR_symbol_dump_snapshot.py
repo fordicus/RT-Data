@@ -16,12 +16,8 @@ async def symbol_dump_snapshot(symbol: str) -> None:
 			LATEST_JSON_FLUSH:		Dict[str, int]
 	————————————————————————————————————————————————————————————————————
 	HINT:
-		1. KYC (Know-Your-Cycle) protocol:
-			`del local`: refcount ↓, GC runs sooner
-		2. It is intended to trigger `continue` within the while loop 
-			upon any exception; this allows us to invalidate the data
-			being collected so that we can identify and resolve the
-			issue before resuming the data collection pipeline.
+		KYC (Know-Your-Cycle) protocol:
+		`del local`: refcount ↓, GC runs sooner
 	———————————————————————————————————————————————————————————————— """
 
 	def safe_close_file(f: TextIOWrapper):

@@ -3225,15 +3225,17 @@ if __name__ == "__main__":
 
 Infinite Coroutines in the Main Process:
 
+	TODO:	FIND THE SOURCE OF MEMORY LEAKAGE
+
 	SNAPSHOT:
 		✅ async def put_snapshot() -> None
-		🕔 async def symbol_dump_snapshot(symbol: str) -> None
-		- `symbol_dump_snapshot` is I/O-bound: async co-routine
+		✅ async def symbol_dump_snapshot(symbol: str) -> None
+		- perfectly understand both functions
 
 	LATENCY:
 		async def estimate_latency() -> None
 		async def gate_streaming_by_latency() -> None
-		- refactor as logical threads
+		- probably, refactor as logical threads
 
 	DASHBOARD:
 		async def dashboard(websocket: WebSocket)
