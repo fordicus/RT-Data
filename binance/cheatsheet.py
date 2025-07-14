@@ -67,4 +67,62 @@ async def WEBSOCKET_INGESTION_TEMPLATE() -> None:
 			
 			del ws
 
+""" ————————————————————————————————————————————————————————————————————
+	⚛️ Fire-and-Forget / GIL-Free / Atomic Process Concurrency
+———————————————————————————————————————————————————————————————————— """
+
+from concurrent.futures import ProcessPoolExecutor
+
+def func(x: str):
+	# ... do something with pickled `x` ...
+	return
+
+EXECUTOR = ProcessPoolExecutor(max_workers=4)
+for i in range(4):
+	EXECUTOR.submit(func, i)
+
+# ...any codes agnostic to {EXECUTOR, func, i}...
+# just safely release EXECUTOR on exit(), e.g.,:
+#	EXECUTOR.shutdown(wait=True)
+#	or atexit.register(EXECUTOR.shutdown, wait=True)
+#	with `wait=True` if the return of `func` is guaranteed.
+
+""" ————————————————————————————————————————————————————————————————————
+# Parallel processes / Shared state, Synchronized by Lock.
+———————————————————————————————————————————————————————————————————— """
+
+from multiprocessing import shared_memory, Process, Lock
+import struct  # int ↔ Byte
+
+def worker(shm_name, lock):
+	
+	shm = shared_memory.SharedMemory(name=shm_name)
+
+	with lock:
+		value = struct.unpack('i', shm.buf[:4])[0]
+		value += 1
+		shm.buf[:4] = struct.pack('i', value)
+
+	shm.close()
+
+if __name__ == "__main__":
+	
+	shm = shared_memory.SharedMemory(create=True, size=4)
+	shm.buf[:4] = struct.pack('i', 0)
+
+	lock = Lock()
+	processes = [
+		Process(target=worker, args=(shm.name, lock))
+		for _ in range(4)
+	]
+
+	for p in processes: p.start()
+	for p in processes: p.join()
+
+	result = struct.unpack('i', shm.buf[:4])[0]
+	print("Final Result:", result)  # Final Result: 4
+
+	shm.close()
+	shm.unlink()
+
 # ——————————————————————————————————————————————————————————————————————

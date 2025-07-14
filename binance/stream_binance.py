@@ -22,19 +22,15 @@ Temporary Simple Order Book Rendering:
 ....................................................................................
 
 Dependency:
-	Python ≥ 3.9
+	python==3.9.23
+	pyinstaller==6.14.2
+	pyinstaller==hooks-contrib-2025.5
 	websockets==11.0.3
 	fastapi==0.111.0
 	uvicorn==0.30.1
 	psutil==7.0.0
-	jinja2==3.1.3
-	yappi==1.6.10
-
-Functionality:
-	Stream Binance depth20 order books (100ms interval) via combined websocket.
-	Maintain top-20 in-memory `SYMBOL_SNAPSHOTS_TO_RENDER` for each symbol.
-	Periodically persist `SYMBOL_SNAPSHOTS_TO_RENDER` to JSONL → zip → aggregate daily.
-	Serve REST endpoints for JSON/HTML access and health monitoring.
+	memray==1.17.2
+	pyflowchart==0.3.1
 
 IO Structure:
 	Config:
@@ -66,14 +62,21 @@ Binance Official GitHub Manual:
 # 📦 Built-in Standard Library Imports (Grouped by Purpose)
 # ───────────────────────────────────────────────────────────────────────────────
 
-import asyncio, threading, time, random		# Async, Scheduling, and Timing
-from datetime import datetime, timezone
+from stream_binance_globals import (
+	my_name,
+	resource_path,
+	load_config,
+)
 
-import sys, os, shutil, zipfile				# File I/O, and Path
-import json, statistics						# Data Processing
+import asyncio, threading, time, random
+from datetime import datetime, timezone
+import sys, os, certifi, shutil, zipfile
+import json, statistics
 from collections import deque
 from io import TextIOWrapper
-from typing import Dict, Deque
+from typing import Dict, Deque, Optional
+
+os.environ["SSL_CERT_FILE"] = certifi.where()
 
 # ───────────────────────────────────────────────────────────────────────────────
 # 📝 Logging Configuration: Rotating log file + console output with UTC timestamps
@@ -284,273 +287,23 @@ except Exception as e:
 # 📦 Third-Party Dependencies (from requirements.txt)
 # ───────────────────────────────────────────────────────────────────────────────
 
-# 📡 CORE ──────────────────────────────────────────────────────────────────────
-# websockets:
-#   - Core dependency for Binance L2 stream (`depth20@100ms`)
-#   - Absolutely required for order book ingestion
-
 import websockets
-
-# 🌐 FastAPI Runtime Backbone ──────────────────────────────────────────────────
-# FastAPI:
-#   - Lightweight ASGI framework used as core runtime environment
-#   - Powers both REST API endpoints and underlying logging system via `uvicorn`
-#   - Enables HTTP access for:
-#	   • /state/{symbol}		→ latest order book snapshot (JSON)
-#	   • /orderbook/{symbol}	→ real-time bid/ask viewer (HTML)
-#	   • /health/live, /ready   → liveness & readiness probes
-#   - Logging is routed via `uvicorn.error`, so FastAPI is integral even
-#	 when HTML rendering is not used.
-# ⚠️ Removal of FastAPI implies rewriting logging + API infrastructure
-# jinja2 (via FastAPI templates):
-#   - Optional HTML rendering for order book visualization
-
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.templating import Jinja2Templates
+from fastapi.responses import HTMLResponse
 
-# ───────────────────────────────────────────────────────────────────────────────
-# 🧪 Profiling & Performance Diagnostics
-# ───────────────────────────────────────────────────────────────────────────────
+try:
 
-import yappi						# Coroutine-aware profiler
+	CONFIG, SYMBOLS, WS_URL = load_config(logger)
 
-# ───────────────────────────────────────────────────────────────────────────────
-# 📁 Utility: PyInstaller-Compatible Resource Resolver
-# ───────────────────────────────────────────────────────────────────────────────
+except Exception as e:
 
-def resource_path(relative_path: str) -> str:
-
-	"""
-	───────────────────────────────────────────────────────────────────────────────
-	🚨 DO NOT MODIFY THIS FUNCTION UNLESS NECESSARY.
-	───────────────────────────────────────────────────────────────────────────────
-	This function has been carefully designed and tested to resolve resource paths
-	across PyInstaller builds, Docker containers, and OS differences (Windows ↔ Linux).
-	Only update if new resource inclusion fails under current logic.
-
-	───────────────────────────────────────────────────────────────────────────────
-	📦 Purpose
-	───────────────────────────────────────────────────────────────────────────────
-	Resolve an absolute filesystem path to bundled resource files (e.g., templates,
-	config files), ensuring compatibility with both:
-
-	• 🧪 Development mode  — source-level execution on Windows
-	• 🐧 Deployment mode   — PyInstaller-frozen binary on Ubuntu Linux
-
-	───────────────────────────────────────────────────────────────────────────────
-	⚠️ Runtime Environment Warning
-	───────────────────────────────────────────────────────────────────────────────
-	This project is built and distributed as a self-contained Linux binary using
-	PyInstaller inside a Docker container (see Dockerfile).
-
-	At runtime, all bundled files are extracted to a temporary directory, typically
-	located at `/tmp/_MEIxxxx`, and made available via `sys._MEIPASS`.
-
-	To support both dev and production execution seamlessly, this function resolves
-	the correct base path at runtime.
-
-	───────────────────────────────────────────────────────────────────────────────
-	Args:
-	───────────────────────────────────────────────────────────────────────────────
-		relative_path (str):
-			Path relative to this script — e.g.,
-			• "template/"				 → for HTML rendering
-			• "get_binance_chart.conf"   → chart API config
-
-	Returns:
-		str:
-			Absolute path to the resource file, portable across environments.
-	"""
-
-	logger.info(f"[resource_path] Called with relative_path='{relative_path}'")
-
-	try:
-
-		base = getattr(sys, "_MEIPASS", os.path.dirname(__file__))
-
-		return os.path.join(base, relative_path)
-
-	except Exception as e:
-
-		logger.error(
-			f"[resource_path] Failed to resolve path for '{relative_path}': {e}",
-			exc_info=True
-		)
-
-		return None
-
-# Bind template directory (used for rendering HTML order book UI)
-# `resource_path()` ensures compatibility with PyInstaller-frozen Linux binaries.
-
-templates_dir = resource_path("templates")
-
-if templates_dir is None:
-
-	logger.error(
-		"[global] Failed to resolve template directory path for 'templates'. "
-		"Application cannot start."
+	logger.critical(
+		f"[load_config] Failed to load config: {e}"
+		f"Application cannot start.",
+		exc_info=True
 	)
 
-	sys.exit(1)
-
-templates = Jinja2Templates(directory=templates_dir)
-
-# ───────────────────────────────────────────────────────────────────────────────
-# ⚙️ Configuration Loader (.conf)
-# ───────────────────────────────────────────────────────────────────────────────
-# Loads and parses the unified configuration file shared by both
-# `stream_binance.py` and `get_binance_chart.py`.
-#
-# Defines all runtime parameters, including:
-#
-#   • SYMBOLS (list[str]):
-#	   Binance symbols to stream (e.g., BTCUSDT, ETHUSDT).
-#
-#   • SAVE_INTERVAL_MIN (int):
-#	   File rotation interval (minutes) for snapshot persistence.
-#
-#   • LOB_DIR (str):
-#	   Output directory for JSONL and ZIP files.
-#
-#   • BASE_BACKOFF, MAX_BACKOFF, RESET_CYCLE_AFTER (int):
-#	   Retry/backoff strategy for reconnects.
-#
-#   • MAX_WORKERS (int):
-#	   Process pool size for daily merge operations.
-#
-#   • DASHBOARD_STREAM_INTERVAL (float), MAX_DASHBOARD_CONNECTIONS (int):
-#	   WebSocket dashboard limits.
-#
-# 📄 Filename: get_binance_chart.conf
-#
-# Format: Plaintext `KEY=VALUE`, supporting inline `#` comments.
-#
-# ⚠️ IMPORTANT:
-#   - Always loaded via `resource_path()` for compatibility with both
-#	 development (Windows) and production (PyInstaller/Linux) environments.
-#   - When bundled with PyInstaller, the config is extracted to a temp folder
-#	 at runtime (e.g., `/tmp/_MEIxxxx`), resolved via `sys._MEIPASS`.
-#
-# 🛠️ Robustness Notes:
-#   - Loader expects the config file to be present and well-formed.
-#   - If missing or malformed, the application logs an error and exits.
-#   - SYMBOLS=None or missing triggers a fatal runtime error.
-#   - All configuration is centralized here for maintainability and clarity.
-#
-# See also:
-#   - RULESET.md for documentation and code conventions.
-#   - All config-driven parameters are referenced throughout the codebase.
-# ───────────────────────────────────────────────────────────────────────────────
-
-CONFIG_PATH = "get_binance_chart.conf"
-CONFIG = {}  # Global key-value store loaded during import
-
-def load_config(conf_path: str):
-
-	"""
-	Parses a `.conf` file containing `KEY=VALUE` pairs and loads them into the
-	global CONFIG dictionary.
-
-	Behavior:
-		- Skips blank lines and lines starting with `#`.
-		- Removes inline comments after `#` within valid lines.
-		- Populates CONFIG with key-value pairs for runtime parameters.
-
-	Usage:
-		- Called during application startup to initialize configuration.
-		- Supports both development mode (direct execution) and production mode
-		  (PyInstaller).
-
-	Args:
-		conf_path (str): Path to the configuration file, resolved via
-			`resource_path()` for compatibility across environments.
-
-	Example:
-		Configuration file (`get_binance_chart.conf`):
-			SYMBOLS = BTCUSDT,ETHUSDT  # Comma-separated symbols
-			SAVE_INTERVAL_MIN = 1
-			LOB_DIR = ./data/binance/orderbook/
-
-	Notes:
-		- Missing or malformed configuration files trigger a fatal runtime error.
-		- All loaded parameters are referenced globally throughout the codebase.
-
-	Exceptions:
-		- Logs errors and terminates the application if the file cannot be loaded
-		  or parsed.
-	"""
-
-	global CONFIG
-
-	try:
-
-		with open(conf_path, 'r', encoding='utf-8') as f:
-
-			for line in f:
-
-				line = line.strip()
-
-				if not line or line.startswith("#") or "=" not in line:
-
-					continue
-
-				line = line.split("#", 1)[0].strip()
-
-				if "=" in line:
-
-					key, val = line.split("=", 1)
-					CONFIG[key.strip()] = val.strip()
-
-	except Exception as e:
-
-		logger.error(
-			f"[load_config] Failed to load config from '{conf_path}': {e}",
-			exc_info=True
-		)
-
-		logger.error(f"Failed to load config from {conf_path}: {e}")
-
-		sys.exit(1)
-
-# ───────────────────────────────────────────────────────────────────────────────
-# 🔧 Load config via resource_path() for PyInstaller compatibility
-# ───────────────────────────────────────────────────────────────────────────────
-
-conf_abs_path = resource_path(CONFIG_PATH)
-
-if conf_abs_path is None:
-
-	logger.error(
-		f"[global] Failed to resolve config path for '{CONFIG_PATH}'. "
-		f"Application cannot start."
-	)
-
-	sys.exit(1)
-
-load_config(conf_abs_path)
-
-# ───────────────────────────────────────────────────────────────────────────────
-# 📊 Stream Parameters Derived from Config
-# ───────────────────────────────────────────────────────────────────────────────
-# Parse symbol and latency settings from .conf, and derive:
-#   • `WS_URL` for combined Binance L2 depth20@100ms stream
-#   • Tracking dicts for latency and update consistency
-# ───────────────────────────────────────────────────────────────────────────────
-
-SYMBOLS = [s.lower() for s in CONFIG.get("SYMBOLS", "").split(",") if s.strip()]
-
-if not SYMBOLS:
-
-	logger.error(
-		"[global] No SYMBOLS loaded from config. "
-		"Check 'get_binance_chart.conf'. Application cannot start."
-	)
-
-	sys.exit(1)
-
-STREAMS_PARAM = "/".join(f"{sym}@depth20@100ms" for sym in SYMBOLS)
-WS_URL		  = f"wss://stream.binance.com:9443/stream?streams={STREAMS_PARAM}"
+	exit(1)
 
 # ───────────────────────────────────────────────────────────────────────────────
 # 📈 Latency Measurement Parameters
@@ -565,6 +318,7 @@ LATENCY_DEQUE_SIZE   = int(CONFIG.get("LATENCY_DEQUE_SIZE",		10))
 LATENCY_SAMPLE_MIN   = int(CONFIG.get("LATENCY_SAMPLE_MIN",		10))
 LATENCY_THRESHOLD_MS = int(CONFIG.get("LATENCY_THRESHOLD_MS",	500))
 LATENCY_SIGNAL_SLEEP = float(CONFIG.get("LATENCY_SIGNAL_SLEEP", 0.2))
+LATENCY_GATE_SLEEP	 = float(CONFIG.get("LATENCY_GATE_SLEEP", 0.2))
 ASYNC_SLEEP_INTERVAL = float(CONFIG.get("LATENCY_GATE_SLEEP",	1.0))
 
 # ────────────────────────────────────────────────────────────────────────────────────
@@ -698,31 +452,6 @@ except Exception as e:
 		exc_info=True
 	)
 	
-	sys.exit(1)
-
-# ───────────────────────────────────────────────────────────────────────────────
-# 🧪 Optional Profiling (Controlled via .conf)
-# Configures:
-#   • Execution duration in seconds for profiling with `yappi`
-#   • If 0 → profiling is disabled, runs indefinitely
-# ───────────────────────────────────────────────────────────────────────────────
-
-try:
-
-	PROFILE_DURATION = int(CONFIG.get("PROFILE_DURATION", 0))
-
-	# Ensure order book directory exists
-
-	os.makedirs(LOB_DIR, exist_ok=True)
-
-except Exception as e:
-
-	logger.error(
-		"[global] Failed to set up profiling or create order book directory: "
-		f"{e}",
-		exc_info=True
-	)
-
 	sys.exit(1)
 
 # ───────────────────────────────────────────────────────────────────────────────
@@ -980,233 +709,6 @@ def zip_and_remove(src_path: str):
 			f"[zip_and_remove] Failed to zip "
 			f"or remove '{src_path}': {e}",
 			exc_info=True
-		)
-
-# ───────────────────────────────────────────────────────────────────────────────
-# 🗃️ Per-Symbol Daily Snapshot Consolidation & Archival
-#
-# Merges all per-minute zipped order book snapshots for a given symbol and UTC day
-# into a single consolidated `.jsonl` file, then compresses it as a daily archive.
-#
-# Responsibilities:
-#   • Locate all `.zip` files for the symbol/day in the temp directory.
-#   • Unpack and concatenate their contents into a single `.jsonl` file.
-#   • Compress the consolidated `.jsonl` as a single daily `.zip` archive.
-#   • Optionally purge the original temp directory after successful archiving.
-#
-# File Processing:
-#   - Expects all input files to be in `.zip` format (guaranteed by caller).
-#   - Processes files in chronological order for consistent data sequencing.
-#   - Preserves original line endings from source `.jsonl` files.
-#   - Creates intermediate `.jsonl` file before final compression.
-#
-# Fault Tolerance:
-#   - Gracefully skips missing/corrupted files or directories.
-#   - Logs all errors with full context; never throws to caller.
-#   - Ensures output file handle is properly closed in all scenarios.
-#   - Preserves intermediate files on compression failure for recovery.
-#
-# Usage:
-#   - Called via `ProcessPoolExecutor` for each symbol/day rollover.
-#   - Triggered by `symbol_trigger_merge()` from `symbol_dump_snapshot()`.
-#   - Ensures efficient long-term storage and fast downstream loading.
-#
-# Performance:
-#   - Optimized for large file counts with minimal memory footprint.
-#   - Uses streaming decompression to avoid loading entire files into memory.
-#   - Atomic operations prevent partial writes during system interruption.
-#
-# See also:
-#   - symbol_trigger_merge(), symbol_dump_snapshot()
-#   - RULESET.md for documentation and code conventions.
-# ───────────────────────────────────────────────────────────────────────────────
-
-def symbol_consolidate_a_day(
-	symbol:	  str,
-	day_str:  str,
-	base_dir: str,
-	purge:	  bool = True
-):
-	"""
-	Consolidates per-minute zipped snapshots
-	into a daily archive for a given symbol.
-	"""
-
-	with NanoTimer() as timer:
-
-		# Construct working directories and target paths
-
-		tmp_dir = os.path.join(
-			base_dir,
-			"temporary",
-			f"{symbol.upper()}_orderbook_{day_str}"
-		)
-
-		merged_path = os.path.join(
-			base_dir,
-			f"{symbol.upper()}_orderbook_{day_str}.jsonl"
-		)
-
-		# Abort early if directory is missing (no data captured for this day)
-
-		if not os.path.isdir(tmp_dir):
-
-			logger.error(
-				f"[symbol_consolidate_a_day][{symbol.upper()}] "
-				f"Temp dir missing on {day_str}: {tmp_dir}"
-			)
-
-			return
-
-		# List all zipped minute-level files (may be empty)
-
-		try:
-
-			zip_files = [f for f in os.listdir(tmp_dir) if f.endswith(".zip")]
-
-		except Exception as e:
-
-			logger.error(
-				f"[symbol_consolidate_a_day][{symbol.upper()}] "
-				f"Failed to list zips in {tmp_dir}: {e}",
-				exc_info=True
-			)
-
-			return
-
-		if not zip_files:
-
-			logger.error(
-				f"[symbol_consolidate_a_day][{symbol.upper()}] "
-				f"No zip files to merge on {day_str}."
-			)
-
-			return
-
-		# 🔧 File handle management with proper scope handling
-
-		fout = None
-
-		try:
-
-			# Open output file for merged .jsonl content
-
-			fout = open(merged_path, "w", encoding="utf-8")
-
-			# Process each zip file in chronological order
-
-			for zip_file in sorted(zip_files):
-
-				zip_path = os.path.join(tmp_dir, zip_file)
-
-				try:
-
-					with zipfile.ZipFile(zip_path, "r") as zf:
-
-						for member in zf.namelist():
-
-							with zf.open(member) as f:
-
-								for raw in f:
-
-									fout.write(raw.decode("utf-8"))
-
-				except Exception as e:
-
-					logger.error(
-						f"[symbol_consolidate_a_day][{symbol.upper()}] "
-						f"Failed to extract {zip_path}: {e}",
-						exc_info=True
-					)
-
-					return
-
-		except Exception as e:
-
-			logger.error(
-				f"[symbol_consolidate_a_day][{symbol.upper()}] "
-				f"Failed to open or write to merged file {merged_path}: {e}",
-				exc_info=True
-			)
-
-			return
-
-		finally:
-
-			# 🔧 Ensure the output file is properly closed
-
-			if fout:
-
-				try:
-
-					fout.close()
-
-				except Exception as close_error:
-
-					logger.error(
-						f"[symbol_consolidate_a_day][{symbol.upper()}] "
-						f"Failed to close output file: {close_error}",
-						exc_info=True
-					)
-
-		# Recompress the consolidated .jsonl into a final single-archive zip
-
-		try:
-
-			final_zip = merged_path.replace(".jsonl", ".zip")
-
-			with zipfile.ZipFile(final_zip, "w", zipfile.ZIP_DEFLATED) as zf:
-
-				zf.write(merged_path, arcname=os.path.basename(merged_path))
-
-		except Exception as e:
-
-			logger.error(
-				f"[symbol_consolidate_a_day][{symbol.upper()}] "
-				f"Failed to compress merged file on {day_str}: {e}",
-				exc_info=True
-			)
-
-			# Do not remove .jsonl if compression failed
-
-			return
-
-		# Remove intermediate plain-text .jsonl file after compression
-
-		try:
-
-			if os.path.exists(merged_path):
-
-				os.remove(merged_path)
-
-		except Exception as e:
-
-			logger.error(
-				f"[symbol_consolidate_a_day][{symbol.upper()}] "
-				f"Failed to remove merged .jsonl on {day_str}: {e}",
-				exc_info=True
-			)
-
-		# Optionally delete the original temp folder containing per-minute zips
-
-		if purge:
-
-			try:
-
-				shutil.rmtree(tmp_dir)
-
-			except Exception as e:
-
-				logger.error(
-					f"[symbol_consolidate_a_day][{symbol.upper()}] "
-					f"Failed to remove temp dir {tmp_dir}: {e}",
-					exc_info=True
-				)
-
-		logger.info(
-			f"[symbol_consolidate_a_day][{symbol.upper()}] "
-			f"Successfully merged {len(zip_files)} files for {day_str}"
-			f"(took {timer.tock():.5f} sec)."
 		)
 
 # ───────────────────────────────────────────────────────────────────────────────
@@ -1680,41 +1182,195 @@ async def put_snapshot() -> None:
 	del ws_retry_cnt
 
 # ───────────────────────────────────────────────────────────────────────────────
-# 📝 Background Task: Snapshot Persistence & Daily Merge Trigger
-#
-# Handles per-symbol snapshot persistence with automatic file rotation,
-# compression, and daily merge/archival triggering.
-#
-# Responsibilities:
-#   • Consumes snapshots from `SNAPSHOTS_QUEUE_DICT[symbol]` and appends them
-#	 to per-symbol `.jsonl` files, partitioned by time window (suffix).
-#   • Rotates file handles when the time window changes, immediately compressing
-#	 the previous `.jsonl` file to `.zip` format for storage efficiency.
-#   • On UTC day rollover, triggers a merge/archival process for the previous day,
-#	 ensuring only one merge per symbol/day via `MERGED_DAYS` and `MERGE_LOCKS`.
-#   • Guarantees all previous files are in `.zip` format before merge execution.
-#
-# Execution Flow:
-#   1. File Rotation & Compression — Closes previous file and compresses to `.zip`
-#   2. Day Rollover Detection — Checks for UTC date changes and triggers merge
-#   3. Snapshot Persistence — Writes current snapshot to active file handle
-#
-# Structures:
-#   • `SYMBOL_TO_FILE_HANDLES[symbol]` — Tracks (suffix, writer) for each symbol.
-#   • `MERGED_DAYS[symbol]` — Set of merged days to prevent redundant merges.
-#   • `MERGE_LOCKS[symbol]` — Thread/process lock for safe merge triggering.
-#
-# Data Safety:
-#   - All files are immediately flushed to disk after each snapshot write.
-#   - File compression occurs synchronously before merge trigger.
-#   - Merge operations are thread-safe and deduplicated per symbol/day.
-#   - Graceful error handling prevents data loss on I/O failures.
-#
-# Notes:
-#   - Runs as an infinite async task per symbol.
-#   - Terminates when `EVENT_STREAM_ENABLE` is cleared.
-#   - Merge/archival is dispatched only once per UTC day per symbol.
-#   - See also: RULESET.md for documentation and code conventions.
+
+def symbol_consolidate_a_day(
+	symbol:	  str,
+	day_str:  str,
+	base_dir: str,
+	purge:	  bool = True
+):
+	"""
+	Consolidates per-minute zipped snapshots
+	into a daily archive for a given symbol.
+	"""
+
+	with NanoTimer() as timer:
+
+		# Construct working directories and target paths
+
+		tmp_dir = os.path.join(
+			base_dir,
+			"temporary",
+			f"{symbol.upper()}_orderbook_{day_str}"
+		)
+
+		merged_path = os.path.join(
+			base_dir,
+			f"{symbol.upper()}_orderbook_{day_str}.jsonl"
+		)
+
+		# Abort early if directory is missing (no data captured for this day)
+
+		if not os.path.isdir(tmp_dir):
+
+			logger.error(
+				f"[symbol_consolidate_a_day][{symbol.upper()}] "
+				f"Temp dir missing on {day_str}: {tmp_dir}"
+			)
+
+			return
+
+		# List all zipped minute-level files (may be empty)
+
+		try:
+
+			zip_files = [f for f in os.listdir(tmp_dir) if f.endswith(".zip")]
+
+		except Exception as e:
+
+			logger.error(
+				f"[symbol_consolidate_a_day][{symbol.upper()}] "
+				f"Failed to list zips in {tmp_dir}: {e}",
+				exc_info=True
+			)
+
+			return
+
+		if not zip_files:
+
+			logger.error(
+				f"[symbol_consolidate_a_day][{symbol.upper()}] "
+				f"No zip files to merge on {day_str}."
+			)
+
+			return
+
+		# 🔧 File handle management with proper scope handling
+
+		fout = None
+
+		try:
+
+			# Open output file for merged .jsonl content
+
+			fout = open(merged_path, "w", encoding="utf-8")
+
+			# Process each zip file in chronological order
+
+			for zip_file in sorted(zip_files):
+
+				zip_path = os.path.join(tmp_dir, zip_file)
+
+				try:
+
+					with zipfile.ZipFile(zip_path, "r") as zf:
+
+						for member in zf.namelist():
+
+							with zf.open(member) as f:
+
+								for raw in f:
+
+									fout.write(raw.decode("utf-8"))
+
+				except Exception as e:
+
+					logger.error(
+						f"[symbol_consolidate_a_day][{symbol.upper()}] "
+						f"Failed to extract {zip_path}: {e}",
+						exc_info=True
+					)
+
+					return
+
+		except Exception as e:
+
+			logger.error(
+				f"[symbol_consolidate_a_day][{symbol.upper()}] "
+				f"Failed to open or write to merged file {merged_path}: {e}",
+				exc_info=True
+			)
+
+			return
+
+		finally:
+
+			# 🔧 Ensure the output file is properly closed
+
+			if fout:
+
+				try:
+
+					fout.close()
+
+				except Exception as close_error:
+
+					logger.error(
+						f"[symbol_consolidate_a_day][{symbol.upper()}] "
+						f"Failed to close output file: {close_error}",
+						exc_info=True
+					)
+
+		# Recompress the consolidated .jsonl into a final single-archive zip
+
+		try:
+
+			final_zip = merged_path.replace(".jsonl", ".zip")
+
+			with zipfile.ZipFile(final_zip, "w", zipfile.ZIP_DEFLATED) as zf:
+
+				zf.write(merged_path, arcname=os.path.basename(merged_path))
+
+		except Exception as e:
+
+			logger.error(
+				f"[symbol_consolidate_a_day][{symbol.upper()}] "
+				f"Failed to compress merged file on {day_str}: {e}",
+				exc_info=True
+			)
+
+			# Do not remove .jsonl if compression failed
+
+			return
+
+		# Remove intermediate plain-text .jsonl file after compression
+
+		try:
+
+			if os.path.exists(merged_path):
+
+				os.remove(merged_path)
+
+		except Exception as e:
+
+			logger.error(
+				f"[symbol_consolidate_a_day][{symbol.upper()}] "
+				f"Failed to remove merged .jsonl on {day_str}: {e}",
+				exc_info=True
+			)
+
+		# Optionally delete the original temp folder containing per-minute zips
+
+		if purge:
+
+			try:
+
+				shutil.rmtree(tmp_dir)
+
+			except Exception as e:
+
+				logger.error(
+					f"[symbol_consolidate_a_day][{symbol.upper()}] "
+					f"Failed to remove temp dir {tmp_dir}: {e}",
+					exc_info=True
+				)
+
+		logger.info(
+			f"[symbol_consolidate_a_day][{symbol.upper()}] "
+			f"Successfully merged {len(zip_files)} files for {day_str} "
+			f"(took {timer.tock():.5f} sec)."
+		)
+
 # ───────────────────────────────────────────────────────────────────────────────
 
 def symbol_trigger_merge(symbol, last_day):
@@ -1750,115 +1406,309 @@ async def symbol_dump_snapshot(symbol: str) -> None:
 		READ & WRITE:
 			SYMBOL_TO_FILE_HANDLES: dict[str, tuple[str, TextIOWrapper]]
 			LATEST_JSON_FLUSH:		Dict[str, int]
-	————————————————————————————————————————————————————————————————————
-	HINT:
-		KYC (Know-Your-Cycle) protocol:
-		`del local`: refcount ↓, GC runs sooner
+			MERGED_DAYS:			dict[str, set[str]]
+		LOCK:
+			MERGE_LOCKS:			dict[str, threading.Lock]
 	———————————————————————————————————————————————————————————————— """
 
-	def safe_close_file(f: TextIOWrapper):
-		""" ————————————————————————————————————————————————————————————
-		# from io import TextIOWrapper
-		#	if 'file' in locals():
-		#		safe_close_file(file)
-		#		del file
-		———————————————————————————————————————————————————————————— """
+	def safe_close_file_muted(f: TextIOWrapper):
+
 		if f is not None and hasattr(f, 'close'):
-			try:
-				f.close()
-			except Exception:
-				pass
+			try:   f.close()
+			except Exception: pass
 
-	def pop_and_close_handle(
-		handles: dict[str, tuple[str, TextIOWrapper]], symbol: str
-	):
-		tup = handles.pop(symbol, None)
-		if tup is not None:
-			safe_close_file(tup[1])
+	#——————————————————————————————————————————————————————————————————
 
-	queue = SNAPSHOTS_QUEUE_DICT[symbol]
-	symbol_upper = symbol.upper()
-
-	while True:
-
+	def safe_close_jsonl(
+		f: TextIOWrapper
+	) -> bool:
+		
 		try:
-
-			snapshot = await queue.get()
+			
+			f.close()
+			return True
 
 		except Exception as e:
 
-			logger.error(
-				f"[symbol_dump_snapshot][{symbol_upper}] "
-				f"Failed to get snapshot from queue: {e}",
+			logger.error(f"[{my_name()}]"
+				f"[{symbol.upper()}] "
+				f"Close failed, retrying... "
+				f"→ {e}",
 				exc_info=True
 			)
+			safe_close_file_muted(f)
+			return False
 
-			if 'snapshot' in locals(): del snapshot
-			del e
-			continue
-
-		if not EVENT_STREAM_ENABLE.is_set():
-			continue
+	#——————————————————————————————————————————————————————————————————
+	
+	def refresh_file_handle(
+		file_path: str,
+		suffix: str,
+		symbol: str,
+		symbol_to_file_handles: dict[str, tuple[str, TextIOWrapper]],
+		logger: logging.Logger
+	) -> Optional[TextIOWrapper]:
 
 		try:
 
+			json_writer = open(
+				file_path, "a",
+				encoding="utf-8"
+			)
+
+		except OSError as e:
+
+			logger.error(
+				f"[{my_name()}][{symbol.upper()}] "
+				f"Open failed: {file_path} → {e}",
+				exc_info=True
+			)
+			return None
+
+		if json_writer is not None:
+
+			try:
+
+				symbol_to_file_handles[symbol] = (
+					suffix, json_writer
+				)
+
+			except Exception as e:
+
+				logger.error(
+					f"[{my_name()}][{symbol.upper()}] "
+					f"Failed to assign file handle: "
+					f"{file_path} → {e}",
+					exc_info=True
+				)
+				safe_close_jsonl(json_writer)
+				return None
+
+		return json_writer
+
+	#——————————————————————————————————————————————————————————————————
+
+	def pop_and_close_handle(
+		handles: dict[str, tuple[str, TextIOWrapper]],
+		symbol: str
+	):
+		tup = handles.pop(symbol, None)	# not only `pop` from dict
+
+		if tup is not None:
+			safe_close_file_muted(tup[1])		# but also `close`
+
+	#——————————————————————————————————————————————————————————————————
+
+	async def fetch_snapshot(
+		queue:  asyncio.Queue,
+		logger: logging.Logger,
+		symbol: str
+	) -> Optional[Dict]:
+
+		try:
+			return await queue.get()
+		
+		except Exception as e:
+			logger.error(
+				f"[{my_name()}][{symbol.upper()}] "
+				f"Failed to get snapshot from queue: {e}",
+				exc_info=True
+			)
+			return None
+		
+	#——————————————————————————————————————————————————————————————————
+
+	def get_suffix_n_date(
+		save_interval_min: int,
+		snapshot: Dict,
+		symbol: str
+	) -> tuple[Optional[str], Optional[str]]:
+		
+		try:
+
 			suffix = get_file_suffix(
-				SAVE_INTERVAL_MIN,
+				save_interval_min,
 				snapshot.get(
 					"eventTime",
 					get_current_time_ms()
 				)
 			)
 
-			day_str = get_date_from_suffix(suffix)
+			date_str = get_date_from_suffix(suffix)
 
+			return suffix, date_str
+		
 		except Exception as e:
 
 			logger.error(
-				f"[symbol_dump_snapshot][{symbol_upper}] "
+				f"[{my_name()}][{symbol.upper()}] "
 				f"Failed to compute suffix/day: {e}",
 				exc_info=True
 			)
 
-			_locals_ = locals()
-			for var in ['suffix', 'day_str']:
-				if var in _locals_: del _locals_[var]
-			del _locals_, e
-			continue
+			return None, None
+	
+	#——————————————————————————————————————————————————————————————————
 
-		# ── Build file name and full path
-
+	def gen_file_path(
+		symbol_upper: str,
+		suffix:   str,
+		lob_dir:  str,
+		date_str: str
+	) -> Optional[str]:
 		try:
 
-			filename = f"{symbol_upper}_orderbook_{suffix}.jsonl"
-			tmp_dir = os.path.join(LOB_DIR, "temporary",
-				f"{symbol_upper}_orderbook_{day_str}",
+			file_name = f"{symbol_upper}_orderbook_{suffix}.jsonl"
+			temp_dir  = os.path.join(lob_dir, "temporary",
+				f"{symbol_upper}_orderbook_{date_str}",
 			)
-			os.makedirs(tmp_dir, exist_ok=True)
-			file_path = os.path.join(tmp_dir, filename)
-
-			del filename, tmp_dir
+			os.makedirs(temp_dir, exist_ok=True)
+			return os.path.join(temp_dir, file_name)
 
 		except Exception as e:
 
 			logger.error(
-				f"[symbol_dump_snapshot][{symbol_upper}] "
+				f"[{my_name()}][{symbol_upper}] "
 				f"Failed to build file path: {e}",
 				exc_info=True
 			)
+			return None
 
-			_locals_ = locals()
-			for var in [
-				'file_path', 'filename', 'tmp_dir', 'suffix', 'day_str'
-			]:
-				if var in _locals_: del _locals_[var]
-			del _locals_, e
+	#——————————————————————————————————————————————————————————————————
+	
+	def safe_zip_n_remove_jsonl(
+		lob_dir: str,
+		symbol_upper:  str,
+		last_suffix:  str,
+		logger:	logging.Logger
+	):
+
+		last_jsonl_path = os.path.join(
+			os.path.join(
+				lob_dir, "temporary",
+				f"{symbol_upper}_orderbook_"
+				f"{get_date_from_suffix(last_suffix)}",
+			),
+			f"{symbol_upper}_orderbook_{last_suffix}.jsonl"
+		)
+
+		if os.path.exists(last_jsonl_path):
+
+			zip_and_remove(last_jsonl_path)
+
+		else:
+
+			logger.warning(
+				f"[{my_name()}][{symbol_upper}] "
+				f"File not found for compression: "
+				f"{last_jsonl_path}"
+			)
+
+	#——————————————————————————————————————————————————————————————————
+
+	def flush_snapshot(
+		json_writer: TextIOWrapper,
+		snapshot: Dict,
+		symbol: str,
+		symbol_to_file_handles: dict[str, tuple[str, TextIOWrapper]],
+		json_flush_interval: Dict[str, int],
+		latest_json_flush: Dict[str, int],
+		file_path: str,
+		logger: logging.Logger
+	) -> bool:
+		try:
+
+			json_writer.write(
+				json.dumps(snapshot, 
+					separators=(",", ":")
+				) + "\n"
+			)
+			json_writer.flush()
+
+			current_time = get_current_time_ms()
+
+			json_flush_interval[symbol] = (
+				current_time - latest_json_flush[symbol]
+			)
+			
+			latest_json_flush[symbol] = current_time
+
+			return True
+
+		except Exception as e:
+
+			logger.error(
+				f"[{my_name()}][{symbol.upper()}] "
+				f"Write failed: {file_path} → {e}",
+				exc_info=True
+			)
+
+			try:
+
+				# Invalidate `json_writer` for next iteration
+				pop_and_close_handle(
+					symbol_to_file_handles, symbol
+				)
+
+			except Exception: pass
+
+			return False
+		
+	#——————————————————————————————————————————————————————————————————
+
+	queue = SNAPSHOTS_QUEUE_DICT[symbol]
+	symbol_upper = symbol.upper()
+
+	while True:
+
+		#——————————————————————————————————————————————————————————————
+
+		snapshot = await fetch_snapshot(
+			queue, logger, symbol
+		)
+		
+		if snapshot is None:
+			logger.warning(
+				f"[{my_name()}][{symbol_upper}] "
+				f"Snapshot is None, skipping iteration."
+			)
+			continue
+
+		if not EVENT_STREAM_ENABLE.is_set():
+			continue
+		
+		suffix, date_str = get_suffix_n_date(
+			SAVE_INTERVAL_MIN,
+			snapshot, symbol
+		)
+
+		if ((suffix is None) or (date_str is None)):
+			logger.warning(
+				f"[{my_name()}][{symbol_upper}] "
+				f"Suffix or date string is None, "
+				f"skipping iteration."
+			)
+			continue
+
+		file_path = gen_file_path(
+			symbol_upper, suffix,
+			LOB_DIR, date_str
+		)
+		
+		if file_path is None:
+			logger.warning(
+				f"[{my_name()}][{symbol_upper}] "
+				f"File path is None, "
+				f"skipping iteration."
+			)
 			continue
 
 		# ────────────────────────────────────────────────────────────────────
 		# STEP 1
-		# 	zip_and_remove(last_file_path)
+		# 	safe_zip_n_remove_jsonl(last_jsonl_path)
 		#	json_writer = open(file_path, "a", encoding="utf-8")
+		# ────────────────────────────────────────────────────────────────────
+		# `last_suffix` will be `None` at the beginning.
 		# ────────────────────────────────────────────────────────────────────
 
 		last_suffix, json_writer = SYMBOL_TO_FILE_HANDLES.get(
@@ -1868,85 +1718,59 @@ async def symbol_dump_snapshot(symbol: str) -> None:
 
 			if json_writer:
 
-				try: json_writer.close()
+				# ────────────────────────────────────────────────────────────
 
-				except Exception as e:
+				if not safe_close_jsonl(json_writer):
 
-					logger.error(f"[symbol_dump_snapshot]"
-						f"[{symbol_upper}] Close failed → {e}",
-						exc_info=True
+					logger.warning(
+						f"[{my_name()}][{symbol.upper()}] "
+						f"JSON writer may not "
+						f"have been closed."
 					)
-					del e
 
-				finally:
-					
-					if 'json_writer' in locals():
-						safe_close_file(json_writer)
-						del json_writer
+				del json_writer
+
+				# ────────────────────────────────────────────────────────────
 
 				try:
 
-					last_file_path = os.path.join(
-						os.path.join(
-							LOB_DIR, "temporary",
-							f"{symbol_upper}_orderbook_"
-							f"{get_date_from_suffix(last_suffix)}",
-						),
-						f"{symbol_upper}_orderbook_{last_suffix}.jsonl"
+					safe_zip_n_remove_jsonl(
+						LOB_DIR, symbol_upper,
+						last_suffix, logger
 					)
-
-					does_last_file_exist = os.path.exists(last_file_path)
-
-					if does_last_file_exist:
-
-						zip_and_remove(last_file_path)
-
-					else:
-
-						logger.error(
-							f"[symbol_dump_snapshot][{symbol_upper}] "
-							f"File not found for compression: "
-							f"{last_file_path}"
-						)
-
-					del last_file_path, does_last_file_exist
 
 				except Exception as e:
 
 					logger.error(
-						f"[symbol_dump_snapshot][{symbol_upper}] "
-						f"zip_and_remove(last_file_path={last_file_path}) "
-						f"failed for last_suffix={last_suffix}: {e}",
+						f"[{my_name()}][{symbol_upper}] "
+						f"safe_zip_n_remove_jsonl() failed "
+						f"for last_suffix={last_suffix}: {e}",
 						exc_info=True
 					)
-
-					if 'last_file_path' in locals(): del last_file_path
 					del e
+
+			# ────────────────────────────────────────────────────────────────
 
 			try: 
 				
-				json_writer = open(
-					file_path, "a", encoding="utf-8"
-				)	# for the current snapshot
+				json_writer = refresh_file_handle(
+					file_path, suffix, symbol, 
+					SYMBOL_TO_FILE_HANDLES,
+					logger
+				)
+				if json_writer is None: continue 
 
-			except OSError as e:
+			except Exception as e:
 
 				logger.error(
-					f"[symbol_dump_snapshot][{symbol_upper}] "
-					f"Open failed: {file_path} → {e}",
+					f"[{my_name()}][{symbol_upper}] "
+					f"Failed to refresh file handles → {e}",
 					exc_info=True
 				)
-
-				_locals_ = locals()
-				for var in ['file_path', 'last_suffix', 'json_writer']:
-					if var in _locals_: del _locals_[var]
-				del _locals_, e
 				continue
 
-			SYMBOL_TO_FILE_HANDLES[symbol] = (suffix, json_writer)
-
 		# ────────────────────────────────────────────────────────────────────
-		# 🔧 STEP 2: Check for day rollover and trigger merge
+		# STEP 2: Check for day rollover and trigger merge
 		# At this point, ALL previous files are guaranteed to be .zip
 		# ────────────────────────────────────────────────────────────────────
 
@@ -1964,7 +1788,7 @@ async def symbol_dump_snapshot(symbol: str) -> None:
 					# format, ensuring complete day consolidation.
 					# ────────────────────────────────────────────────────────
 
-					if ((last_day != day_str) and 
+					if ((last_day != date_str) and 
 						(last_day not in MERGED_DAYS[symbol])
 					):
 
@@ -1973,9 +1797,9 @@ async def symbol_dump_snapshot(symbol: str) -> None:
 						symbol_trigger_merge(symbol, last_day)
 
 						logger.info(
-							f"[symbol_dump_snapshot][{symbol_upper}] "
+							f"[{my_name()}][{symbol_upper}] "
 							f"Triggered merge for {last_day} "
-							f"(current day: {day_str})."
+							f"(current day: {date_str})."
 						)
 
 						del last_day
@@ -1983,7 +1807,7 @@ async def symbol_dump_snapshot(symbol: str) -> None:
 		except Exception as e:
 
 			logger.error(
-				f"[symbol_dump_snapshot][{symbol_upper}] "
+				f"[{my_name()}][{symbol_upper}] "
 				f"Failed to check/trigger merge: {e}",
 				exc_info=True
 			)
@@ -1994,55 +1818,31 @@ async def symbol_dump_snapshot(symbol: str) -> None:
 
 		finally:
 
-			del day_str, last_suffix
+			del date_str, last_suffix
 
-		try:
+		# ────────────────────────────────────────────────────────────────────
+		# STEP 3: Write snapshot to file and update flush intervals
+		# This step ensures the snapshot is saved and flush intervals are updated.
+		# ────────────────────────────────────────────────────────────────────
 
-			json_writer.write(
-				json.dumps(snapshot, 
-					separators=(",", ":")
-				) + "\n"
-			)
-			json_writer.flush()
-
-			current_time = get_current_time_ms()
-
-			JSON_FLUSH_INTERVAL[symbol] = (
-				current_time - LATEST_JSON_FLUSH[symbol]
-			)
-			
-			LATEST_JSON_FLUSH[symbol] = current_time
-
-			del current_time
-
-		except Exception as e:
+		if not flush_snapshot(
+			json_writer,
+			snapshot,
+			symbol,
+			SYMBOL_TO_FILE_HANDLES,
+			JSON_FLUSH_INTERVAL,
+			LATEST_JSON_FLUSH,
+			file_path,
+			logger
+		):
 
 			logger.error(
-				f"[symbol_dump_snapshot][{symbol_upper}] "
-				f"Write failed: {file_path} → {e}",
+				f"[{my_name()}][{symbol_upper}] "
+				f"Failed to flush snapshot: {e}",
 				exc_info=True
 			)
 
-			try:
-
-				# Invalidate `json_writer` for next iteratio
-				pop_and_close_handle(SYMBOL_TO_FILE_HANDLES, symbol)
-
-			except Exception:
-				pass
-
-			if 'current_time' in locals(): del current_time
-			del e
-			continue
-
-		finally:
-
-			_locals_ = locals()
-			for var in ['snapshot', 'file_path']:
-				if var in _locals_: del _locals_[var]
-			del _locals_
-
-	del queue, symbol_upper
+		del snapshot, file_path
 
 # ───────────────────────────────────────────────────────────────────────────────
 # 🛑 Graceful Shutdown Handlers (FastAPI Lifespan & Merge Executor)
@@ -2068,14 +1868,6 @@ def shutdown_merge_executor():
 
 	"""
 	Shuts down the ProcessPoolExecutor and waits for all merge tasks to complete.
-	
-	Called in two scenarios:
-	1. Normal exit: via atexit.register() when process terminates naturally
-	2. Profiling mode: via graceful_shutdown() before os._exit(0)
-	
-	No recursion risk exists because:
-	• Scenario 1: Only atexit handler runs, graceful_shutdown() not called
-	• Scenario 2: os._exit() bypasses atexit handlers after this function
 	"""
 
 	global MERGE_EXECUTOR
@@ -2094,12 +1886,6 @@ def shutdown_merge_executor():
 			f"[main] MERGE_EXECUTOR shutdown failed: {e}",
 			exc_info=True
 		)
-
-"""
-	Register shutdown handler for normal application termination
-	NOTE: This will NOT execute during profiling mode because
-	watchdog_timer() uses os._exit(0) which bypasses atexit handlers
-"""
 
 atexit.register(shutdown_merge_executor)
 
@@ -2172,16 +1958,10 @@ async def lifespan(APP):
 #	  - Provides health checks, JSON-based order book access,
 # 		and real-time UI rendering.
 #
-#   3. 🧱 HTML UI Layer:
-#
-#	  - Jinja2 template system is integrated via FastAPI
-# 		for `/orderbook/{symbol}`.
-#
 # ⚠️ Removal of FastAPI would break:
 #
 #	  - Logging infrastructure
-#	  - REST endpoints (/health, /state)
-#	  - HTML visualization
+#	  - HTML endpoint: /dashboard
 #
 #   - Even if not all FastAPI features are always used,
 # 	  its presence is mandatory.
@@ -2195,141 +1975,7 @@ async def lifespan(APP):
 APP = FastAPI(lifespan=lifespan)
 
 # ───────────────────────────────────────────────────────────────────────────────
-# 🔍 Healthcheck Endpoints
-# ───────────────────────────────────────────────────────────────────────────────
-
-@APP.get("/health/live")
-async def health_live():
-
-	"""
-	Liveness probe — Returns 200 OK unconditionally.
-	Used to check if the server process is alive (not necessarily functional).
-	"""
-
-	try:
-
-		return {"status": "alive"}
-
-	except Exception as e:
-
-		logger.error(
-			f"[health_live] Healthcheck failed: {e}",
-			exc_info=True
-		)
-
-		raise HTTPException(status_code=500, detail="healthcheck error")
-
-@APP.get("/health/ready")
-async def health_ready():
-
-	"""
-	Readiness probe — Returns 200 OK only after first market snapshot is received.
-
-	Before readiness:
-		- Server may be running, but not yet connected to Binance stream.
-		- Kubernetes/monitoring agents can use this to delay traffic routing.
-	"""
-
-	try:
-
-		if EVENT_1ST_SNAPSHOT.is_set():
-
-			return {"status": "ready"}
-
-		raise HTTPException(status_code=503, detail="not ready")
-
-	except Exception as e:
-
-		logger.error(
-			f"[health_ready] Readiness check failed: {e}",
-			exc_info=True
-		)
-
-		raise HTTPException(status_code=500, detail="readiness check error")
-
-# ───────────────────────────────────────────────────────────────────────────────
-# 🧠 JSON API for Order Book (Temporary Primitive Functionality)
-# ───────────────────────────────────────────────────────────────────────────────
-
-@APP.get("/state/{symbol}")
-async def get_order_book(symbol: str):
-
-	"""
-	Returns the most recent order book snapshot (depth20@100ms)
-	being streamed down from Binance for a given symbol.
-	"""
-
-	try:
-
-		symbol = symbol.lower()
-
-		if symbol not in SYMBOL_SNAPSHOTS_TO_RENDER:
-
-			raise HTTPException(status_code=404, detail="symbol not found")
-
-		return JSONResponse(content=SYMBOL_SNAPSHOTS_TO_RENDER[symbol])
-
-	except Exception as e:
-
-		logger.error(
-			f"[get_order_book] Failed to serve order book for '{symbol}': {e}",
-			exc_info=True
-		)
-		
-		raise HTTPException(status_code=500, detail="internal error")
-
-# ───────────────────────────────────────────────────────────────────────────────
-# 👁️ HTML UI for Order Book (Temporary Primitive Functionality)
-# ───────────────────────────────────────────────────────────────────────────────
-
-@APP.get("/orderbook/{symbol}", response_class=HTMLResponse)
-async def orderbook_ui(request: Request, symbol: str):
-
-	"""
-	Renders a lightweight HTML page showing
-	the current order book snapshot for
-	the given symbol.
-	"""
-
-	try:
-
-		sym = symbol.lower()
-
-		if sym not in SYMBOL_SNAPSHOTS_TO_RENDER:
-
-			raise HTTPException(status_code=404, detail="symbol not found")
-
-		data = SYMBOL_SNAPSHOTS_TO_RENDER[sym]
-		bids = data["bids"]
-		asks = data["asks"]
-		max_len = max(len(bids), len(asks))  # For consistent rendering in the template
-
-		return templates.TemplateResponse(
-			"orderbook.html",
-			{
-				"request": request,
-				"symbol": sym,
-				"bids": bids,
-				"asks": asks,
-				"max_len": max_len,
-			},
-		)
-
-	except HTTPException:
-
-		raise
-
-	except Exception as e:
-
-		logger.error(
-			f"[orderbook_ui] Failed to render order book for '{symbol}': {e}",
-			exc_info=True
-		)
-
-		raise HTTPException(status_code=500, detail="internal error")
-
-# ───────────────────────────────────────────────────────────────────────────────
-# EXPERIMENTAL: EXTERNAL DASHBOARD SERVICE
+# EXTERNAL DASHBOARD SERVICE
 # ───────────────────────────────────────────────────────────────────────────────
 
 @APP.get("/dashboard", response_class=HTMLResponse)
@@ -2337,7 +1983,10 @@ async def dashboard_page(request: Request):
 	"""Dashboard HTML 페이지 서빙"""
 	try:
 		# HTML 파일 경로를 resource_path를 통해 가져오기
-		html_path = resource_path("stream_binance_dashboard.html")
+		html_path = resource_path(
+			"stream_binance_dashboard.html",
+			logger
+		)
 
 		if not os.path.exists(html_path):
 			logger.error(f"[dashboard_page] HTML file not found: {html_path}")
@@ -2544,16 +2193,17 @@ async def monitor_hardware():
 			prev_time = curr_time
 
 			# High Memory Load Warning
-
-			if MEM_LOAD_PERCENTAGE > DESIRED_MAX_SYS_MEM_LOAD:
-
-				logger.warning(
-					f"[monitor_hardware]\n"
-					f"\t  {MEM_LOAD_PERCENTAGE:.2f}% "
-					f"(MEM_LOAD_PERCENTAGE)\n"
-					f"\t> {DESIRED_MAX_SYS_MEM_LOAD:.2f}% "
-					f"(DESIRED_MAX_SYS_MEM_LOAD)."
-				)
+			# Disabled for now since it can confuse memray
+			
+			#if MEM_LOAD_PERCENTAGE > DESIRED_MAX_SYS_MEM_LOAD:
+			#
+			#	logger.warning(
+			#		f"[monitor_hardware]\n"
+			#		f"\t  {MEM_LOAD_PERCENTAGE:.2f}% "
+			#		f"(MEM_LOAD_PERCENTAGE)\n"
+			#		f"\t> {DESIRED_MAX_SYS_MEM_LOAD:.2f}% "
+			#		f"(DESIRED_MAX_SYS_MEM_LOAD)."
+			#	)
 			
 		except Exception as e:
 
@@ -2777,16 +2427,6 @@ def graceful_shutdown():
 
 	"""
 	Graceful shutdown function for profiling mode.
-	
-	IMPORTANT: This function is called ONLY during profiling mode via
-	watchdog_timer() and leads to immediate process termination (os._exit).
-	It does NOT conflict with atexit.register(shutdown_merge_executor) 
-	because they execute in mutually exclusive scenarios:
-	
-	• Profiling mode: watchdog_timer() → graceful_shutdown() → os._exit(0)
-	• Normal exit: atexit handler → shutdown_merge_executor() only
-	
-	No infinite recursion occurs because os._exit() bypasses atexit handlers.
 	"""
 
 	try:
@@ -2829,122 +2469,6 @@ def graceful_shutdown():
 			f"[graceful_shutdown] Error during shutdown: {e}"
 		)
 
-async def watchdog_timer(timeout_sec: int) -> None:
-
-	"""
-		Waits for a given number of seconds,
-		then triggers profiling shutdown.
-	"""
-
-	global EVENT_STREAM_ENABLE
-
-	try:
-
-		await asyncio.sleep(timeout_sec)
-
-		logger.info(
-			f"[watchdog_timer] {timeout_sec}s elapsed. "
-			f"Initiating shutdown..."
-		)
-
-		EVENT_STREAM_ENABLE.clear()  # Signal downstream tasks to stop
-
-		try:
-
-			yappi.stop()				# Stop profiling
-
-		except Exception as e:
-
-			logger.error(
-				f"[watchdog_timer] Failed to stop yappi: {e}",
-				exc_info=True
-			)
-
-		try:
-
-			dump_yappi_stats()		  # Dump profiler results to disk
-
-		except Exception as e:
-
-			logger.error(
-				f"[watchdog_timer] Failed to dump yappi stats: {e}",
-				exc_info=True
-			)
-
-		try:
-
-			# ───────────────────────────────────────────────────────────────────
-			# Close file handles and shutdown executors before
-			# process termination. This is safe because `os._exit(0)`
-			# below bypasses atexit handlers, preventing any conflict with
-			# `atexit.register(shutdown_merge_executor)`
-			# ───────────────────────────────────────────────────────────────────
-
-			graceful_shutdown()
-
-
-		except Exception as e:
-
-			logger.error(
-				f"[watchdog_timer] Failed to run graceful_shutdown: {e}",
-				exc_info=True
-			)
-
-		logger.info("Profiling completed. Terminating application.")
-
-		os._exit(0)					 # Force full process termination
-
-	except Exception as e:
-
-		logger.error(
-			f"[watchdog_timer] Unexpected error: {e}",
-			exc_info=True
-		)
-
-		os._exit(1)
-
-# ───────────────────────────────────────────────────────────────────────────────
-# 🧪 Start Profiling
-# ───────────────────────────────────────────────────────────────────────────────
-
-try:
-
-	yappi.set_clock_type("wall")	# Walltime-based profiling
-	yappi.start()
-
-except Exception as e:
-
-	logger.error(
-		f"[profiling] Failed to start yappi profiler: {e}",
-		exc_info=True
-	)
-
-# ───────────────────────────────────────────────────────────────────────────────
-# 🧪 Result Dump on Exit
-# ───────────────────────────────────────────────────────────────────────────────
-
-def dump_yappi_stats() -> None:
-
-	try:
-
-		yappi.get_func_stats().save(
-			"yappi_stats.callgrind", 
-			type="callgrind"
-		)
-
-		logger.info("[profiling] Yappi stats dumped to yappi_stats.callgrind")
-
-	except Exception as e:
-
-		logger.error(
-			f"[profiling] Failed to dump yappi stats: {e}",
-			exc_info=True
-		)
-
-if PROFILE_DURATION > 0:
-
-	atexit.register(dump_yappi_stats)   # Register dump on shutdown
-
 # ───────────────────────────────────────────────────────────────────────────────
 # 🚦 Main Entrypoint & Async Task Orchestration
 #
@@ -2972,8 +2496,7 @@ if PROFILE_DURATION > 0:
 #	  - If enabled, starts a watchdog timer to terminate the application
 #		after a fixed duration.
 #   4. FastAPI Server:
-#	  - Serves REST endpoints for health checks, order book snapshots, and
-#		HTML visualization.
+#	  - Serves REST endpoints for HTML dashboard.
 #	  - Provides WebSocket streaming for dashboard monitoring.
 #
 # Notes:
@@ -3123,30 +2646,6 @@ if __name__ == "__main__":
 
 				sys.exit(1)
 
-			# Triggers shutdown after fixed duration (profiling scenario)
-
-			if PROFILE_DURATION > 0:
-
-				try:
-
-					asyncio.create_task(
-						watchdog_timer(timeout_sec=PROFILE_DURATION)
-					)
-
-					logger.info(
-						"Profiling started. "
-						f"Execution will stop after {PROFILE_DURATION} seconds."
-					)
-
-				except Exception as e:
-
-					logger.error(
-						f"[main] Failed to launch watchdog_timer: {e}",
-						exc_info=True
-					)
-
-					sys.exit(1)
-
 			# Wait for at least one valid snapshot before serving
 
 			try:
@@ -3230,7 +2729,7 @@ Infinite Coroutines in the Main Process:
 	SNAPSHOT:
 		✅ async def put_snapshot() -> None
 		✅ async def symbol_dump_snapshot(symbol: str) -> None
-		- perfectly understand both functions
+		- perfectly understand both functions via flow chart generation
 
 	LATENCY:
 		async def estimate_latency() -> None
@@ -3243,6 +2742,19 @@ Infinite Coroutines in the Main Process:
 
 	DEPRECATED:
 		async def periodic_gc()
+
+————————————————————————————————————————————————————————————————————————————————
+
+The `memray` Python module @VS Code WSL2 Terminal:
+	sudo apt update
+	sudo apt install -y build-essential python3-dev cargo
+	pip install --upgrade pip setuptools wheel
+	pip install memray
+
+Run `memray` as follows:
+	memray run -o memleak_trace.bin stream_binance.py
+	memray flamegraph memleak_trace.bin -o memleak_report.html
+	memray stats memleak_trace.bin
 
 ————————————————————————————————————————————————————————————————————————————————
 

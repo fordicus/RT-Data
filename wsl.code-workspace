@@ -1,0 +1,14 @@
+{
+  "folders": [
+    {
+      "path": "."
+    }
+  ],
+  "settings": {
+    "workbench.editor.restoreEditors": true,
+    "python.defaultInterpreterPath": "/usr/bin/python3",
+    "terminal.integrated.defaultProfile.linux": "bash",
+    "terminal.integrated.cwd": "/mnt/c/workspace/RT-Data"
+  },
+  "remoteAuthority": "wsl+Ubuntu"
+}
