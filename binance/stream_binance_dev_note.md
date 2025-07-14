@@ -1,13 +1,19 @@
 ### TODO
 
-1. **EXTERNAL DASHBOARD SERVICE**
+1. **TODO-HOTFIX**
 
-   * dashboard_page() 함수가 하드 코딩 되어있음
+	*	⚛️ Fire-and-Forget / GIL-Free / Atomic Process Concurrency for `zip_and_remove`  
+	*	The top trading-volume symbol alone sufficies for the latency measurement:
+		*	mean & variance from a deque
+		*	simplest possible implementation of `estimate_latency()`
+
+2. **EXTERNAL DASHBOARD SERVICE**
+
    * duckdns는 신뢰할 수 없음
    * UptimeRobot이 대시보드 포트를 모니터링하도록 설정
    * 모니터링 지표 중 문제 발생 시 텔레그렘 메시지 전송
 
-2. **홈서버 관리 가이드 통합 (RT-Data 저장소)**
+3. **홈서버 관리 가이드 통합 (RT-Data 저장소)**
 
 - dashboard_page() 함수 디플로이 관련 세팅 문서에 통합
 	- 홈서버 관리 가이드 문서를 RT-Data Git 저장소에 통합 및 정리
