@@ -2,8 +2,17 @@ import inspect, os, asyncio, threading, json, logging
 from io import TextIOWrapper
 from typing import Dict, Optional
 
-SAVE_INTERVAL_MIN   = int()
+def get_file_suffix():		return
+def get_current_time_ms():	return
+def get_date_from_suffix():	return
+def zip_and_remove():		return
+def symbol_trigger_merge():	return
 
+# ——————————————————————————————————————————————————————————————————————
+# COMMON
+# ——————————————————————————————————————————————————————————————————————
+
+SAVE_INTERVAL_MIN:		int
 SNAPSHOTS_QUEUE_DICT:	dict[str, asyncio.Queue]
 EVENT_STREAM_ENABLE:	asyncio.Event
 LOB_DIR:				str
@@ -12,20 +21,13 @@ SYMBOL_TO_FILE_HANDLES: dict[str, tuple[str, TextIOWrapper]]
 LATEST_JSON_FLUSH:		Dict[str, int]
 MERGE_LOCKS:			dict[str, threading.Lock]
 MERGED_DAYS:			dict[str, set[str]]
-
-def get_file_suffix():		return
-def get_current_time_ms():	return
-def get_date_from_suffix():	return
-def zip_and_remove():		return
-def symbol_trigger_merge():	return
+logger:					logging.Logger
 
 def my_name():
 	frame = inspect.stack()[1]
 	return f"{frame.function}:{frame.lineno}"
 
-logger = logging.Logger()
-
-`symbol_dump_snapshot` 함수의 플로우 차트를 위에서 아래로 텍스트로 작성해줄래요?:
+# ——————————————————————————————————————————————————————————————————————
 
 async def symbol_dump_snapshot(symbol: str) -> None:
 

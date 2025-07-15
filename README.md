@@ -21,7 +21,7 @@ to extract alpha signals from market microstructure dynamics.
 
 ## 📅 Latest Data Acquisition
 
-- **Date:**  2025.07.01  
+- **Date:**  2025.07.14  
 - **Range (65 days):** 2025.05.10 ~ 2025.07.13  
 - **Symbols (30):**
 
