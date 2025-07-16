@@ -1,9 +1,6 @@
-from concurrent.futures import ProcessPoolExecutor
+from typing import Dict
 
-def func(x: str):
-	# ... do something with pickled `x` ...
-	return
-
-EXECUTOR = ProcessPoolExecutor(max_workers=4)
-print(type(EXECUTOR))
+# meine = dict()
+meine = Dict()
+print(type(meine))
 exit()

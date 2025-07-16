@@ -21,7 +21,6 @@ async def symbol_dump_snapshot(
 	latest_json_flush:		Dict[str, int],
 	purge_on_date_change:	int,
 	merge_executor:			ProcessPoolExecutor,
-	merge_locks:			dict[str, threading.Lock],
 	merged_days:			dict[str, set[str]],
 	logger:					logging.Logger
 ):
@@ -277,10 +276,10 @@ async def symbol_dump_snapshot(
 	#——————————————————————————————————————————————————————————————————
 
 	def safe_zip_n_remove_jsonl(
-		lob_dir: str,
-		symbol_upper:  str,
+		lob_dir:	  str,
+		symbol_upper: str,
 		last_suffix:  str,
-		logger:	logging.Logger
+		logger:		  logging.Logger
 	):
 
 		last_jsonl_path = os.path.join(
@@ -360,14 +359,14 @@ async def symbol_dump_snapshot(
 	def symbol_trigger_merge(
 		merge_executor: ProcessPoolExecutor,
 		purge_on_date_change: int,
-		lob_dir:  str,
-		symbol:	  str,
-		last_day: str
+		lob_dir:   str,
+		symbol:	   str,
+		last_date: str
 	):
 
 		merge_executor.submit(
 			symbol_consolidate_a_day,	# TODO: defined in global
-			symbol, last_day,			# pickle
+			symbol, last_date,			# pickle
 			lob_dir,
 			purge_on_date_change == 1
 		)
@@ -496,35 +495,27 @@ async def symbol_dump_snapshot(
 
 			if last_suffix:
 
-				last_day = get_date_from_suffix(last_suffix)
+				last_date = get_date_from_suffix(last_suffix)
 
-				with merge_locks[symbol]:
+				if ((last_date != date_str) and 
+					(last_date not in merged_days[symbol])
+				):
 
-					# ────────────────────────────────────────────────────────
-					# This block ensures thread-safe execution for
-					# merge operations. All previous files are now .zip
-					# format, ensuring complete day consolidation.
-					# ────────────────────────────────────────────────────────
+					merged_days[symbol].add(last_date)		# TODO: deque
+					
+					symbol_trigger_merge(
+						merge_executor,
+						purge_on_date_change,
+						lob_dir, symbol, last_date
+					)
 
-					if ((last_day != date_str) and 
-						(last_day not in merged_days[symbol])
-					):
+					logger.info(
+						f"[{my_name()}][{symbol_upper}] "
+						f"Triggered merge for {last_date} "
+						f"(current day: {date_str})."
+					)
 
-						merged_days[symbol].add(last_day)
-						
-						symbol_trigger_merge(
-							merge_executor,
-							purge_on_date_change,
-							lob_dir, symbol, last_day
-						)
-
-						logger.info(
-							f"[{my_name()}][{symbol_upper}] "
-							f"Triggered merge for {last_day} "
-							f"(current day: {date_str})."
-						)
-
-						del last_day
+					del last_date
 
 		except Exception as e:
 
@@ -534,7 +525,7 @@ async def symbol_dump_snapshot(
 				exc_info=True
 			)
 
-			if 'last_day' in locals(): del last_day
+			if 'last_date' in locals(): del last_date
 			del e
 			continue
 

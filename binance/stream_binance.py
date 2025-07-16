@@ -62,8 +62,10 @@ Binance Official GitHub Manual:
 # 📦 Built-in Standard Library Imports (Grouped by Purpose)
 # ───────────────────────────────────────────────────────────────────────────────
 
+import inspect
+
 from stream_binance_globals import (
-	my_name,
+	my_name,		# For `Exception` that almost-surely does not happen.
 	resource_path,
 	load_config,
 )
@@ -74,7 +76,8 @@ import sys, os, certifi, shutil, zipfile
 import json, statistics
 from collections import deque
 from io import TextIOWrapper
-from typing import Dict, Deque, Optional
+from typing import Optional
+from collections import OrderedDict
 
 os.environ["SSL_CERT_FILE"] = certifi.where()
 
@@ -339,12 +342,12 @@ if WS_PING_TIMEOUT  == 0: WS_PING_TIMEOUT  = None
 # 🧠 Runtime Per-Symbol State
 # ───────────────────────────────────────────────────────────────────────────────
 
-LATENCY_DICT:		  Dict[str, Deque[int]] = {}
-MEDIAN_LATENCY_DICT:  Dict[str, int] = {}
-DEPTH_UPDATE_ID_DICT: Dict[str, int] = {}
+LATENCY_DICT:		  dict[str, deque[int]] = {}
+MEDIAN_LATENCY_DICT:  dict[str, int] = {}
+DEPTH_UPDATE_ID_DICT: dict[str, int] = {}
 
-LATEST_JSON_FLUSH:	  Dict[str, int] = {}
-JSON_FLUSH_INTERVAL:  Dict[str, int] = {}
+LATEST_JSON_FLUSH:	  dict[str, int] = {}
+JSON_FLUSH_INTERVAL:  dict[str, int] = {}
 
 # ───────────────────────────────────────────────────────────────────────────────
 # 🔒 Global Event Flags (pre-declared to prevent NameError)
@@ -449,22 +452,13 @@ SYMBOL_TO_FILE_HANDLES:		dict[str, tuple[str, TextIOWrapper]] = {}
 
 SNAPSHOTS_QUEUE_MAX = int(CONFIG.get("SNAPSHOTS_QUEUE_MAX",	100))
 
-# Each symbol has its own threading.Lock to ensure
-# independent synchronization during merge operations.
-
-MERGED_DAYS: dict[str, set[str]] = {}
-MERGE_LOCKS: dict[str, threading.Lock] = {
-	symbol: threading.Lock() for symbol in SYMBOLS
-}
+RECORDS_MERGED_DATES: dict[str, OrderedDict[str]] = {}
+RECORDS_ZNR_MINUTES:  dict[str, OrderedDict[str]] = {}	# ZNR := zip_n_remove
+RECORDS_MAX = int(CONFIG.get("RECORDS_MAX", 10))
 
 # ───────────────────────────────────────────────────────────────────────────────
 
 def initialize_runtime_state():
-
-	"""
-	Initializes all global runtime state dictionaries and sets.
-	Logs and terminates if any error occurs during initialization.
-	"""
 
 	try:
 		global SYMBOLS
@@ -517,9 +511,17 @@ def initialize_runtime_state():
 		})
 
 		SYMBOL_TO_FILE_HANDLES.clear()
-		MERGED_DAYS.clear()
-		MERGED_DAYS.update({
-			symbol: set() for symbol in SYMBOLS
+
+		RECORDS_MERGED_DATES.clear()
+		RECORDS_MERGED_DATES.update({
+			symbol: OrderedDict()
+			for symbol in SYMBOLS
+		})
+
+		RECORDS_ZNR_MINUTES.clear()
+		RECORDS_ZNR_MINUTES.update({
+			symbol: OrderedDict()
+			for symbol in SYMBOLS
 		})
 
 		logger.info(
@@ -848,8 +850,8 @@ async def put_snapshot() -> None:
 		READ:
 			LATENCY_GATE:
 				EVENT_STREAM_ENABLE:	asyncio.Event
-				LATENCY_DICT:			Dict[str, Deque[int]]
-				MEDIAN_LATENCY_DICT:	Dict[str, int]
+				LATENCY_DICT:			dict[str, deque[int]]
+				MEDIAN_LATENCY_DICT:	dict[str, int]
 			WEBSOCKETS:
 				WS_URL, WS_PING_INTERVAL, WS_PING_TIMEOUT
 				MAX_BACKOFF, BASE_BACKOFF,
@@ -1000,15 +1002,19 @@ async def put_snapshot() -> None:
 
 		finally:
 
-			if 'symbol' not in locals():
+			_locals_ = locals()
+
+			if 'symbol' not in _locals_:
 				symbol = "UNKNOWN"
+
+			if 'ws'		in _locals_: del ws
+			if 'symbol' in _locals_: del symbol
+			del _locals_
 
 			logger.info(
 				f"[put_snapshot][{symbol.upper()}] "
 				f"WebSocket connection closed."
 			)
-
-			del ws, symbol	# explicitly being deleted
 		
 	del ws_retry_cnt
 
@@ -1202,6 +1208,89 @@ def symbol_consolidate_a_day(
 
 from concurrent.futures import ProcessPoolExecutor
 
+#——————————————————————————————————————————————————————————————————
+
+#	 '2025-06-27_13-15'
+# -> '2025-06-27'
+def get_date_from_suffix(
+	suffix: str
+) -> str:
+
+	try: return suffix.split("_")[0]
+
+	except Exception as e:
+
+		logger.error(
+			f"[{my_name()}] Failed to extract date "
+			f"from suffix '{suffix}': {e}",
+			exc_info=True
+		)
+		return "invalid_date"
+
+#——————————————————————————————————————————————————————————————————
+
+def safe_zip_n_remove_jsonl(
+	lob_dir:	  str,
+	symbol_upper: str,
+	last_suffix:  str
+):
+
+#——————————————————————————————————————————————————————————————————
+
+	def zip_and_remove(
+		src_path: str
+	):
+
+		try:
+
+			# `os.path.exists(src_path) == True` known by Caller
+
+			zip_path = src_path.replace(".jsonl", ".zip")
+
+			with zipfile.ZipFile(
+				zip_path, "w",
+				zipfile.ZIP_DEFLATED
+			) as zf:
+
+				zf.write(src_path,
+					arcname=os.path.basename(src_path)
+				)
+
+			os.remove(src_path)
+
+		except Exception as e:
+
+			logger.error(
+				f"[{my_name()}] Failed to zip "
+				f"or remove '{src_path}': {e}",
+				exc_info=True
+			)
+
+#——————————————————————————————————————————————————————————————————
+
+	last_jsonl_path = os.path.join(
+		os.path.join(
+			lob_dir, "temporary",
+			f"{symbol_upper}_orderbook_"
+			f"{get_date_from_suffix(last_suffix)}",
+		),
+		f"{symbol_upper}_orderbook_{last_suffix}.jsonl"
+	)
+
+	if os.path.exists(last_jsonl_path):
+
+		zip_and_remove(last_jsonl_path)
+
+	else:
+
+		logger.warning(
+			f"[{my_name()}][{symbol_upper}] "
+			f"File not found for compression: "
+			f"{last_jsonl_path}"
+		)
+
+#——————————————————————————————————————————————————————————————————
+
 async def symbol_dump_snapshot(
 	symbol:					str,
 	save_interval_min:		int,
@@ -1209,12 +1298,14 @@ async def symbol_dump_snapshot(
 	event_stream_enable:	asyncio.Event,
 	lob_dir:				str,
 	symbol_to_file_handles: dict[str, tuple[str, TextIOWrapper]],
-	json_flush_interval:	Dict[str, int],
-	latest_json_flush:		Dict[str, int],
+	json_flush_interval:	dict[str, int],
+	latest_json_flush:		dict[str, int],
 	purge_on_date_change:	int,
 	merge_executor:			ProcessPoolExecutor,
-	merge_locks:			dict[str, threading.Lock],
-	merged_days:			dict[str, set[str]],
+	records_merged_dates:	dict[str, OrderedDict[str]],
+	znr_executor:			ProcessPoolExecutor,
+	records_znr_minutes:	dict[str, OrderedDict[str]],
+	records_max:			int,
 	logger:					logging.Logger
 ):
 
@@ -1319,7 +1410,7 @@ async def symbol_dump_snapshot(
 		queue:  asyncio.Queue,
 		logger: logging.Logger,
 		symbol: str
-	) -> Optional[Dict]:
+	) -> Optional[dict]:
 
 		try:
 			return await queue.get()
@@ -1331,23 +1422,6 @@ async def symbol_dump_snapshot(
 				exc_info=True
 			)
 			return None
-		
-	#——————————————————————————————————————————————————————————————————
-
-	def get_date_from_suffix(suffix: str) -> str:
-
-		# '2025-06-27_13-15' -> '2025-06-27'
-
-		try: return suffix.split("_")[0]
-
-		except Exception as e:
-
-			logger.error(
-				f"[{my_name()}] Failed to extract date "
-				f"from suffix '{suffix}': {e}",
-				exc_info=True
-			)
-			return "invalid_date"
 
 	#——————————————————————————————————————————————————————————————————
 
@@ -1383,7 +1457,7 @@ async def symbol_dump_snapshot(
 
 	def get_suffix_n_date(
 		save_interval_min: int,
-		snapshot: Dict,
+		snapshot: dict,
 		symbol: str
 	) -> tuple[Optional[str], Optional[str]]:
 		
@@ -1440,71 +1514,13 @@ async def symbol_dump_snapshot(
 
 	#——————————————————————————————————————————————————————————————————
 
-	def zip_and_remove(src_path: str):
-
-		try:
-
-			if os.path.exists(src_path):
-
-				zip_path = src_path.replace(".jsonl", ".zip")
-
-				with zipfile.ZipFile(
-					zip_path, "w", zipfile.ZIP_DEFLATED
-				) as zf:
-
-					zf.write(src_path,
-						arcname=os.path.basename(src_path)
-					)
-
-				os.remove(src_path)
-
-		except Exception as e:
-
-			logger.error(
-				f"[{my_name()}] Failed to zip "
-				f"or remove '{src_path}': {e}",
-				exc_info=True
-			)
-
-	#——————————————————————————————————————————————————————————————————
-
-	def safe_zip_n_remove_jsonl(
-		lob_dir: str,
-		symbol_upper:  str,
-		last_suffix:  str,
-		logger:	logging.Logger
-	):
-
-		last_jsonl_path = os.path.join(
-			os.path.join(
-				lob_dir, "temporary",
-				f"{symbol_upper}_orderbook_"
-				f"{get_date_from_suffix(last_suffix)}",
-			),
-			f"{symbol_upper}_orderbook_{last_suffix}.jsonl"
-		)
-
-		if os.path.exists(last_jsonl_path):
-
-			zip_and_remove(last_jsonl_path)
-
-		else:
-
-			logger.warning(
-				f"[{my_name()}][{symbol_upper}] "
-				f"File not found for compression: "
-				f"{last_jsonl_path}"
-			)
-
-	#——————————————————————————————————————————————————————————————————
-
 	def flush_snapshot(
 		json_writer: TextIOWrapper,
-		snapshot: Dict,
+		snapshot: dict,
 		symbol: str,
 		symbol_to_file_handles: dict[str, tuple[str, TextIOWrapper]],
-		json_flush_interval: Dict[str, int],
-		latest_json_flush: Dict[str, int],
+		json_flush_interval: dict[str, int],
+		latest_json_flush: dict[str, int],
 		file_path: str,
 		logger: logging.Logger
 	) -> bool:
@@ -1549,20 +1565,17 @@ async def symbol_dump_snapshot(
 		
 	#——————————————————————————————————————————————————————————————————
 
-	def symbol_trigger_merge(
-		merge_executor: ProcessPoolExecutor,
-		purge_on_date_change: int,
-		lob_dir:  str,
-		symbol:	  str,
-		last_day: str
+	def memorize_treated(
+		records: dict[str, OrderedDict[str]],
+		records_max: int,
+		symbol: str,
+		to_rec: str
 	):
 
-		merge_executor.submit(
-			symbol_consolidate_a_day,	# TODO: defined in global
-			symbol, last_day,			# pickle
-			lob_dir,
-			purge_on_date_change == 1
-		)
+		# discard the oldest at the front of the OrderedDict
+		if len(records[symbol]) >= records_max:
+			records[symbol].popitem(last=False)
+		records[symbol][to_rec] = None
 
 	#——————————————————————————————————————————————————————————————————
 
@@ -1614,9 +1627,7 @@ async def symbol_dump_snapshot(
 			continue
 
 		# ────────────────────────────────────────────────────────────────────
-		# STEP 1
-		# 	safe_zip_n_remove_jsonl(last_jsonl_path)
-		#	json_writer = open(file_path, "a", encoding="utf-8")
+		# STEP 1: Roll-over by Minute
 		# ────────────────────────────────────────────────────────────────────
 		# `last_suffix` will be `None` at the beginning.
 		# ────────────────────────────────────────────────────────────────────
@@ -1626,7 +1637,7 @@ async def symbol_dump_snapshot(
 
 		if last_suffix != suffix:
 
-			if json_writer:
+			if json_writer:							  # if not the first flush
 
 				# ────────────────────────────────────────────────────────────
 
@@ -1641,23 +1652,22 @@ async def symbol_dump_snapshot(
 				del json_writer
 
 				# ────────────────────────────────────────────────────────────
+				# fire and forget
+				# ────────────────────────────────────────────────────────────
 
-				try:
+				if last_suffix not in records_znr_minutes[symbol]:
 
-					safe_zip_n_remove_jsonl(
-						lob_dir, symbol_upper,
-						last_suffix, logger
+					memorize_treated(
+						records_znr_minutes,
+						records_max,
+						symbol, last_suffix
 					)
 
-				except Exception as e:
-
-					logger.error(
-						f"[{my_name()}][{symbol_upper}] "
-						f"safe_zip_n_remove_jsonl() failed "
-						f"for last_suffix={last_suffix}: {e}",
-						exc_info=True
+					znr_executor.submit(			# pickle
+						safe_zip_n_remove_jsonl,
+						lob_dir, symbol_upper, 
+						last_suffix
 					)
-					del e
 
 			# ────────────────────────────────────────────────────────────────
 
@@ -1688,35 +1698,31 @@ async def symbol_dump_snapshot(
 
 			if last_suffix:
 
-				last_day = get_date_from_suffix(last_suffix)
+				last_date = get_date_from_suffix(last_suffix)
 
-				with merge_locks[symbol]:
+				if ((last_date != date_str) and 
+					(last_date not in records_merged_dates[symbol])
+				):
 
-					# ────────────────────────────────────────────────────────
-					# This block ensures thread-safe execution for
-					# merge operations. All previous files are now .zip
-					# format, ensuring complete day consolidation.
-					# ────────────────────────────────────────────────────────
+					memorize_treated(
+						records_merged_dates,
+						records_max,
+						symbol, last_date
+					)
+					
+					merge_executor.submit(			# pickle
+						symbol_consolidate_a_day,	# TODO: defined in global
+						symbol, last_date, lob_dir,
+						purge_on_date_change == 1
+					)
 
-					if ((last_day != date_str) and 
-						(last_day not in merged_days[symbol])
-					):
+					logger.info(
+						f"[{my_name()}][{symbol_upper}] "
+						f"Triggered merge for {last_date} "
+						f"(current day: {date_str})."
+					)
 
-						merged_days[symbol].add(last_day)
-						
-						symbol_trigger_merge(
-							merge_executor,
-							purge_on_date_change,
-							lob_dir, symbol, last_day
-						)
-
-						logger.info(
-							f"[{my_name()}][{symbol_upper}] "
-							f"Triggered merge for {last_day} "
-							f"(current day: {date_str})."
-						)
-
-						del last_day
+					del last_date
 
 		except Exception as e:
 
@@ -1726,7 +1732,7 @@ async def symbol_dump_snapshot(
 				exc_info=True
 			)
 
-			if 'last_day' in locals(): del last_day
+			if 'last_date' in locals(): del last_date
 			del e
 			continue
 
@@ -1752,7 +1758,7 @@ async def symbol_dump_snapshot(
 
 			logger.error(
 				f"[{my_name()}][{symbol_upper}] "
-				f"Failed to flush snapshot: {e}",
+				f"Failed to flush snapshot.",
 				exc_info=True
 			)
 
@@ -1805,24 +1811,22 @@ import atexit
 
 def shutdown_merge_executor():
 
-	"""
-	Shuts down the ProcessPoolExecutor and waits for all merge tasks to complete.
-	"""
-
-	global MERGE_EXECUTOR
-
 	try:
-
 		MERGE_EXECUTOR.shutdown(wait=True)
-
-		logger.info(
-			f"[main] MERGE_EXECUTOR shutdown safely complete."
-		)
+		logger.info(f"[main] MERGE_EXECUTOR shutdown safely complete.")
 
 	except Exception as e:
-
 		logger.error(
 			f"[main] MERGE_EXECUTOR shutdown failed: {e}",
+			exc_info=True
+		)
+	try:
+		ZNR_EXECUTOR.shutdown(wait=True)
+		logger.info(f"[main] ZNR_EXECUTOR shutdown safely complete.")
+
+	except Exception as e:
+		logger.error(
+			f"[main] ZNR_EXECUTOR shutdown failed: {e}",
 			exc_info=True
 		)
 
@@ -2416,14 +2420,14 @@ if __name__ == "__main__":
 
 	from uvicorn.config import Config
 	from uvicorn.server import Server
-	from concurrent.futures import ProcessPoolExecutor
 	import asyncio
 
-	# Use `ProcessPoolExecutor` for process-based parallelism
-	# #to minimize GIL impact.
+	# ───────────────────────────────────────────────────────────────────────────
+	# THESE TWO MUST BE WITHIN THE MAIN PROCESS
+	# ───────────────────────────────────────────────────────────────────────────
 
-	MAX_WORKERS		 = int(CONFIG.get("MAX_WORKERS", 8))
-	MERGE_EXECUTOR	 = ProcessPoolExecutor(max_workers=MAX_WORKERS)
+	MERGE_EXECUTOR = ProcessPoolExecutor(max_workers=len(SYMBOLS))
+	ZNR_EXECUTOR   = ProcessPoolExecutor(max_workers=len(SYMBOLS))
 
 	# ───────────────────────────────────────────────────────────────────────────
 
@@ -2498,9 +2502,9 @@ if __name__ == "__main__":
 							JSON_FLUSH_INTERVAL,
 							LATEST_JSON_FLUSH,
 							PURGE_ON_DATE_CHANGE,
-							MERGE_EXECUTOR,
-							MERGE_LOCKS,
-							MERGED_DAYS,
+							MERGE_EXECUTOR, RECORDS_MERGED_DATES,
+							ZNR_EXECUTOR,   RECORDS_ZNR_MINUTES,
+							RECORDS_MAX,
 							logger
 						)
 					)
@@ -2590,7 +2594,7 @@ if __name__ == "__main__":
 					lifespan	= "on",
 					use_colors	= True,
 					log_level	= "warning",
-					workers		= MAX_WORKERS,
+					workers		= os.cpu_count(),
 					loop		= "asyncio",	# todo: `uvicorn` if Linux
 				)
 
