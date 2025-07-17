@@ -62,8 +62,10 @@ Binance Official GitHub Manual:
 # 📦 Built-in Standard Library Imports (Grouped by Purpose)
 # ───────────────────────────────────────────────────────────────────────────────
 
+import inspect
+
 from stream_binance_globals import (
-	my_name,
+	my_name,		# For `Exception` that almost-surely does not happen.
 	resource_path,
 	load_config,
 )
@@ -74,7 +76,8 @@ import sys, os, certifi, shutil, zipfile
 import json, statistics
 from collections import deque
 from io import TextIOWrapper
-from typing import Dict, Deque, Optional
+from typing import Optional
+from collections import OrderedDict
 
 os.environ["SSL_CERT_FILE"] = certifi.where()
 
@@ -247,9 +250,16 @@ try:
 	logger.addHandler(file_handler)
 	logger.addHandler(console_handler)
 
+	for handler in logger.handlers:
+		handler.setFormatter(log_formatter)
+
 	# Set specific loggers to WARNING level
 
-	for name in ["fastapi", "uvicorn", "uvicorn.error", "uvicorn.access"]:
+	for name in [
+		"fastapi", "uvicorn",
+		"uvicorn.error",
+		"uvicorn.access"
+	]:
 		
 		specific_logger = logging.getLogger(name)
 		specific_logger.setLevel(logging.WARNING)
@@ -267,11 +277,8 @@ try:
 		"concurrent.futures"
 	]:
 		individual_logger = logging.getLogger(name)
-		individual_logger.propagate = True
 		individual_logger.setLevel(logging.INFO)
-
-		for handler in individual_logger.handlers:
-			handler.setFormatter(log_formatter)
+		individual_logger.propagate = True
 
 except Exception as e:
 
@@ -337,29 +344,14 @@ if WS_PING_TIMEOUT  == 0: WS_PING_TIMEOUT  = None
 
 # ───────────────────────────────────────────────────────────────────────────────
 # 🧠 Runtime Per-Symbol State
-#
-# Structures:
-#   • LATENCY_DICT: Tracks recent latency samples per symbol (rolling deque).
-#   • MEDIAN_LATENCY_DICT: Stores median latency (ms) per symbol, updated dynamically.
-#   • DEPTH_UPDATE_ID_DICT: Records the latest `updateId` for each symbol to ensure
-#	 proper sequencing of depth updates.
-#   • LATEST_JSON_FLUSH: Stores the last flush timestamp (ms) for each symbol.
-#   • JSON_FLUSH_INTERVAL: Tracks the interval (ms) between consecutive flushes.
-#
-# Usage:
-#   - LATENCY_DICT: Used for latency estimation and validation.
-#   - MEDIAN_LATENCY_DICT: Provides latency compensation for timestamp adjustments.
-#   - DEPTH_UPDATE_ID_DICT: Prevents out-of-order updates from being processed.
-#   - LATEST_JSON_FLUSH: Monitors the last flush time for snapshot persistence.
-#   - JSON_FLUSH_INTERVAL: Enables real-time monitoring of flush intervals.
 # ───────────────────────────────────────────────────────────────────────────────
 
-LATENCY_DICT:		  Dict[str, Deque[int]] = {}
-MEDIAN_LATENCY_DICT:  Dict[str, int] = {}
-DEPTH_UPDATE_ID_DICT: Dict[str, int] = {}
+LATENCY_DICT:		  dict[str, deque[int]] = {}
+MEDIAN_LATENCY_DICT:  dict[str, int] = {}
+DEPTH_UPDATE_ID_DICT: dict[str, int] = {}
 
-LATEST_JSON_FLUSH:	  Dict[str, int] = {}
-JSON_FLUSH_INTERVAL:  Dict[str, int] = {}
+LATEST_JSON_FLUSH:	  dict[str, int] = {}
+JSON_FLUSH_INTERVAL:  dict[str, int] = {}
 
 # ───────────────────────────────────────────────────────────────────────────────
 # 🔒 Global Event Flags (pre-declared to prevent NameError)
@@ -457,49 +449,6 @@ except Exception as e:
 # ───────────────────────────────────────────────────────────────────────────────
 # 📦 Runtime Memory Buffers & Async File Handles
 # ───────────────────────────────────────────────────────────────────────────────
-# Maintains all per-symbol runtime state required for streaming, persistence,
-# API rendering, and safe daily merge orchestration.
-#
-# Responsibilities:
-#   • Snapshot ingestion (async queue per symbol, for file persistence)
-#   • API rendering (in-memory latest snapshot for FastAPI endpoints)
-#   • File writing (active file handle per symbol, rotated by time window)
-#   • Daily merge deduplication (tracks merged days per symbol)
-#   • Thread/process safety for merge triggers (per-symbol locks)
-#
-# Structures:
-#
-#   SNAPSHOTS_QUEUE_DICT: dict[str, asyncio.Queue[dict]]
-#	 → Per-symbol async queues for order book snapshots.
-#	   Populated by `put_snapshot()`, consumed by `symbol_dump_snapshot()`.
-#
-#   SNAPSHOTS_QUEUE_MAX: int
-#	 → Maximum size of each per-symbol snapshot queue.
-#	   Controls the buffer limit for in-memory order book snapshots.
-#
-#   SYMBOL_SNAPSHOTS_TO_RENDER: dict[str, dict]
-#	 → In-memory latest snapshot per symbol for FastAPI rendering.
-#	   Used for diagnostics/UI only; not persisted to disk.
-#
-#   SYMBOL_TO_FILE_HANDLES: dict[str, tuple[str, TextIOWrapper]]
-#	 → Tracks open file writers per symbol:
-#		└── (last_suffix, writer) where:
-#			• last_suffix: str = time suffix like "2025-07-03_15-00"
-#			• writer: open text file handle for appending .jsonl data
-#
-#   MERGED_DAYS: dict[str, set[str]]
-#	 → For each symbol, contains UTC day strings ("YYYY-MM-DD") that have
-#	   already been merged and archived, preventing redundant merge triggers.
-#
-#   MERGE_LOCKS: dict[str, threading.Lock]
-#	 → Per-symbol locks to prevent race conditions on `MERGED_DAYS` and
-#	   ensure only one merge process is launched per symbol/day.
-#
-# Notes:
-#   - All structures are (re-)initialized via `initialize_runtime_state()`.
-#   - Thread/process safety is enforced for all merge-related state.
-#   - See also: RULESET.md for code conventions and documentation standards.
-# ───────────────────────────────────────────────────────────────────────────────
 
 SNAPSHOTS_QUEUE_DICT:		dict[str, asyncio.Queue] = {}
 SYMBOL_SNAPSHOTS_TO_RENDER: dict[str, dict] = {}
@@ -507,20 +456,13 @@ SYMBOL_TO_FILE_HANDLES:		dict[str, tuple[str, TextIOWrapper]] = {}
 
 SNAPSHOTS_QUEUE_MAX = int(CONFIG.get("SNAPSHOTS_QUEUE_MAX",	100))
 
-# Each symbol has its own threading.Lock to ensure
-# independent synchronization during merge operations.
+RECORDS_MERGED_DATES: dict[str, OrderedDict[str]] = {}
+RECORDS_ZNR_MINUTES:  dict[str, OrderedDict[str]] = {}	# ZNR := zip_n_remove
+RECORDS_MAX = int(CONFIG.get("RECORDS_MAX", 10))
 
-MERGED_DAYS: dict[str, set[str]] = {}
-MERGE_LOCKS: dict[str, threading.Lock] = {
-	symbol: threading.Lock() for symbol in SYMBOLS
-}
+# ───────────────────────────────────────────────────────────────────────────────
 
 def initialize_runtime_state():
-
-	"""
-	Initializes all global runtime state dictionaries and sets.
-	Logs and terminates if any error occurs during initialization.
-	"""
 
 	try:
 		global SYMBOLS
@@ -573,9 +515,17 @@ def initialize_runtime_state():
 		})
 
 		SYMBOL_TO_FILE_HANDLES.clear()
-		MERGED_DAYS.clear()
-		MERGED_DAYS.update({
-			symbol: set() for symbol in SYMBOLS
+
+		RECORDS_MERGED_DATES.clear()
+		RECORDS_MERGED_DATES.update({
+			symbol: OrderedDict()
+			for symbol in SYMBOLS
+		})
+
+		RECORDS_ZNR_MINUTES.clear()
+		RECORDS_ZNR_MINUTES.update({
+			symbol: OrderedDict()
+			for symbol in SYMBOLS
 		})
 
 		logger.info(
@@ -591,125 +541,6 @@ def initialize_runtime_state():
 			exc_info=True
 		)
 		sys.exit(1)
-
-# ───────────────────────────────────────────────────────────────────────────────
-# 📦 File Utilities: Naming, Compression, and Periodic Merging
-#
-# Includes:
-#   • get_file_suffix(...) → Returns time window suffix for
-# 	  filenames (e.g., '1315' for 13:15 UTC)
-#   • zip_and_remove(...) → Compresses a file into .zip and
-# 	  deletes the original
-#   • symbol_consolidate_a_day(...)
-# 	  → Merges minute-level .zip files a daily archive
-#
-# Note:
-#   - Merging behavior assumes SAVE_INTERVAL_MIN < 1440
-# 	  (i.e., per-day rollover is supported)
-#   - If SAVE_INTERVAL_MIN == 1440, merging is redundant but harmless
-# ───────────────────────────────────────────────────────────────────────────────
-
-def get_file_suffix(interval_min: int, event_ts_ms: int) -> str:
-
-	"""
-	Returns a timestamp-based suffix for snapshot filenames.
-
-	Uses `event_ts_ms` from the snapshot's 'eventTime' field, which reflects
-	the client-side receipt time of the Binance WebSocket message.
-
-	Args:
-		interval_min (int): Save interval in minutes.
-		event_ts_ms (int): Client-received timestamp (ms) from snapshot.
-
-	Returns:
-		str: e.g., '2025-07-01_13-00' or '2025-07-01' if daily.
-	"""
-
-	try:
-
-		ts = ms_to_datetime(event_ts_ms)
-
-		if interval_min >= 1440:
-
-			return ts.strftime("%Y-%m-%d")
-
-		else:
-
-			return ts.strftime("%Y-%m-%d_%H-%M")
-
-	except Exception as e:
-
-		logger.error(
-			f"[get_file_suffix] Failed to generate suffix for "
-			f"interval_min={interval_min}, event_ts_ms={event_ts_ms}: {e}",
-			exc_info=True
-		)
-
-		return "invalid_suffix"
-
-# .............................................................
-
-def get_date_from_suffix(suffix: str) -> str:
-
-	"""
-	Extracts the date portion from a file suffix.
-
-	Args:
-		suffix (str): Filename suffix such as '2025-06-27_13-15'
-
-	Returns:
-		str: Date string in 'YYYY-MM-DD'
-	"""
-
-	try:
-
-		return suffix.split("_")[0]
-
-	except Exception as e:
-
-		logger.error(
-			f"[get_date_from_suffix] Failed to extract date "
-			f"from suffix '{suffix}': {e}",
-			exc_info=True
-		)
-
-		return "invalid_date"
-
-# .............................................................
-
-def zip_and_remove(src_path: str):
-
-	"""
-	Zips the specified .jsonl file and removes the original.
-
-	Args:
-		src_path (str): Path to the JSONL file to compress
-	"""
-
-	try:
-
-		if os.path.exists(src_path):
-
-			zip_path = src_path.replace(".jsonl", ".zip")
-
-			with zipfile.ZipFile(
-				zip_path, "w", zipfile.ZIP_DEFLATED
-			) as zf:
-
-				zf.write(
-					src_path,
-					arcname=os.path.basename(src_path)
-				)
-
-			os.remove(src_path)
-
-	except Exception as e:
-
-		logger.error(
-			f"[zip_and_remove] Failed to zip "
-			f"or remove '{src_path}': {e}",
-			exc_info=True
-		)
 
 # ───────────────────────────────────────────────────────────────────────────────
 # 🕓 Latency Control: Measurement, Thresholding, and Flow Gate
@@ -782,7 +613,7 @@ async def gate_streaming_by_latency() -> None:
 
 			await asyncio.sleep(LATENCY_GATE_SLEEP)
 
-# .............................................................
+# ───────────────────────────────────────────────────────────────────────────────
 
 async def estimate_latency() -> None:
 
@@ -971,7 +802,11 @@ async def estimate_latency() -> None:
 				f"WebSocket connection closed."
 			)
 
-def format_ws_url(url: str, label: str = "") -> str:
+# ───────────────────────────────────────────────────────────────────────────────
+
+def format_ws_url(
+	url: str, label: str = ""
+) -> str:
 
 	"""
 	Formats a Binance WebSocket URL for multi-symbol readability.
@@ -998,6 +833,8 @@ def format_ws_url(url: str, label: str = "") -> str:
 
 	return formatted
 
+# ───────────────────────────────────────────────────────────────────────────────
+
 async def put_snapshot() -> None:
 
 	""" ————————————————————————————————————————————————————————————————
@@ -1017,8 +854,8 @@ async def put_snapshot() -> None:
 		READ:
 			LATENCY_GATE:
 				EVENT_STREAM_ENABLE:	asyncio.Event
-				LATENCY_DICT:			Dict[str, Deque[int]]
-				MEDIAN_LATENCY_DICT:	Dict[str, int]
+				LATENCY_DICT:			dict[str, deque[int]]
+				MEDIAN_LATENCY_DICT:	dict[str, int]
 			WEBSOCKETS:
 				WS_URL, WS_PING_INTERVAL, WS_PING_TIMEOUT
 				MAX_BACKOFF, BASE_BACKOFF,
@@ -1169,15 +1006,19 @@ async def put_snapshot() -> None:
 
 		finally:
 
-			if 'symbol' not in locals():
+			_locals_ = locals()
+
+			if 'symbol' not in _locals_:
 				symbol = "UNKNOWN"
+
+			if 'ws'		in _locals_: del ws
+			if 'symbol' in _locals_: del symbol
+			del _locals_
 
 			logger.info(
 				f"[put_snapshot][{symbol.upper()}] "
 				f"WebSocket connection closed."
 			)
-
-			del ws, symbol	# explicitly being deleted
 		
 	del ws_retry_cnt
 
@@ -1189,10 +1030,6 @@ def symbol_consolidate_a_day(
 	base_dir: str,
 	purge:	  bool = True
 ):
-	"""
-	Consolidates per-minute zipped snapshots
-	into a daily archive for a given symbol.
-	"""
 
 	with NanoTimer() as timer:
 
@@ -1373,43 +1210,116 @@ def symbol_consolidate_a_day(
 
 # ───────────────────────────────────────────────────────────────────────────────
 
-def symbol_trigger_merge(symbol, last_day):
+from concurrent.futures import ProcessPoolExecutor
 
-	"""
-	Triggers daily merge and archival
-	for the given symbol and day.
-	"""
+#——————————————————————————————————————————————————————————————————
 
-	global MERGE_EXECUTOR, LOB_DIR, PURGE_ON_DATE_CHANGE
+#	 '2025-06-27_13-15'
+# -> '2025-06-27'
+def get_date_from_suffix(
+	suffix: str
+) -> str:
 
-	MERGE_EXECUTOR.submit(
-		symbol_consolidate_a_day,
-		# pickle(symbol, last_day)
-		symbol, last_day,
-		LOB_DIR,
-		PURGE_ON_DATE_CHANGE == 1
+	try: return suffix.split("_")[0]
+
+	except Exception as e:
+
+		logger.error(
+			f"[{my_name()}] Failed to extract date "
+			f"from suffix '{suffix}': {e}",
+			exc_info=True
+		)
+		return "invalid_date"
+
+#——————————————————————————————————————————————————————————————————
+
+def safe_zip_n_remove_jsonl(
+	lob_dir:	  str,
+	symbol_upper: str,
+	last_suffix:  str
+):
+
+#——————————————————————————————————————————————————————————————————
+
+	def zip_and_remove(
+		src_path: str
+	):
+
+		try:
+
+			# `os.path.exists(src_path) == True` known by Caller
+
+			zip_path = src_path.replace(".jsonl", ".zip")
+
+			with zipfile.ZipFile(
+				zip_path, "w",
+				zipfile.ZIP_DEFLATED
+			) as zf:
+
+				zf.write(src_path,
+					arcname=os.path.basename(src_path)
+				)
+
+			os.remove(src_path)
+
+		except Exception as e:
+
+			logger.error(
+				f"[{my_name()}] Failed to zip "
+				f"or remove '{src_path}': {e}",
+				exc_info=True
+			)
+
+#——————————————————————————————————————————————————————————————————
+
+	last_jsonl_path = os.path.join(
+		os.path.join(
+			lob_dir, "temporary",
+			f"{symbol_upper}_orderbook_"
+			f"{get_date_from_suffix(last_suffix)}",
+		),
+		f"{symbol_upper}_orderbook_{last_suffix}.jsonl"
 	)
 
-async def symbol_dump_snapshot(symbol: str) -> None:
+	if os.path.exists(last_jsonl_path):
 
-	""" ————————————————————————————————————————————————————————————————
-	CORE FUNCTIONALITY:
-		TO BE WRITTEN
-	————————————————————————————————————————————————————————————————————
-	GLOBAL VARIABLES:
-		READ:
-			SNAPSHOTS_QUEUE_DICT:	dict[str, asyncio.Queue]
-			EVENT_STREAM_ENABLE:	asyncio.Event
-			LOB_DIR:				str
-		WRITE:
-			JSON_FLUSH_INTERVAL:	Dict[str, int]
-		READ & WRITE:
-			SYMBOL_TO_FILE_HANDLES: dict[str, tuple[str, TextIOWrapper]]
-			LATEST_JSON_FLUSH:		Dict[str, int]
-			MERGED_DAYS:			dict[str, set[str]]
-		LOCK:
-			MERGE_LOCKS:			dict[str, threading.Lock]
-	———————————————————————————————————————————————————————————————— """
+		zip_and_remove(last_jsonl_path)
+
+	else:
+
+		logger.warning(
+			f"[{my_name()}][{symbol_upper}] "
+			f"File not found for compression: "
+			f"{last_jsonl_path}"
+		)
+
+#——————————————————————————————————————————————————————————————————
+
+async def symbol_dump_snapshot(
+	symbol:					str,
+	save_interval_min:		int,
+	snapshots_queue_dict:	dict[str, asyncio.Queue],
+	event_stream_enable:	asyncio.Event,
+	lob_dir:				str,
+	symbol_to_file_handles: dict[str, tuple[str, TextIOWrapper]],
+	json_flush_interval:	dict[str, int],
+	latest_json_flush:		dict[str, int],
+	purge_on_date_change:	int,
+	merge_executor:			ProcessPoolExecutor,
+	records_merged_dates:	dict[str, OrderedDict[str]],
+	znr_executor:			ProcessPoolExecutor,
+	records_znr_minutes:	dict[str, OrderedDict[str]],
+	records_max:			int,
+	logger:					logging.Logger
+):
+
+	#——————————————————————————————————————————————————————————————————
+
+	def my_name():
+		frame = inspect.stack()[1]
+		return f"{frame.function}:{frame.lineno}"
+
+	#——————————————————————————————————————————————————————————————————
 
 	def safe_close_file_muted(f: TextIOWrapper):
 
@@ -1492,6 +1402,7 @@ async def symbol_dump_snapshot(symbol: str) -> None:
 		handles: dict[str, tuple[str, TextIOWrapper]],
 		symbol: str
 	):
+
 		tup = handles.pop(symbol, None)	# not only `pop` from dict
 
 		if tup is not None:
@@ -1503,7 +1414,7 @@ async def symbol_dump_snapshot(symbol: str) -> None:
 		queue:  asyncio.Queue,
 		logger: logging.Logger,
 		symbol: str
-	) -> Optional[Dict]:
+	) -> Optional[dict]:
 
 		try:
 			return await queue.get()
@@ -1515,12 +1426,42 @@ async def symbol_dump_snapshot(symbol: str) -> None:
 				exc_info=True
 			)
 			return None
-		
+
+	#——————————————————————————————————————————————————————————————————
+
+	def get_file_suffix(
+		interval_min: int,
+		event_ts_ms: int
+	) -> str:
+
+		try:
+
+			ts = ms_to_datetime(event_ts_ms)
+
+			if interval_min >= 1440:
+
+				return ts.strftime("%Y-%m-%d")
+
+			else:
+
+				return ts.strftime("%Y-%m-%d_%H-%M")
+
+		except Exception as e:
+
+			logger.error(
+				f"[{my_name()}] Failed to generate suffix for "
+				f"interval_min={interval_min}, "
+				f"event_ts_ms={event_ts_ms}: {e}",
+				exc_info=True
+			)
+
+			return "invalid_suffix"
+
 	#——————————————————————————————————————————————————————————————————
 
 	def get_suffix_n_date(
 		save_interval_min: int,
-		snapshot: Dict,
+		snapshot: dict,
 		symbol: str
 	) -> tuple[Optional[str], Optional[str]]:
 		
@@ -1556,6 +1497,7 @@ async def symbol_dump_snapshot(symbol: str) -> None:
 		lob_dir:  str,
 		date_str: str
 	) -> Optional[str]:
+		
 		try:
 
 			file_name = f"{symbol_upper}_orderbook_{suffix}.jsonl"
@@ -1575,47 +1517,18 @@ async def symbol_dump_snapshot(symbol: str) -> None:
 			return None
 
 	#——————————————————————————————————————————————————————————————————
-	
-	def safe_zip_n_remove_jsonl(
-		lob_dir: str,
-		symbol_upper:  str,
-		last_suffix:  str,
-		logger:	logging.Logger
-	):
-
-		last_jsonl_path = os.path.join(
-			os.path.join(
-				lob_dir, "temporary",
-				f"{symbol_upper}_orderbook_"
-				f"{get_date_from_suffix(last_suffix)}",
-			),
-			f"{symbol_upper}_orderbook_{last_suffix}.jsonl"
-		)
-
-		if os.path.exists(last_jsonl_path):
-
-			zip_and_remove(last_jsonl_path)
-
-		else:
-
-			logger.warning(
-				f"[{my_name()}][{symbol_upper}] "
-				f"File not found for compression: "
-				f"{last_jsonl_path}"
-			)
-
-	#——————————————————————————————————————————————————————————————————
 
 	def flush_snapshot(
 		json_writer: TextIOWrapper,
-		snapshot: Dict,
+		snapshot: dict,
 		symbol: str,
 		symbol_to_file_handles: dict[str, tuple[str, TextIOWrapper]],
-		json_flush_interval: Dict[str, int],
-		latest_json_flush: Dict[str, int],
+		json_flush_interval: dict[str, int],
+		latest_json_flush: dict[str, int],
 		file_path: str,
 		logger: logging.Logger
 	) -> bool:
+
 		try:
 
 			json_writer.write(
@@ -1656,7 +1569,21 @@ async def symbol_dump_snapshot(symbol: str) -> None:
 		
 	#——————————————————————————————————————————————————————————————————
 
-	queue = SNAPSHOTS_QUEUE_DICT[symbol]
+	def memorize_treated(
+		records: dict[str, OrderedDict[str]],
+		records_max: int,
+		symbol: str,
+		to_rec: str
+	):
+
+		# discard the oldest at the front of the OrderedDict
+		if len(records[symbol]) >= records_max:
+			records[symbol].popitem(last=False)
+		records[symbol][to_rec] = None
+
+	#——————————————————————————————————————————————————————————————————
+
+	queue = snapshots_queue_dict[symbol]
 	symbol_upper = symbol.upper()
 
 	while True:
@@ -1674,11 +1601,11 @@ async def symbol_dump_snapshot(symbol: str) -> None:
 			)
 			continue
 
-		if not EVENT_STREAM_ENABLE.is_set():
+		if not event_stream_enable.is_set():
 			continue
 		
 		suffix, date_str = get_suffix_n_date(
-			SAVE_INTERVAL_MIN,
+			save_interval_min,
 			snapshot, symbol
 		)
 
@@ -1692,7 +1619,7 @@ async def symbol_dump_snapshot(symbol: str) -> None:
 
 		file_path = gen_file_path(
 			symbol_upper, suffix,
-			LOB_DIR, date_str
+			lob_dir, date_str
 		)
 		
 		if file_path is None:
@@ -1704,19 +1631,17 @@ async def symbol_dump_snapshot(symbol: str) -> None:
 			continue
 
 		# ────────────────────────────────────────────────────────────────────
-		# STEP 1
-		# 	safe_zip_n_remove_jsonl(last_jsonl_path)
-		#	json_writer = open(file_path, "a", encoding="utf-8")
+		# STEP 1: Roll-over by Minute
 		# ────────────────────────────────────────────────────────────────────
 		# `last_suffix` will be `None` at the beginning.
 		# ────────────────────────────────────────────────────────────────────
 
-		last_suffix, json_writer = SYMBOL_TO_FILE_HANDLES.get(
+		last_suffix, json_writer = symbol_to_file_handles.get(
 			symbol, (None, None))
 
 		if last_suffix != suffix:
 
-			if json_writer:
+			if json_writer:							  # if not the first flush
 
 				# ────────────────────────────────────────────────────────────
 
@@ -1731,23 +1656,22 @@ async def symbol_dump_snapshot(symbol: str) -> None:
 				del json_writer
 
 				# ────────────────────────────────────────────────────────────
+				# fire and forget
+				# ────────────────────────────────────────────────────────────
 
-				try:
+				if last_suffix not in records_znr_minutes[symbol]:
 
-					safe_zip_n_remove_jsonl(
-						LOB_DIR, symbol_upper,
-						last_suffix, logger
+					memorize_treated(
+						records_znr_minutes,
+						records_max,
+						symbol, last_suffix
 					)
 
-				except Exception as e:
-
-					logger.error(
-						f"[{my_name()}][{symbol_upper}] "
-						f"safe_zip_n_remove_jsonl() failed "
-						f"for last_suffix={last_suffix}: {e}",
-						exc_info=True
+					znr_executor.submit(			# pickle
+						safe_zip_n_remove_jsonl,
+						lob_dir, symbol_upper, 
+						last_suffix
 					)
-					del e
 
 			# ────────────────────────────────────────────────────────────────
 
@@ -1755,7 +1679,7 @@ async def symbol_dump_snapshot(symbol: str) -> None:
 				
 				json_writer = refresh_file_handle(
 					file_path, suffix, symbol, 
-					SYMBOL_TO_FILE_HANDLES,
+					symbol_to_file_handles,
 					logger
 				)
 				if json_writer is None: continue 
@@ -1778,31 +1702,31 @@ async def symbol_dump_snapshot(symbol: str) -> None:
 
 			if last_suffix:
 
-				last_day = get_date_from_suffix(last_suffix)
+				last_date = get_date_from_suffix(last_suffix)
 
-				with MERGE_LOCKS[symbol]:
+				if ((last_date != date_str) and 
+					(last_date not in records_merged_dates[symbol])
+				):
 
-					# ────────────────────────────────────────────────────────
-					# This block ensures thread-safe execution for
-					# merge operations. All previous files are now .zip
-					# format, ensuring complete day consolidation.
-					# ────────────────────────────────────────────────────────
+					memorize_treated(
+						records_merged_dates,
+						records_max,
+						symbol, last_date
+					)
+					
+					merge_executor.submit(			# pickle
+						symbol_consolidate_a_day,	# TODO: defined in global
+						symbol, last_date, lob_dir,
+						purge_on_date_change == 1
+					)
 
-					if ((last_day != date_str) and 
-						(last_day not in MERGED_DAYS[symbol])
-					):
+					logger.info(
+						f"[{my_name()}][{symbol_upper}] "
+						f"Triggered merge for {last_date} "
+						f"(current day: {date_str})."
+					)
 
-						MERGED_DAYS[symbol].add(last_day)
-						
-						symbol_trigger_merge(symbol, last_day)
-
-						logger.info(
-							f"[{my_name()}][{symbol_upper}] "
-							f"Triggered merge for {last_day} "
-							f"(current day: {date_str})."
-						)
-
-						del last_day
+					del last_date
 
 		except Exception as e:
 
@@ -1812,7 +1736,7 @@ async def symbol_dump_snapshot(symbol: str) -> None:
 				exc_info=True
 			)
 
-			if 'last_day' in locals(): del last_day
+			if 'last_date' in locals(): del last_date
 			del e
 			continue
 
@@ -1829,20 +1753,45 @@ async def symbol_dump_snapshot(symbol: str) -> None:
 			json_writer,
 			snapshot,
 			symbol,
-			SYMBOL_TO_FILE_HANDLES,
-			JSON_FLUSH_INTERVAL,
-			LATEST_JSON_FLUSH,
+			symbol_to_file_handles,
+			json_flush_interval,
+			latest_json_flush,
 			file_path,
 			logger
 		):
 
 			logger.error(
 				f"[{my_name()}][{symbol_upper}] "
-				f"Failed to flush snapshot: {e}",
+				f"Failed to flush snapshot.",
 				exc_info=True
 			)
 
 		del snapshot, file_path
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 # ───────────────────────────────────────────────────────────────────────────────
 # 🛑 Graceful Shutdown Handlers (FastAPI Lifespan & Merge Executor)
@@ -1866,24 +1815,22 @@ import atexit
 
 def shutdown_merge_executor():
 
-	"""
-	Shuts down the ProcessPoolExecutor and waits for all merge tasks to complete.
-	"""
-
-	global MERGE_EXECUTOR
-
 	try:
-
 		MERGE_EXECUTOR.shutdown(wait=True)
-
-		logger.info(
-			f"[main] MERGE_EXECUTOR shutdown safely complete."
-		)
+		logger.info(f"[main] MERGE_EXECUTOR shutdown safely complete.")
 
 	except Exception as e:
-
 		logger.error(
 			f"[main] MERGE_EXECUTOR shutdown failed: {e}",
+			exc_info=True
+		)
+	try:
+		ZNR_EXECUTOR.shutdown(wait=True)
+		logger.info(f"[main] ZNR_EXECUTOR shutdown safely complete.")
+
+	except Exception as e:
+		logger.error(
+			f"[main] ZNR_EXECUTOR shutdown failed: {e}",
 			exc_info=True
 		)
 
@@ -2471,62 +2418,20 @@ def graceful_shutdown():
 
 # ───────────────────────────────────────────────────────────────────────────────
 # 🚦 Main Entrypoint & Async Task Orchestration
-#
-# Serves as the primary entrypoint for the application, orchestrating all
-# asynchronous tasks and initializing runtime components.
-#
-# Responsibilities:
-#   • Initializes runtime state and event flags required for streaming.
-#   • Launches background tasks for hardware monitoring, snapshot persistence,
-#	 latency estimation, and stream gating.
-#   • Starts the FastAPI server for REST and WebSocket endpoints.
-#   • Handles profiling mode with a watchdog timer for graceful shutdown.
-#
-# Execution Flow:
-#   1. Runtime Initialization:
-#	  - Sets up global dictionaries, queues, and locks for per-symbol state.
-#	  - Ensures all event flags are properly initialized.
-#   2. Background Task Launch:
-#	  - Hardware monitoring (`monitor_hardware()`).
-#	  - Snapshot persistence (`symbol_dump_snapshot()`).
-#	  - WebSocket stream handling (`put_snapshot()`).
-#	  - Latency estimation (`estimate_latency()`).
-#	  - Stream gating (`gate_streaming_by_latency()`).
-#   3. Profiling Mode:
-#	  - If enabled, starts a watchdog timer to terminate the application
-#		after a fixed duration.
-#   4. FastAPI Server:
-#	  - Serves REST endpoints for HTML dashboard.
-#	  - Provides WebSocket streaming for dashboard monitoring.
-#
-# Notes:
-#   - Profiling mode is controlled via `PROFILE_DURATION` in the configuration.
-#   - All tasks are launched as asyncio coroutines for non-blocking execution.
-#   - Graceful shutdown ensures all resources are cleaned up before termination.
-#
-# See also:
-#   - `initialize_runtime_state()`: Sets up global runtime state.
-#   - `monitor_hardware()`: Tracks hardware metrics asynchronously.
-#   - `symbol_dump_snapshot()`: Handles snapshot persistence and daily merge.
-#   - `put_snapshot()`: Processes Binance depth20 snapshots.
-#   - `estimate_latency()`: Measures downstream latency for gating.
-#   - `gate_streaming_by_latency()`: Controls stream flow based on latency.
-#   - `watchdog_timer()`: Terminates the application after profiling duration.
-#   - `FastAPI`: Provides REST and WebSocket endpoints.
 # ───────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
 
 	from uvicorn.config import Config
 	from uvicorn.server import Server
-	from concurrent.futures import ProcessPoolExecutor
 	import asyncio
 
-	# Use `ProcessPoolExecutor` for process-based parallelism
-	# #to minimize GIL impact.
+	# ───────────────────────────────────────────────────────────────────────────
+	# THESE TWO MUST BE WITHIN THE MAIN PROCESS
+	# ───────────────────────────────────────────────────────────────────────────
 
-	MAX_WORKERS		 = int(CONFIG.get("MAX_WORKERS", 8))
-	MERGE_EXECUTOR	 = ProcessPoolExecutor(max_workers=MAX_WORKERS)
+	MERGE_EXECUTOR = ProcessPoolExecutor(max_workers=len(SYMBOLS))
+	ZNR_EXECUTOR   = ProcessPoolExecutor(max_workers=len(SYMBOLS))
 
 	# ───────────────────────────────────────────────────────────────────────────
 
@@ -2590,7 +2495,23 @@ if __name__ == "__main__":
 
 				for symbol in SYMBOLS:
 
-					asyncio.create_task(symbol_dump_snapshot(symbol))
+					asyncio.create_task(
+						symbol_dump_snapshot(
+							symbol,
+							SAVE_INTERVAL_MIN,
+							SNAPSHOTS_QUEUE_DICT,
+							EVENT_STREAM_ENABLE,
+							LOB_DIR,
+							SYMBOL_TO_FILE_HANDLES,
+							JSON_FLUSH_INTERVAL,
+							LATEST_JSON_FLUSH,
+							PURGE_ON_DATE_CHANGE,
+							MERGE_EXECUTOR, RECORDS_MERGED_DATES,
+							ZNR_EXECUTOR,   RECORDS_ZNR_MINUTES,
+							RECORDS_MAX,
+							logger
+						)
+					)
 
 			except Exception as e:
 
@@ -2677,7 +2598,7 @@ if __name__ == "__main__":
 					lifespan	= "on",
 					use_colors	= True,
 					log_level	= "warning",
-					workers		= MAX_WORKERS,
+					workers		= os.cpu_count(),
 					loop		= "asyncio",	# todo: `uvicorn` if Linux
 				)
 
@@ -2723,8 +2644,6 @@ if __name__ == "__main__":
 """ ————————————————————————————————————————————————————————————————————————————
 
 Infinite Coroutines in the Main Process:
-
-	TODO:	FIND THE SOURCE OF MEMORY LEAKAGE
 
 	SNAPSHOT:
 		✅ async def put_snapshot() -> None
