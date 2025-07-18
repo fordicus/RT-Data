@@ -65,15 +65,18 @@ Binance Official GitHub Manual:
 import inspect
 
 from util import (
-	my_name,				# For `Exception` that almost-surely does not happen.
+	my_name,				# For exceptions with 0 Lebesgue measure
+	resource_path,
 	get_current_time_ms,
 	ms_to_datetime,
-	resource_path,
 	load_config,
+	format_ws_url,
+	configure_global_logger,
 )
 
 from core import (
-	symbol_dump_snapshot
+	put_snapshot,
+	symbol_dump_snapshot,
 )
 
 import asyncio, threading, time, random
@@ -83,178 +86,15 @@ import json, statistics
 from collections import deque
 from io import TextIOWrapper
 from collections import OrderedDict
-
 from concurrent.futures import ProcessPoolExecutor
 
 os.environ["SSL_CERT_FILE"] = certifi.where()
 
-# ───────────────────────────────────────────────────────────────────────────────
-# 📝 Logging Configuration: Rotating log file + console output with UTC timestamps
-# ───────────────────────────────────────────────────────────────────────────────
+logger, queue_listener = configure_global_logger()
 
-import logging
-from logging.handlers import RotatingFileHandler
-
-# ───────────────────────────────────────────────────────────────────────────────
-# 👤 Custom Formatter: Ensures all log timestamps are in UTC
-# ───────────────────────────────────────────────────────────────────────────────
-
-class UTCFormatter(logging.Formatter):
-
-	"""
-	Custom log formatter that converts log record timestamps
-	to ISO 8601 UTC format (e.g., 2025-07-03T14:23:01.123456+00:00).
-	"""
-
-	def formatTime(self, record, datefmt=None):
-		# Convert record creation time to UTC datetime
-		dt = datetime.fromtimestamp(record.created, tz=timezone.utc)
-		
-		# Return formatted string based on optional format string
-		if datefmt:
-			return dt.strftime(datefmt)
-		
-		# Default to ISO 8601 format
-		return dt.isoformat(timespec='microseconds')
-
-# ───────────────────────────────────────────────────────────────────────────────
-# ⚙️ Formatter Definition (applied to both file and console)
-# ───────────────────────────────────────────────────────────────────────────────
-
-log_formatter = UTCFormatter("[%(asctime)s] %(levelname)s: %(message)s")
-
-# ───────────────────────────────────────────────────────────────────────────────
-# 💾 Rotating File Handler Configuration
-# - Log file: stream_binance.log
-# - Rotation: 10 MB per file
-# - Retention: up to 3 old versions (e.g., .1, .2, .3)
-# ───────────────────────────────────────────────────────────────────────────────
-
-file_handler = RotatingFileHandler(
-	"stream_binance.log",
-	maxBytes	= 10_000_000,	# Rotate after 10 MB
-	backupCount	= 100			# Keep 3 backups
-)
-
-try:
-
-	file_handler.setFormatter(log_formatter)
-
-except Exception as e:
-
-	# Logging is not fully initialized yet, so use stderr directly.
-
-	print(
-		f"[{datetime.now(timezone.utc).isoformat()}] ERROR: "
-		f"[global] Failed to set formatter for file_handler: {e}",
-		file=sys.stderr
-	)
-	sys.exit(1)
-
-# ───────────────────────────────────────────────────────────────────────────────
-# 📺 Console Handler Configuration
-# - Mirrors the same UTC timestamp format
-# ───────────────────────────────────────────────────────────────────────────────
-
-console_handler = logging.StreamHandler()
-
-try:
-
-	console_handler.setFormatter(log_formatter)
-
-except Exception as e:
-
-	# Logging is not fully initialized yet, so use stderr directly.
-
-	print(
-		f"[{datetime.now(timezone.utc).isoformat()}] ERROR: "
-		f"[global] Failed to set formatter for console_handler: {e}",
-		file=sys.stderr
-	)
-
-	sys.exit(1)
-
-# ───────────────────────────────────────────────────────────────────────────────
-# Unified Logger for FastAPI, Uvicorn, websockets, and all dependencies.
-# All logs are routed to both file and console with UTC timestamps @RootLogger.
-# ───────────────────────────────────────────────────────────────────────────────
-
-try:
-
-	# ───────────────────────────────────────────────────────────────────────────
-	# Root logger: attach file and console handlers
-	# ───────────────────────────────────────────────────────────────────────────
-	
-	logger = logging.getLogger()
-	
-	logger.addHandler(
-		RotatingFileHandler(
-			"stream_binance.log",
-			maxBytes	= 10_000_000,	# Rotate after 10 MB
-			backupCount	= 100			# Keep # of backups
-		)
-	)
-	
-	logger.addHandler(
-		logging.StreamHandler()
-	)
-	
-	logger.setLevel(logging.INFO)		# Default: INFO
-
-	# ───────────────────────────────────────────────────────────────────────────
-	# Uvicorn & FastAPI: WARNING
-	# ───────────────────────────────────────────────────────────────────────────
-
-	for name in [
-		"fastapi", "uvicorn",
-		"uvicorn.error",
-		"uvicorn.access"
-	]:
-		
-		specific_logger = logging.getLogger(name)
-		specific_logger.setLevel(logging.WARNING)
-		specific_logger.propagate = True
-
-	# ───────────────────────────────────────────────────────────────────────────
-	# All Others: INFO
-	# ───────────────────────────────────────────────────────────────────────────
-
-	for name in [
-		"websockets",
-		"websockets.server",
-		"websockets.client",
-		"starlette",
-		"asyncio",
-		"concurrent.futures"
-	]:
-		individual_logger = logging.getLogger(name)
-		individual_logger.setLevel(logging.INFO)
-		individual_logger.propagate = True
-
-	formatter = UTCFormatter(
-		f"[%(asctime)s] "
-		f"%(levelname)s: "
-		f"%(message)s"
-	)
-	
-	for handler in logger.handlers:
-		handler.setFormatter(formatter)
-
-except Exception as e:
-
-	print(
-		f"[{datetime.now(timezone.utc).isoformat()}] "
-		f"ERROR: [global] Failed to "
-		f"initialize logging: {e}",
-		file=sys.stderr
-	)
-
-	sys.exit(1)
-
-
-# ───────────────────────────────────────────────────────────────────────────────
+#——————————————————————————————————————————————————————————————————
 # 📦 Third-Party Dependencies (from requirements.txt)
-# ───────────────────────────────────────────────────────────────────────────────
+#——————————————————————————————————————————————————————————————————
 
 import websockets
 from fastapi import FastAPI, HTTPException, Request
@@ -757,206 +597,8 @@ async def estimate_latency() -> None:
 				f"WebSocket connection closed."
 			)
 
-# ───────────────────────────────────────────────────────────────────────────────
 
-def format_ws_url(
-	url: str, label: str = ""
-) -> str:
 
-	"""
-	Formats a Binance WebSocket URL for multi-symbol readability.
-	Example:
-		wss://stream.binance.com:9443/stream?streams=
-			btcusdc@depth/
-			ethusdc@depth/
-			solusdc@depth (@depth)
-	"""
-
-	if "streams=" not in url:
-
-		return url + (f" {label}" if label else "")
-
-	prefix, streams = url.split("streams=", 1)
-	symbols = streams.split("/")
-	formatted = "\t" + prefix + "streams=\n"
-	formatted += "".join(f"\t\t{s}/\n" for s in symbols if s)
-	formatted = formatted.rstrip("/\n")
-
-	if label:
-
-		formatted += f" {label}"
-
-	return formatted
-
-# ───────────────────────────────────────────────────────────────────────────────
-
-async def put_snapshot() -> None:	# @depth20@100ms snapshots
-	
-	""" ————————————————————————————————————————————————————————————————
-	CORE FUNCTIONALITY:
-		await SNAPSHOTS_QUEUE_DICT[symbol].put(snapshot)
-	————————————————————————————————————————————————————————————————————
-	HINT:
-		asyncio.Queue(maxsize=SNAPSHOTS_QUEUE_MAX)
-	————————————————————————————————————————————————————————————————————
-	GLOBAL VARIABLES:
-		WRITE:
-			SNAPSHOTS_QUEUE_DICT:		dict[str, asyncio.Queue]
-			EVENT_1ST_SNAPSHOT:			asyncio.Event
-		READ:
-			LATENCY_GATE:
-				EVENT_STREAM_ENABLE:	asyncio.Event
-				LATENCY_DICT:			dict[str, deque[int]]
-				MEDIAN_LATENCY_DICT:	dict[str, int]
-			WEBSOCKETS:
-				WS_URL, WS_PING_INTERVAL, WS_PING_TIMEOUT
-				MAX_BACKOFF, BASE_BACKOFF,
-				RESET_CYCLE_AFTER, RESET_BACKOFF_LEVEL
-			LOGICAL:
-				SYMBOLS
-	———————————————————————————————————————————————————————————————— """
-
-	ws_retry_cnt = 0
-
-	while True:
-
-		current_symbol = "UNKNOWN"
-
-		try:
-			async with websockets.connect(
-				WS_URL,
-				ping_interval = WS_PING_INTERVAL,
-				ping_timeout  = WS_PING_TIMEOUT
-			) as ws:
-
-				logger.info(
-					f"[put_snapshot] Connected to:\n"
-					f"{format_ws_url(WS_URL, '(depth20@100ms)')}\n"
-				)
-
-				ws_retry_cnt = 0
-
-				async for raw in ws:
-					try:
-						msg	= json.loads(raw)
-						stream = msg.get("stream", "")
-						current_symbol = (
-							stream.split("@", 1)[0]
-							or "UNKNOWN"
-						).lower()
-
-						# Guard: out-of-scope symbols
-						if current_symbol not in SYMBOLS:
-							continue
-
-						# Gate closed or no latency samples yet? drop
-						if (
-							(not EVENT_STREAM_ENABLE.is_set()) or
-							(not LATENCY_DICT.get(current_symbol, []))
-						):
-							continue
-
-						data = msg.get("data", {})
-
-						last_update = data.get("lastUpdateId")
-						if last_update is None:
-							continue
-
-						bids = data.get("bids", [])
-						asks = data.get("asks", [])
-
-						# ──────────────────────────────────────────────────
-						# Binance partial streams like `@depth20@100ms`
-						# do NOT include the server-side event timestamp
-						# ("E"). Thus, we must rely on local receipt time
-						# corrected by estimated network latency.
-						# ──────────────────────────────────────────────────
-						
-						lat_ms = max(
-							0, MEDIAN_LATENCY_DICT.get(current_symbol, 0)
-						)
-						snapshot = {
-							"lastUpdateId": last_update,
-							"eventTime":	get_current_time_ms() - lat_ms,
-							"bids": [[float(p), float(q)] for p, q in bids],
-							"asks": [[float(p), float(q)] for p, q in asks],
-						}
-
-						# ──────────────────────────────────────────────────
-						# `.qsize()` is less than or equal to one almost
-						# surely, meaning that `SNAPSHOTS_QUEUE_DICT` is
-						# being quickly consumed via `.get()`.
-						# ──────────────────────────────────────────────────
-						
-						await SNAPSHOTS_QUEUE_DICT[current_symbol].put(snapshot)
-
-						# 1st snapshot gate for FastAPI readiness
-						
-						if not EVENT_1ST_SNAPSHOT.is_set():
-							EVENT_1ST_SNAPSHOT.set()
-
-					except Exception as e:
-						sym = (
-							current_symbol
-							if current_symbol in SYMBOLS
-							else "UNKNOWN"
-						)
-						logger.warning(
-							f"[put_snapshot][{sym.upper()}] "
-							f"Failed to process message: {e}",
-							exc_info=True
-						)
-						continue  # stay in websocket loop
-
-		except asyncio.CancelledError:
-			# propagate so caller can shut down gracefully
-			raise
-
-		except Exception as e:
-			# websocket-level error → exponential backoff + retry
-			ws_retry_cnt += 1
-			sym = (
-				current_symbol
-				if current_symbol in SYMBOLS
-				else "UNKNOWN"
-			)
-
-			logger.warning(
-				f"[put_snapshot][{sym.upper()}] "
-				f"WebSocket error "
-				f"(ws_retry_cnt {ws_retry_cnt}): "
-				f"{e}",
-				exc_info=True
-			)
-
-			backoff = min(
-				MAX_BACKOFF, BASE_BACKOFF * (2 ** ws_retry_cnt)
-			) + random.uniform(0, 1)
-
-			if ws_retry_cnt > RESET_CYCLE_AFTER:
-				ws_retry_cnt = RESET_BACKOFF_LEVEL
-
-			logger.warning(
-				f"[put_snapshot][{sym.upper()}] "
-				f"Retrying in {backoff:.1f} seconds..."
-			)
-
-			await asyncio.sleep(backoff)
-
-		finally:
-			# Informational close log; `async with` ensures ws is closed.
-			# Use last known symbol purely for context (may be UNKNOWN).
-			sym = (
-				current_symbol
-				if current_symbol in SYMBOLS
-				else "UNKNOWN"
-			)
-			logger.info(
-				f"[put_snapshot][{sym.upper()}] "
-				f"WebSocket connection closed."
-			)
-
-# ───────────────────────────────────────────────────────────────────────────────
 
 
 
@@ -1616,59 +1258,46 @@ if __name__ == "__main__":
 
 		try:
 
-			# Initialize in-memory structures
-
-			global EVENT_1ST_SNAPSHOT
+			initialize_runtime_state()
+			initialize_event_flags()
+			assert_event_flags_initialized()
 
 			try:
 
-				initialize_runtime_state()
-				initialize_event_flags()
-				assert_event_flags_initialized()
+				tasks = [
+					asyncio.create_task(monitor_hardware()),
+					asyncio.create_task(estimate_latency()),
+					asyncio.create_task(gate_streaming_by_latency()),
+				]
 
 			except Exception as e:
 
-				logger.error(
-					f"[main] Initialization failed: {e}",
+				logger.critical(
+					f"[main] Unhandled exception: {e}",
 					exc_info=True
 				)
-
 				sys.exit(1)
-
-			# Launch a periodic garbage collection coroutine
-			# try:
-				# asyncio.create_task(periodic_gc())
-				# logger.info(
-					# f"[main] periodic_gc task launched "
-					# f"(every {GC_INTERVAL_SEC:.1f}s)."
-				# )
-			# except Exception as e:
-				# logger.error(
-					# f"[main] Failed to launch periodic_gc: {e}",
-					# exc_info=True
-				# )
-				# sys.exit(1)
-
-			# Launch hardware monitoring in a coroutine
 
 			try:
 
-				asyncio.create_task(monitor_hardware())
-				logger.info(f"[main] Hardware monitoring task launched.")
-
-			except Exception as e:
-
-				logger.error(
-					f"[main] Failed to launch hardware monitoring: {e}",
-					exc_info=True
+				asyncio.create_task(
+					put_snapshot(	# @depth20@100ms snapshots
+						SNAPSHOTS_QUEUE_DICT,
+						EVENT_STREAM_ENABLE,
+						LATENCY_DICT,
+						MEDIAN_LATENCY_DICT,
+						EVENT_1ST_SNAPSHOT,
+						MAX_BACKOFF, 
+						BASE_BACKOFF,
+						RESET_CYCLE_AFTER,
+						RESET_BACKOFF_LEVEL,
+						WS_URL,
+						WS_PING_INTERVAL,
+						WS_PING_TIMEOUT,
+						SYMBOLS,
+						logger,
+					)
 				)
-
-				sys.exit(1)
-
-			# Launch background tasks
-			# Handles periodic snapshot persistence per symbol
-
-			try:
 
 				for symbol in SYMBOLS:
 
@@ -1686,7 +1315,7 @@ if __name__ == "__main__":
 							MERGE_EXECUTOR, RECORDS_MERGED_DATES,
 							ZNR_EXECUTOR,   RECORDS_ZNR_MINUTES,
 							RECORDS_MAX,
-							logger
+							logger,
 						)
 					)
 
@@ -1694,51 +1323,6 @@ if __name__ == "__main__":
 
 				logger.error(
 					f"[main] Failed to launch symbol_dump_snapshot tasks: {e}",
-					exc_info=True
-				)
-
-				sys.exit(1)
-
-			# Streams and stores depth20@100ms
-
-			try:
-
-				asyncio.create_task(put_snapshot())
-
-			except Exception as e:
-
-				logger.error(
-					f"[main] Failed to launch put_snapshot task: {e}",
-					exc_info=True
-				)
-
-				sys.exit(1)
-
-			# Streams @depth for latency estimation
-
-			try:
-
-				asyncio.create_task(estimate_latency())
-
-			except Exception as e:
-
-				logger.error(
-					f"[main] Failed to launch estimate_latency task: {e}",
-					exc_info=True
-				)
-
-				sys.exit(1)
-
-			# Synchronize latency control
-
-			try:
-
-				asyncio.create_task(gate_streaming_by_latency())
-
-			except Exception as e:
-
-				logger.error(
-					f"[main] Failed to launch gate_streaming_by_latency task: {e}",
 					exc_info=True
 				)
 
@@ -1835,9 +1419,6 @@ Infinite Coroutines in the Main Process:
 	DASHBOARD:
 		async def dashboard(websocket: WebSocket)
 		async def monitor_hardware()
-
-	DEPRECATED:
-		async def periodic_gc()
 
 ————————————————————————————————————————————————————————————————————————————————
 

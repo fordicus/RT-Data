@@ -207,37 +207,6 @@ def load_config(
 		) from e
 
 #——————————————————————————————————————————————————————————————————
-
-def format_ws_url(
-	url: str, label: str = ""
-) -> str:
-
-	"""
-	Formats a Binance WebSocket URL for multi-symbol readability.
-	Example:
-		wss://stream.binance.com:9443/stream?streams=
-			btcusdc@depth/
-			ethusdc@depth/
-			solusdc@depth (@depth)
-	"""
-
-	if "streams=" not in url:
-
-		return url + (f" {label}" if label else "")
-
-	prefix, streams = url.split("streams=", 1)
-	symbols = streams.split("/")
-	formatted = "\t" + prefix + "streams=\n"
-	formatted += "".join(f"\t\t{s}/\n" for s in symbols if s)
-	formatted = formatted.rstrip("/\n")
-
-	if label:
-
-		formatted += f" {label}"
-
-	return formatted
-
-#——————————————————————————————————————————————————————————————————
 # Unified Process-Agnostic Logger
 #——————————————————————————————————————————————————————————————————
 # Any Process
