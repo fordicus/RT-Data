@@ -1,25 +1,20 @@
 # stream_binance.py
-# Refer to RULESET.md for coding guidelines.
 
-r"""................................................................................
+r"""———————————————————————————————————————————————————————————————
 
-How to Use:
+Dashboard URLs:
+	http://localhost:8000/dashboard			dev pc
+	http://192.168.1.107/dashboard			internal server
+	http://c01hyka.duckdns.org/dashboard	external server
 
-	🧪 Development Mode (e.g., Windows, debugging):
-	$ python stream_binance.py
+BinanceWsMan:
+	https://tinyurl.com/BinanceWsMan
 
-	🐧 Production Mode (Ubuntu, self-contained executable):
-	$ ./stream_binance
+Binance websocket:
+	wss://stream.binance.com:9443/stream?
+		streams={symbol}@depth20@100ms
 
-Note:
-	- The production binary is built via `compile_linux.bat`, which uses Docker
-	  to produce a statically linked Linux executable from `stream_binance.py`.
-	- No Python environment is required at runtime for the production build.
-
-Temporary Simple Order Book Rendering:
-		http://localhost:8000/orderbook/btcusdc
-
-....................................................................................
+———————————————————————————————————————————————————————————————————
 
 Dependency:
 	python==3.9.23
@@ -30,48 +25,17 @@ Dependency:
 	uvicorn==0.30.1
 	psutil==7.0.0
 	memray==1.17.2
-	pyflowchart==0.3.1
 
-IO Structure:
-	Config:
-		- get_binance_chart.conf
-			• Shared between `stream_binance.py` and `get_binance_chart.py`
-			• Defines symbols, backoff intervals, output paths, etc.
-	Inputs:
-		- Binance websocket:
-		  wss://stream.binance.com:9443/stream?streams={symbol}@depth20@100ms
-	Outputs:
-		- Zipped JSONL files (per-symbol, per-minute/day):
-		  ./data/binance/orderbook/temporary/{symbol}_orderbook_{YYYY-MM-DD}/
-		- Daily merged archive:
-		  ./data/binance/orderbook/{symbol}_orderbook_{YYYY-MM-DD}.zip
-		- API Endpoints:
-			/health/live		→ liveness probe
-			/health/ready		→ readiness after first snapshot
-			/state/{symbol}		→ JSON: current top-20 snapshot
-			/orderbook/{symbol}	→ HTML: real-time bid/ask viewer
-			
-....................................................................................
-
-Binance Official GitHub Manual:
-	https://github.com/binance/binance-spot-api-docs/blob/master/web-socket-streams.md
-
-................................................................................."""
-
-# ───────────────────────────────────────────────────────────────────────────────
-# 📦 Built-in Standard Library Imports (Grouped by Purpose)
-# ───────────────────────────────────────────────────────────────────────────────
-
-import inspect
+————————————————————————————————————————————————————————————————"""
 
 from util import (
-	my_name,				# For exceptions with 0 Lebesgue measure
+	my_name,			   # For exceptions with 0 Lebesgue measure
 	resource_path,
 	get_current_time_ms,
 	ms_to_datetime,
 	load_config,
 	format_ws_url,
-	configure_global_logger,
+	set_global_logger,
 )
 
 from core import (
@@ -79,30 +43,33 @@ from core import (
 	symbol_dump_snapshot,
 )
 
-import asyncio, threading, time, random
+import os, time, random, statistics
+import websockets, asyncio, certifi, json
 from datetime import datetime, timezone
-import sys, os, certifi, shutil, zipfile
-import json, statistics
 from collections import deque
 from io import TextIOWrapper
 from collections import OrderedDict
 from concurrent.futures import ProcessPoolExecutor
-
-os.environ["SSL_CERT_FILE"] = certifi.where()
-
-logger, queue_listener = configure_global_logger()
-
-#——————————————————————————————————————————————————————————————————
-# 📦 Third-Party Dependencies (from requirements.txt)
-#——————————————————————————————————————————————————————————————————
-
-import websockets
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
-try:
+os.environ["SSL_CERT_FILE"] = certifi.where()
+logger, queue_listener = set_global_logger()
 
-	CONFIG, SYMBOLS, WS_URL = load_config(logger)
+#——————————————————————————————————————————————————————————————————
+
+try:
+	(
+		CONFIG, SYMBOLS, WS_URL, LOB_DIR, PURGE_ON_DATE_CHANGE,
+		BASE_BACKOFF, MAX_BACKOFF, RESET_CYCLE_AFTER,
+		RESET_BACKOFF_LEVEL, DASHBOARD_STREAM_INTERVAL,
+		MAX_DASHBOARD_CONNECTIONS, MAX_DASHBOARD_SESSION_SEC,
+		HARDWARE_MONITORING_INTERVAL, CPU_PERCENT_DURATION,
+		DESIRED_MAX_SYS_MEM_LOAD, LATENCY_DEQUE_SIZE,
+		LATENCY_SAMPLE_MIN, LATENCY_THRESHOLD_MS,
+		LATENCY_SIGNAL_SLEEP, LATENCY_GATE_SLEEP,
+		WS_PING_INTERVAL, WS_PING_TIMEOUT
+	) = load_config(logger)
 
 except Exception as e:
 
@@ -111,57 +78,17 @@ except Exception as e:
 		f"Application cannot start.",
 		exc_info=True
 	)
+	raise SystemExit()
 
-	exit(1)
-
-# ───────────────────────────────────────────────────────────────────────────────
-# 📈 Latency Measurement Parameters
-# These control how latency is estimated from the @depth stream:
-#   - LATENCY_DEQUE_SIZE:	 buffer size for per-symbol latency samples
-#   - LATENCY_SAMPLE_MIN:	 number of samples required before validation
-#   - LATENCY_THRESHOLD_MS:  max latency allowed for stream readiness
-#   - ASYNC_SLEEP_INTERVAL:  Seconds to sleep in asyncio tasks
-# ───────────────────────────────────────────────────────────────────────────────
-
-LATENCY_DEQUE_SIZE   = int(CONFIG.get("LATENCY_DEQUE_SIZE",		10))
-LATENCY_SAMPLE_MIN   = int(CONFIG.get("LATENCY_SAMPLE_MIN",		10))
-LATENCY_THRESHOLD_MS = int(CONFIG.get("LATENCY_THRESHOLD_MS",	500))
-LATENCY_SIGNAL_SLEEP = float(CONFIG.get("LATENCY_SIGNAL_SLEEP", 0.2))
-LATENCY_GATE_SLEEP	 = float(CONFIG.get("LATENCY_GATE_SLEEP", 0.2))
-ASYNC_SLEEP_INTERVAL = float(CONFIG.get("LATENCY_GATE_SLEEP",	1.0))
-
-# ────────────────────────────────────────────────────────────────────────────────────
-# 🔄 WebSocket Ping/Pong Timing (from .conf)
-# Controls client ping interval and pong timeout for Binance streams.
-# Set to None to disable client pings (Binance pings the client by default).
-# See Section `WebSocket Streams for Binance (2025-01-28)` in
-# 	https://github.com/binance/binance-spot-api-docs/blob/master/web-socket-streams.md
-# ────────────────────────────────────────────────────────────────────────────────────
-
-WS_PING_INTERVAL = int(CONFIG.get("WS_PING_INTERVAL", 0))
-WS_PING_TIMEOUT  = int(CONFIG.get("WS_PING_TIMEOUT",  0))
-
-if WS_PING_INTERVAL == 0: WS_PING_INTERVAL = None
-if WS_PING_TIMEOUT  == 0: WS_PING_TIMEOUT  = None
-
-# ───────────────────────────────────────────────────────────────────────────────
+#——————————————————————————————————————————————————————————————————
 # 🧠 Runtime Per-Symbol State
-# ───────────────────────────────────────────────────────────────────────────────
+#——————————————————————————————————————————————————————————————————
 
 LATENCY_DICT:		  dict[str, deque[int]] = {}
 MEDIAN_LATENCY_DICT:  dict[str, int] = {}
 DEPTH_UPDATE_ID_DICT: dict[str, int] = {}
-
 LATEST_JSON_FLUSH:	  dict[str, int] = {}
 JSON_FLUSH_INTERVAL:  dict[str, int] = {}
-
-# ───────────────────────────────────────────────────────────────────────────────
-# 🔒 Global Event Flags (pre-declared to prevent NameError)
-# - Properly initialized inside `main()` to bind to the right loop
-# - ✅ Minimalistic pattern for single-instance runtime
-# - ⚠️ Consider `AppContext` encapsulation
-# 	if modularization/multi-instance is needed
-# ───────────────────────────────────────────────────────────────────────────────
 
 EVENT_1ST_SNAPSHOT:	 asyncio.Event
 EVENT_LATENCY_VALID: asyncio.Event
@@ -170,11 +97,6 @@ EVENT_STREAM_ENABLE: asyncio.Event
 EVENT_FLAGS_INITIALIZED = False
 
 def initialize_event_flags():
-
-	"""
-	Initializes global asyncio.Event flags for controlling stream state.
-	Logs any exception and terminates if initialization fails.
-	"""
 
 	try:
 
@@ -197,7 +119,7 @@ def initialize_event_flags():
 			exc_info=True
 		)
 
-		sys.exit(1)
+		raise SystemExit("Failed to initialize event flags.")
 
 def assert_event_flags_initialized():
 
@@ -213,40 +135,7 @@ def assert_event_flags_initialized():
 			"Call initialize_event_flags() before using event objects."
 		)
 
-		sys.exit(1)
-
-# ───────────────────────────────────────────────────────────────────────────────
-# 🕒 Backoff Strategy & Snapshot Save Policy
-# Configures:
-#   • WebSocket reconnect behavior (exponential backoff)
-#   • Order book snapshot directory and save intervals
-#   • Optional data purging upon date rollover
-# ───────────────────────────────────────────────────────────────────────────────
-
-try:
-
-	BASE_BACKOFF		= int(CONFIG.get("BASE_BACKOFF", 2))
-	MAX_BACKOFF			= int(CONFIG.get("MAX_BACKOFF", 30))
-	RESET_CYCLE_AFTER   = int(CONFIG.get("RESET_CYCLE_AFTER", 7))
-	RESET_BACKOFF_LEVEL = int(CONFIG.get("RESET_BACKOFF_LEVEL", 3))
-
-	LOB_DIR = CONFIG.get("LOB_DIR", "./data/binance/orderbook/")
-
-	PURGE_ON_DATE_CHANGE= int(CONFIG.get("PURGE_ON_DATE_CHANGE", 1))
-	SAVE_INTERVAL_MIN   = int(CONFIG.get("SAVE_INTERVAL_MIN", 1440))
-
-	if SAVE_INTERVAL_MIN > 1440:
-
-		raise ValueError("SAVE_INTERVAL_MIN must be ≤ 1440")
-
-except Exception as e:
-
-	logger.error(
-		f"[global] Failed to load or validate stream/save config: {e}",
-		exc_info=True
-	)
-	
-	sys.exit(1)
+		raise SystemExit("Event flags not initialized. Application cannot proceed.")
 
 # ───────────────────────────────────────────────────────────────────────────────
 # 📦 Runtime Memory Buffers & Async File Handles
@@ -255,21 +144,20 @@ except Exception as e:
 SNAPSHOTS_QUEUE_DICT:   dict[str, asyncio.Queue] = {}
 SYMBOL_TO_FILE_HANDLES: dict[str, tuple[str, TextIOWrapper]] = {}
 
-SNAPSHOTS_QUEUE_MAX = int(CONFIG.get("SNAPSHOTS_QUEUE_MAX",	100))
-
 RECORDS_MERGED_DATES: dict[str, OrderedDict[str]] = {}
 RECORDS_ZNR_MINUTES:  dict[str, OrderedDict[str]] = {}	# ZNR := zip_n_remove
-RECORDS_MAX = int(CONFIG.get("RECORDS_MAX", 10))
 
 # ───────────────────────────────────────────────────────────────────────────────
 
-def initialize_runtime_state():
+def initialize_runtime_state(
+	snapshots_queue_max: int = 100
+):
 
 	try:
 		global SYMBOLS
 		global LATENCY_DICT, MEDIAN_LATENCY_DICT, DEPTH_UPDATE_ID_DICT
 		global LATEST_JSON_FLUSH, JSON_FLUSH_INTERVAL
-		global SNAPSHOTS_QUEUE_DICT, SNAPSHOTS_QUEUE_MAX
+		global SNAPSHOTS_QUEUE_DICT
 
 		LATENCY_DICT.clear()
 		LATENCY_DICT.update({
@@ -305,7 +193,7 @@ def initialize_runtime_state():
 
 		SNAPSHOTS_QUEUE_DICT.clear()
 		SNAPSHOTS_QUEUE_DICT.update({
-			symbol: asyncio.Queue(maxsize=SNAPSHOTS_QUEUE_MAX)
+			symbol: asyncio.Queue(maxsize=snapshots_queue_max)
 			for symbol in SYMBOLS
 		})
 
@@ -335,7 +223,7 @@ def initialize_runtime_state():
 			f"Failed to initialize runtime state: {e}",
 			exc_info=True
 		)
-		sys.exit(1)
+		raise SystemExit("Failed to initialize runtime state.")
 
 # ───────────────────────────────────────────────────────────────────────────────
 # 🕓 Latency Control: Measurement, Thresholding, and Flow Gate
@@ -845,34 +733,14 @@ async def dashboard_page(request: Request):
 from fastapi import WebSocket, WebSocketDisconnect
 import psutil
 
-DASHBOARD_STREAM_INTERVAL = float(CONFIG.get("DASHBOARD_STREAM_INTERVAL", 0.075))
-MAX_DASHBOARD_CONNECTIONS = int(CONFIG.get("MAX_DASHBOARD_CONNECTIONS", 3))
-MAX_DASHBOARD_SESSION_SEC = int(CONFIG.get("MAX_DASHBOARD_SESSION_SEC", 1800))
-
 ACTIVE_DASHBOARD_LOCK		 = asyncio.Lock()
 ACTIVE_DASHBOARD_CONNECTIONS = 0
-
-HARDWARE_MONITORING_INTERVAL = float(
-	CONFIG.get("HARDWARE_MONITORING_INTERVAL", 1.0)
-)
-
-CPU_PERCENT_DURATION = float(
-	CONFIG.get("CPU_PERCENT_DURATION", 0.2)
-)
 
 NETWORK_LOAD_MBPS:		int   = 0
 CPU_LOAD_PERCENTAGE:	float = 0.0
 MEM_LOAD_PERCENTAGE:	float = 0.0
 STORAGE_PERCENTAGE:		float = 0.0
 GC_TIME_COST_MS:		float = -0.0
-
-GC_INTERVAL_SEC = float(
-	CONFIG.get("GC_INTERVAL_SEC", 60.0)
-)
-
-DESIRED_MAX_SYS_MEM_LOAD = float(
-	CONFIG.get("DESIRED_MAX_SYS_MEM_LOAD", 85.0)
-)
 
 # ───────────────────────────────────────────────────────────────────────────────
 
@@ -1276,7 +1144,7 @@ if __name__ == "__main__":
 					f"[main] Unhandled exception: {e}",
 					exc_info=True
 				)
-				sys.exit(1)
+				raise SystemExit("Unhandled exception during task creation.")
 
 			try:
 
@@ -1304,7 +1172,6 @@ if __name__ == "__main__":
 					asyncio.create_task(
 						symbol_dump_snapshot(
 							symbol,
-							SAVE_INTERVAL_MIN,
 							SNAPSHOTS_QUEUE_DICT,
 							EVENT_STREAM_ENABLE,
 							LOB_DIR,
@@ -1314,7 +1181,6 @@ if __name__ == "__main__":
 							PURGE_ON_DATE_CHANGE,
 							MERGE_EXECUTOR, RECORDS_MERGED_DATES,
 							ZNR_EXECUTOR,   RECORDS_ZNR_MINUTES,
-							RECORDS_MAX,
 							logger,
 						)
 					)
@@ -1326,7 +1192,7 @@ if __name__ == "__main__":
 					exc_info=True
 				)
 
-				sys.exit(1)
+				raise SystemExit("Failed to launch symbol_dump_snapshot tasks.")
 
 			# Wait for at least one valid snapshot before serving
 
@@ -1341,7 +1207,7 @@ if __name__ == "__main__":
 					exc_info=True
 				)
 
-				sys.exit(1)
+				raise SystemExit("Error while waiting for the first snapshot.")
 
 			# FastAPI
 
@@ -1374,7 +1240,7 @@ if __name__ == "__main__":
 					exc_info=True
 				)
 
-				sys.exit(1)
+				raise SystemExit("FastAPI server failed to start.")
 
 		except Exception as e:
 
@@ -1396,7 +1262,7 @@ if __name__ == "__main__":
 	except Exception as e:
 
 		logger.critical(f"[main] Unhandled exception: {e}", exc_info=True)
-		sys.exit(1)
+		raise SystemExit("Unhandled exception in main application.")
 
 	finally:
 		
@@ -1432,12 +1298,5 @@ Run `memray` as follows:
 	memray run -o memleak_trace.bin stream_binance.py
 	memray flamegraph memleak_trace.bin -o memleak_report.html
 	memray stats memleak_trace.bin
-
-————————————————————————————————————————————————————————————————————————————————
-
-Dashboard URLs:
-- http://localhost:8000/dashboard		dev pc
-- http://192.168.1.107/dashboard		server (internal access)
-- http://c01hyka.duckdns.org/dashboard	server (external access)
 
 ———————————————————————————————————————————————————————————————————————————— """

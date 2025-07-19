@@ -6,13 +6,15 @@ from util import (
 	my_name,				# For exceptions with 0 Lebesgue measure
 	NanoTimer,
 	ms_to_datetime,
+	format_ws_url,
 	get_current_time_ms,
 	get_global_log_queue,
 	get_subprocess_logger
 )
 
 import sys, os, io, asyncio, json
-import shutil, zipfile, time, logging
+import shutil, zipfile, logging
+import websockets, time, random
 
 from io import TextIOWrapper
 from collections import OrderedDict
@@ -776,3 +778,199 @@ async def symbol_dump_snapshot(
 			)
 
 		del snapshot, file_path
+
+#——————————————————————————————————————————————————————————————————
+
+from collections import deque
+
+async def put_snapshot(		# @depth20@100ms snapshots
+	snapshots_queue_dict:	dict[str, asyncio.Queue],
+	event_stream_enable:	asyncio.Event,
+	latency_dict:			dict[str, deque[int]],
+	median_latency_dict:	dict[str, int],
+	event_1st_snapshot:		asyncio.Event,
+	max_backoff:			int, 
+	base_backoff:			int,
+	reset_cycle_after:		int,
+	reset_backoff_level:	int,
+	ws_url:					str,
+	ws_ping_interval:		int,
+	ws_ping_timeout:		int,
+	symbols:				list,
+	logger:					logging.Logger,
+):
+
+	"""————————————————————————————————————————————————————————————
+	CORE FUNCTIONALITY:
+		await snapshots_queue_dict[symbol].put(snapshot)
+	———————————————————————————————————————————————————————————————
+	HINT:
+		asyncio.Queue(maxsize=SNAPSHOTS_QUEUE_MAX)
+	————————————————————————————————————————————————————————————"""
+
+	ws_retry_cnt = 0
+
+	while True:
+
+		current_symbol = "UNKNOWN"
+
+		try:
+			async with websockets.connect(
+				ws_url,
+				ping_interval = ws_ping_interval,
+				ping_timeout  = ws_ping_timeout
+			) as ws:
+
+				logger.info(
+					f"[put_snapshot] Connected to:\n"
+					f"{format_ws_url(ws_url, '(depth20@100ms)')}\n"
+				)
+
+				ws_retry_cnt = 0
+
+				async for raw in ws:
+					try:
+						msg	= json.loads(raw)
+						stream = msg.get("stream", "")
+						current_symbol = (
+							stream.split("@", 1)[0]
+							or "UNKNOWN"
+						).lower()
+
+						# out of scope
+						if current_symbol not in symbols:
+							continue
+
+						# drop if (gate closed) 
+						# or (no latency samples)
+						if (
+							(not event_stream_enable.is_set()) or
+							(not latency_dict.get(
+								current_symbol, [])
+							)
+						):
+							continue
+
+						data = msg.get("data", {})
+
+						last_update = data.get("lastUpdateId")
+						if last_update is None:
+							continue
+
+						bids = data.get("bids", [])
+						asks = data.get("asks", [])
+
+						#──────────────────────────────────────────
+						# Binance partial streams like
+						# `@depth20@100ms` do NOT include the
+						# server-side event timestamp ("E").
+						# Thus, we must rely on local receipt time
+						# corrected by estimated network latency.
+						#──────────────────────────────────────────
+						
+						lat_ms = max(
+							0, median_latency_dict.get(
+								current_symbol, 0
+							)
+						)
+						
+						latency_adjusted_time = (
+							get_current_time_ms() - lat_ms
+						)
+
+						snapshot = {
+							"lastUpdateId": last_update,
+							"eventTime": latency_adjusted_time,
+							"bids": [
+								[float(p), float(q)]
+								for p, q in bids
+							],
+							"asks": [
+								[float(p), float(q)]
+								for p, q in asks
+							],
+						}
+
+						#──────────────────────────────────────────
+						# `.qsize()` is less than or equal to one
+						# almost surely, meaning that
+						# `snapshots_queue_dict` is being quickly
+						# consumed via `.get()`.
+						#──────────────────────────────────────────
+						
+						await snapshots_queue_dict[
+							current_symbol
+						].put(snapshot)
+
+						# 1st snapshot gate for FastAPI readiness
+						
+						if not event_1st_snapshot.is_set():
+							event_1st_snapshot.set()
+
+					except Exception as e:
+						sym = (
+							current_symbol
+							if current_symbol in symbols
+							else "UNKNOWN"
+						)
+						logger.warning(
+							f"[put_snapshot][{sym.upper()}] "
+							f"Failed to process message: {e}",
+							exc_info=True
+						)
+						continue  # stay in websocket loop
+
+		except asyncio.CancelledError:
+			# propagate so caller can shut down gracefully
+			raise
+
+		except Exception as e:
+			# websocket-level error → exponential backoff + retry
+			ws_retry_cnt += 1
+			sym = (
+				current_symbol
+				if current_symbol in symbols
+				else "UNKNOWN"
+			)
+
+			logger.warning(
+				f"[put_snapshot][{sym.upper()}] "
+				f"WebSocket error "
+				f"(ws_retry_cnt {ws_retry_cnt}): "
+				f"{e}",
+				exc_info=True
+			)
+
+			backoff = min(
+				max_backoff, base_backoff * (2 ** ws_retry_cnt)
+			) + random.uniform(0, 1)
+
+			if ws_retry_cnt > reset_cycle_after:
+				ws_retry_cnt = reset_backoff_level
+
+			logger.warning(
+				f"[put_snapshot][{sym.upper()}] "
+				f"Retrying in {backoff:.1f} seconds..."
+			)
+
+			await asyncio.sleep(backoff)
+
+		finally:
+
+			#——————————————————————————————————————————————————————
+			# Informational close log; `async with` ensures ws is
+			# closed. Use last known symbol purely for context
+			# (may be UNKNOWN).
+			#——————————————————————————————————————————————————————
+
+			sym = (
+				current_symbol
+				if current_symbol in symbols
+				else "UNKNOWN"
+			)
+			logger.info(
+				f"[put_snapshot][{sym.upper()}] "
+				f"WebSocket connection closed."
+			)
+
+#——————————————————————————————————————————————————————————————————

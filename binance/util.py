@@ -165,7 +165,7 @@ def load_config(
 			'r', encoding='utf-8'
 		) as f:
 
-			config: dict[str, str] = {}	# loaded from .conf
+			CONFIG: dict[str, str] = {}	# loaded from .conf
 
 			for line in f:
 
@@ -183,9 +183,9 @@ def load_config(
 				if len(parts) != 2:
 					continue
 				key, val = parts
-				config[key.strip()] = val.strip()
+				CONFIG[key.strip()] = val.strip()
 		
-		SYMBOLS = extract_symbols(config)
+		SYMBOLS = extract_symbols(CONFIG)
 
 		if not SYMBOLS:
 
@@ -198,7 +198,37 @@ def load_config(
 			f"{'/'.join(f'{sym}@depth20@100ms' for sym in SYMBOLS)}"
 		)
 
-		return config, SYMBOLS, WS_URL
+		LOB_DIR							= CONFIG.get("LOB_DIR", "./data/binance/orderbook/")
+		PURGE_ON_DATE_CHANGE			= int(CONFIG.get("PURGE_ON_DATE_CHANGE",				1))
+		BASE_BACKOFF					= int(CONFIG.get("BASE_BACKOFF",						2))
+		MAX_BACKOFF						= int(CONFIG.get("MAX_BACKOFF", 					   30))
+		RESET_CYCLE_AFTER				= int(CONFIG.get("RESET_CYCLE_AFTER",					7))
+		RESET_BACKOFF_LEVEL				= int(CONFIG.get("RESET_BACKOFF_LEVEL",					3))
+		DASHBOARD_STREAM_INTERVAL		= float(CONFIG.get("DASHBOARD_STREAM_INTERVAL",		0.075))
+		MAX_DASHBOARD_CONNECTIONS		= int(CONFIG.get("MAX_DASHBOARD_CONNECTIONS",			3))
+		MAX_DASHBOARD_SESSION_SEC		= int(CONFIG.get("MAX_DASHBOARD_SESSION_SEC",		 1800))
+		HARDWARE_MONITORING_INTERVAL	= float(CONFIG.get("HARDWARE_MONITORING_INTERVAL",	  1.0))
+		CPU_PERCENT_DURATION			= float(CONFIG.get("CPU_PERCENT_DURATION",			  0.2))
+		DESIRED_MAX_SYS_MEM_LOAD		= float(CONFIG.get("DESIRED_MAX_SYS_MEM_LOAD",		 85.0))
+		LATENCY_DEQUE_SIZE				= int(CONFIG.get("LATENCY_DEQUE_SIZE",				   10))
+		LATENCY_SAMPLE_MIN				= int(CONFIG.get("LATENCY_SAMPLE_MIN",				   10))
+		LATENCY_THRESHOLD_MS			= int(CONFIG.get("LATENCY_THRESHOLD_MS",			  500))
+		LATENCY_SIGNAL_SLEEP			= float(CONFIG.get("LATENCY_SIGNAL_SLEEP",			  0.2))
+		LATENCY_GATE_SLEEP				= float(CONFIG.get("LATENCY_GATE_SLEEP",			  0.2))
+		WS_PING_INTERVAL				= int(CONFIG.get("WS_PING_INTERVAL",					0))
+		WS_PING_TIMEOUT 				= int(CONFIG.get("WS_PING_TIMEOUT",						0))
+		if WS_PING_INTERVAL == 0: WS_PING_INTERVAL = None
+		if WS_PING_TIMEOUT  == 0: WS_PING_TIMEOUT  = None
+
+		return (
+			CONFIG, SYMBOLS, WS_URL, LOB_DIR, PURGE_ON_DATE_CHANGE,
+			BASE_BACKOFF, MAX_BACKOFF, RESET_CYCLE_AFTER, RESET_BACKOFF_LEVEL,
+			DASHBOARD_STREAM_INTERVAL, MAX_DASHBOARD_CONNECTIONS, MAX_DASHBOARD_SESSION_SEC,
+			HARDWARE_MONITORING_INTERVAL, CPU_PERCENT_DURATION, DESIRED_MAX_SYS_MEM_LOAD,
+			LATENCY_DEQUE_SIZE, LATENCY_SAMPLE_MIN, LATENCY_THRESHOLD_MS,
+			LATENCY_SIGNAL_SLEEP, LATENCY_GATE_SLEEP,
+			WS_PING_INTERVAL, WS_PING_TIMEOUT
+		)
 
 	except Exception as e:
 
@@ -278,7 +308,7 @@ def get_global_log_queue():
 
 from logging.handlers import QueueHandler
 
-def configure_global_logger(
+def set_global_logger(
 	filename:	  str = "stream_binance.log",
 	maxBytes:	  int = 10_485_760,		# Rotate after 10 MB
 	backupCount:  int = 100,			# Keep # of backups
