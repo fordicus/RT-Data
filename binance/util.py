@@ -278,7 +278,7 @@ def get_global_log_queue():
 
 from logging.handlers import QueueHandler
 
-def configure_global_logger(
+def set_global_logger(
 	filename:	  str = "stream_binance.log",
 	maxBytes:	  int = 10_485_760,		# Rotate after 10 MB
 	backupCount:  int = 100,			# Keep # of backups
