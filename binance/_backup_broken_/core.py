@@ -308,7 +308,6 @@ def symbol_consolidate_a_day(
 
 async def symbol_dump_snapshot(
 	symbol:					str,
-	save_interval_min:		int,
 	snapshots_queue_dict:	dict[str, asyncio.Queue],
 	event_stream_enable:	asyncio.Event,
 	lob_dir:				str,
@@ -320,8 +319,9 @@ async def symbol_dump_snapshot(
 	records_merged_dates:	dict[str, OrderedDict[str, None]],
 	znr_executor:			ProcessPoolExecutor,
 	records_znr_minutes:	dict[str, OrderedDict[str, None]],
-	records_max:			int,
 	logger:					logging.Logger,
+	save_interval_min:		int = 1,
+	records_max:			int = 10,
 ):
 
 	#——————————————————————————————————————————————————————————————————
