@@ -26,6 +26,37 @@ Dependency:
 	psutil==7.0.0
 	memray==1.17.2
 
+————————————————————————————————————————————————————————————————————————————————
+
+The `memray` Python module @VS Code WSL2 Terminal:
+	sudo apt update
+	sudo apt install -y build-essential python3-dev cargo
+	pip install --upgrade pip setuptools wheel
+	pip install memray
+
+Run `memray` as follows:
+	memray run -o memleak_trace.bin stream_binance.py
+	memray flamegraph memleak_trace.bin -o memleak_report.html
+	memray stats memleak_trace.bin
+
+————————————————————————————————————————————————————————————————————————————————
+
+Infinite Coroutines in the Main Process:
+
+	SNAPSHOT:
+		✅ async def put_snapshot() -> None
+		✅ async def symbol_dump_snapshot(symbol: str) -> None
+		- perfectly understand both functions via flow chart generation
+
+	LATENCY:
+		async def estimate_latency() -> None
+		async def gate_streaming_by_latency() -> None
+		- probably, refactor as logical threads
+
+	DASHBOARD:
+		async def dashboard(websocket: WebSocket)
+		async def monitor_hardware()
+
 —————————————————————————————————————————————————————————————————————————————"""
 
 from init import (
@@ -636,42 +667,4 @@ if __name__ == "__main__":
 
 	finally: pass
 
-"""—————————————————————————————————————————————————————————————————————————————
-
-Infinite Coroutines in the Main Process:
-
-	SNAPSHOT:
-		✅ async def put_snapshot() -> None
-		✅ async def symbol_dump_snapshot(symbol: str) -> None
-		- perfectly understand both functions via flow chart generation
-
-	LATENCY:
-		async def estimate_latency() -> None
-		async def gate_streaming_by_latency() -> None
-		- probably, refactor as logical threads
-
-	DASHBOARD:
-		async def dashboard(websocket: WebSocket)
-		async def monitor_hardware()
-
-————————————————————————————————————————————————————————————————————————————————
-
-The `memray` Python module @VS Code WSL2 Terminal:
-	sudo apt update
-	sudo apt install -y build-essential python3-dev cargo
-	pip install --upgrade pip setuptools wheel
-	pip install memray
-
-Run `memray` as follows:
-	memray run -o memleak_trace.bin stream_binance.py
-	memray flamegraph memleak_trace.bin -o memleak_report.html
-	memray stats memleak_trace.bin
-
-————————————————————————————————————————————————————————————————————————————————
-
-Dashboard URLs:
-- http://localhost:8000/dashboard		dev pc
-- http://192.168.1.107/dashboard		server (internal access)
-- http://c01hyka.duckdns.org/dashboard	server (external access)
-
-—————————————————————————————————————————————————————————————————————————————"""
+#———————————————————————————————————————————————————————————————————————————————
