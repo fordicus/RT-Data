@@ -16,7 +16,7 @@ Functionality:
 IO Structure:
 	- Input: 
 		--start-date, --end-date via CLI
-		get_binance_chart.conf file with keys: SYMBOLS, MAX_WORKERS, TIMEOUT
+		app.conf file with keys: SYMBOLS, MAX_WORKERS, TIMEOUT
 	- Output: 
 		.zip files saved in ./downloads/<symbol>/ 
 		Only verified files are retained
@@ -79,7 +79,7 @@ Load Configuration and Setup Globals
 ................................................................................"""
 
 # Path to user-defined configuration file
-CONFIG_PATH = "get_binance_chart.conf"
+CONFIG_PATH = "app.conf"
 CONFIG = {}
 
 def load_config(conf_path: str):

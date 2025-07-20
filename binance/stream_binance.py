@@ -28,19 +28,16 @@ Dependency:
 
 ————————————————————————————————————————————————————————————————"""
 
-
-#——————————————————————————————————————————————————————————————————
-# 📦 Built-in Standard Library Imports (Grouped by Purpose)
-#——————————————————————————————————————————————————————————————————
-
-import inspect
+from init import (
+	load_config,
+	init_runtime_state,
+)
 
 from util import (
 	my_name,				# For exceptions with 0 Lebesgue measure
 	resource_path,
 	get_current_time_ms,
 	ms_to_datetime,
-	load_config,
 	format_ws_url,
 	set_global_logger,
 )
@@ -50,7 +47,7 @@ from core import (
 	symbol_dump_snapshot,
 )
 
-import os, time, random, statistics
+import os, time, random, statistics, logging
 import websockets, asyncio, certifi, json
 from datetime import datetime, timezone
 from collections import deque
@@ -64,254 +61,119 @@ os.environ["SSL_CERT_FILE"] = certifi.where()
 
 logger, queue_listener = set_global_logger()
 
-try:
-
-	CONFIG, SYMBOLS, WS_URL = load_config(logger)
-
-except Exception as e:
-
-	logger.critical(
-		f"[load_config] Failed to load config: {e}"
-		f"Application cannot start.",
-		exc_info=True
-	)
-
-	exit(1)
-
-#——————————————————————————————————————————————————————————————————
-# 📈 Latency Measurement Parameters
-# These control how latency is estimated from the @depth stream:
-#   - LATENCY_DEQUE_SIZE:	 buffer size for per-symbol latency samples
-#   - LATENCY_SAMPLE_MIN:	 number of samples required before validation
-#   - LATENCY_THRESHOLD_MS:  max latency allowed for stream readiness
-#   - ASYNC_SLEEP_INTERVAL:  Seconds to sleep in asyncio tasks
-#——————————————————————————————————————————————————————————————————
-
-LATENCY_DEQUE_SIZE   = int(CONFIG.get("LATENCY_DEQUE_SIZE",		10))
-LATENCY_SAMPLE_MIN   = int(CONFIG.get("LATENCY_SAMPLE_MIN",		10))
-LATENCY_THRESHOLD_MS = int(CONFIG.get("LATENCY_THRESHOLD_MS",	500))
-LATENCY_SIGNAL_SLEEP = float(CONFIG.get("LATENCY_SIGNAL_SLEEP", 0.2))
-LATENCY_GATE_SLEEP	 = float(CONFIG.get("LATENCY_GATE_SLEEP", 0.2))
-ASYNC_SLEEP_INTERVAL = float(CONFIG.get("LATENCY_GATE_SLEEP",	1.0))
-
-# ────────────────────────────────────────────────────────────────────────────────────
-# 🔄 WebSocket Ping/Pong Timing (from .conf)
-# Controls client ping interval and pong timeout for Binance streams.
-# Set to None to disable client pings (Binance pings the client by default).
-# See Section `WebSocket Streams for Binance (2025-01-28)` in
-# 	https://github.com/binance/binance-spot-api-docs/blob/master/web-socket-streams.md
-# ────────────────────────────────────────────────────────────────────────────────────
-
-WS_PING_INTERVAL = int(CONFIG.get("WS_PING_INTERVAL", 0))
-WS_PING_TIMEOUT  = int(CONFIG.get("WS_PING_TIMEOUT",  0))
-
-if WS_PING_INTERVAL == 0: WS_PING_INTERVAL = None
-if WS_PING_TIMEOUT  == 0: WS_PING_TIMEOUT  = None
+(
+	SYMBOLS,
+	WS_URL,
+	#
+	LOB_DIR,
+	#
+	PURGE_ON_DATE_CHANGE, SAVE_INTERVAL_MIN,
+	#
+	SNAPSHOTS_QUEUE_MAX, RECORDS_MAX,
+	#
+	LATENCY_DEQUE_SIZE, LATENCY_SAMPLE_MIN,
+	LATENCY_THRESHOLD_MS, LATENCY_SIGNAL_SLEEP,
+	LATENCY_GATE_SLEEP,
+	#
+	BASE_BACKOFF, MAX_BACKOFF,
+	RESET_CYCLE_AFTER, RESET_BACKOFF_LEVEL,
+	#
+	WS_PING_INTERVAL, WS_PING_TIMEOUT,
+	#
+	DASHBOARD_STREAM_INTERVAL,
+	MAX_DASHBOARD_CONNECTIONS,
+	MAX_DASHBOARD_SESSION_SEC,
+	HARDWARE_MONITORING_INTERVAL,
+	CPU_PERCENT_DURATION,
+	DESIRED_MAX_SYS_MEM_LOAD
+	#
+) = load_config(logger)
 
 #——————————————————————————————————————————————————————————————————
-# 🧠 Runtime Per-Symbol State
-#——————————————————————————————————————————————————————————————————
-
-LATENCY_DICT:		  dict[str, deque[int]] = {}
-MEDIAN_LATENCY_DICT:  dict[str, int] = {}
-DEPTH_UPDATE_ID_DICT: dict[str, int] = {}
-
-LATEST_JSON_FLUSH:	  dict[str, int] = {}
-JSON_FLUSH_INTERVAL:  dict[str, int] = {}
-
-#——————————————————————————————————————————————————————————————————
-# 🔒 Global Event Flags (pre-declared to prevent NameError)
-# - Properly initialized inside `main()` to bind to the right loop
-# - ✅ Minimalistic pattern for single-instance runtime
-# - ⚠️ Consider `AppContext` encapsulation
-# 	if modularization/multi-instance is needed
-#——————————————————————————————————————————————————————————————————
-
-EVENT_1ST_SNAPSHOT:	 asyncio.Event
-EVENT_LATENCY_VALID: asyncio.Event
-EVENT_STREAM_ENABLE: asyncio.Event
-
-EVENT_FLAGS_INITIALIZED = False
-
-def initialize_event_flags():
-
-	"""
-	Initializes global asyncio.Event flags for controlling stream state.
-	Logs any exception and terminates if initialization fails.
-	"""
-
-	try:
-
-		global EVENT_1ST_SNAPSHOT, EVENT_LATENCY_VALID, EVENT_STREAM_ENABLE
-		global EVENT_FLAGS_INITIALIZED
-
-		EVENT_1ST_SNAPSHOT = asyncio.Event()
-		EVENT_LATENCY_VALID = asyncio.Event()
-		EVENT_STREAM_ENABLE = asyncio.Event()
-
-		EVENT_FLAGS_INITIALIZED = True
-
-		logger.info("[initialize_event_flags] Event flags initialized.")
-
-	except Exception as e:
-
-		logger.error(
-			"[initialize_event_flags] Failed to initialize event flags: "
-			f"{e}",
-			exc_info=True
-		)
-
-		sys.exit(1)
-
-def assert_event_flags_initialized():
-
-	"""
-	Asserts that event flags have been initialized.
-	Logs and terminates if not initialized.
-	"""
-
-	if not EVENT_FLAGS_INITIALIZED:
-
-		logger.error(
-			"[assert_event_flags_initialized] Event flags not initialized. "
-			"Call initialize_event_flags() before using event objects."
-		)
-
-		sys.exit(1)
-
-#——————————————————————————————————————————————————————————————————
-# 🕒 Backoff Strategy & Snapshot Save Policy
-# Configures:
-#   • WebSocket reconnect behavior (exponential backoff)
-#   • Order book snapshot directory and save intervals
-#   • Optional data purging upon date rollover
-#——————————————————————————————————————————————————————————————————
-
-try:
-
-	BASE_BACKOFF		= int(CONFIG.get("BASE_BACKOFF", 2))
-	MAX_BACKOFF			= int(CONFIG.get("MAX_BACKOFF", 30))
-	RESET_CYCLE_AFTER   = int(CONFIG.get("RESET_CYCLE_AFTER", 7))
-	RESET_BACKOFF_LEVEL = int(CONFIG.get("RESET_BACKOFF_LEVEL", 3))
-
-	LOB_DIR = CONFIG.get("LOB_DIR", "./data/binance/orderbook/")
-
-	PURGE_ON_DATE_CHANGE= int(CONFIG.get("PURGE_ON_DATE_CHANGE", 1))
-	SAVE_INTERVAL_MIN   = int(CONFIG.get("SAVE_INTERVAL_MIN", 1440))
-
-	if SAVE_INTERVAL_MIN > 1440:
-
-		raise ValueError("SAVE_INTERVAL_MIN must be ≤ 1440")
-
-except Exception as e:
-
-	logger.error(
-		f"[global] Failed to load or validate stream/save config: {e}",
-		exc_info=True
-	)
-	
-	sys.exit(1)
-
-#——————————————————————————————————————————————————————————————————
-# 📦 Runtime Memory Buffers & Async File Handles
+# TODO
 #——————————————————————————————————————————————————————————————————
 
 SNAPSHOTS_QUEUE_DICT:   dict[str, asyncio.Queue] = {}
 SYMBOL_TO_FILE_HANDLES: dict[str, tuple[str, TextIOWrapper]] = {}
 
-SNAPSHOTS_QUEUE_MAX = int(CONFIG.get("SNAPSHOTS_QUEUE_MAX",	100))
+RECORDS_MERGED_DATES:	dict[str, OrderedDict[str]] = {}
+RECORDS_ZNR_MINUTES:	dict[str, OrderedDict[str]] = {}
 
-RECORDS_MERGED_DATES: dict[str, OrderedDict[str]] = {}
-RECORDS_ZNR_MINUTES:  dict[str, OrderedDict[str]] = {}	# ZNR := zip_n_remove
-RECORDS_MAX = int(CONFIG.get("RECORDS_MAX", 10))
+LATENCY_DICT:			dict[str, deque[int]] = {}
+MEDIAN_LATENCY_DICT:	dict[str, int] = {}
+DEPTH_UPDATE_ID_DICT:	dict[str, int] = {}
+
+LATEST_JSON_FLUSH:		dict[str, int] = {}
+JSON_FLUSH_INTERVAL:	dict[str, int] = {}
+
+EVENT_1ST_SNAPSHOT:		asyncio.Event
+EVENT_LATENCY_VALID:	asyncio.Event
+EVENT_STREAM_ENABLE:	asyncio.Event
 
 #——————————————————————————————————————————————————————————————————
+# TODO
+#——————————————————————————————————————————————————————————————————
 
-def initialize_runtime_state():
+def init_event_flags(
+	logger: logging.Logger
+):
+
+	global EVENT_1ST_SNAPSHOT
+	global EVENT_LATENCY_VALID
+	global EVENT_STREAM_ENABLE
 
 	try:
-		global SYMBOLS
-		global LATENCY_DICT, MEDIAN_LATENCY_DICT, DEPTH_UPDATE_ID_DICT
-		global LATEST_JSON_FLUSH, JSON_FLUSH_INTERVAL
-		global SNAPSHOTS_QUEUE_DICT, SNAPSHOTS_QUEUE_MAX
 
-		LATENCY_DICT.clear()
-		LATENCY_DICT.update({
-			symbol: deque(maxlen=LATENCY_DEQUE_SIZE)
-			for symbol in SYMBOLS
-		})
-
-		MEDIAN_LATENCY_DICT.clear()
-		MEDIAN_LATENCY_DICT.update({
-			symbol: 0
-			for symbol in SYMBOLS
-		})
-
-		DEPTH_UPDATE_ID_DICT.clear()
-		DEPTH_UPDATE_ID_DICT.update({
-			symbol: 0
-			for symbol in SYMBOLS
-		})
-
-		LATEST_JSON_FLUSH.clear()
-		LATEST_JSON_FLUSH.update({
-			symbol: get_current_time_ms()
-			for symbol in SYMBOLS
-		})
-
-		JSON_FLUSH_INTERVAL.clear()
-		JSON_FLUSH_INTERVAL.update({
-			symbol: 0
-			for symbol in SYMBOLS
-		})
-
-		# ───────────────────────────────────────────────────────────────────────
-
-		SNAPSHOTS_QUEUE_DICT.clear()
-		SNAPSHOTS_QUEUE_DICT.update({
-			symbol: asyncio.Queue(maxsize=SNAPSHOTS_QUEUE_MAX)
-			for symbol in SYMBOLS
-		})
-
-		SYMBOL_TO_FILE_HANDLES.clear()
-
-		RECORDS_MERGED_DATES.clear()
-		RECORDS_MERGED_DATES.update({
-			symbol: OrderedDict()
-			for symbol in SYMBOLS
-		})
-
-		RECORDS_ZNR_MINUTES.clear()
-		RECORDS_ZNR_MINUTES.update({
-			symbol: OrderedDict()
-			for symbol in SYMBOLS
-		})
+		EVENT_1ST_SNAPSHOT  = asyncio.Event()
+		EVENT_LATENCY_VALID = asyncio.Event()
+		EVENT_STREAM_ENABLE = asyncio.Event()
 
 		logger.info(
-			f"[initialize_runtime_state] "
-			f"Runtime state initialized."
+			f"[{my_name()}] Event flags initialized."
 		)
+		# return (
+		# 	EVENT_1ST_SNAPSHOT,
+		# 	EVENT_LATENCY_VALID,
+		# 	EVENT_STREAM_ENABLE,
+		# )
 
 	except Exception as e:
 
 		logger.error(
-			"[initialize_runtime_state] "
-			f"Failed to initialize runtime state: {e}",
+			f"[{my_name()}] Failed to "
+			f"initialize event flags: {e}",
 			exc_info=True
 		)
-		sys.exit(1)
+		raise SystemExit
+
+#——————————————————————————————————————————————————————————————————
+# EOL: TODO
+#——————————————————————————————————————————————————————————————————
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 #——————————————————————————————————————————————————————————————————
 # 🕓 Latency Control: Measurement, Thresholding, and Flow Gate
 #——————————————————————————————————————————————————————————————————
 
 async def gate_streaming_by_latency() -> None:
-
-	"""
-	Streaming controller based on latency.
-	Manages `EVENT_STREAM_ENABLE` flag for order book streaming.
-	Observes `EVENT_LATENCY_VALID`, set by latency estimation loop.
-	"""
 
 	has_logged_warmup = False  # Initial launch flag
 
@@ -375,47 +237,6 @@ async def gate_streaming_by_latency() -> None:
 #——————————————————————————————————————————————————————————————————
 
 async def estimate_latency() -> None:
-
-	"""
-	🔁 Latency Estimator via Binance @depth Stream
-
-	This coroutine connects to the Binance @depth WebSocket stream 
-	(not @depth20@100ms) to measure effective downstream latency 
-	for each tracked symbol.
-
-	Latency is estimated by comparing:
-		latency ≈ get_current_time_ms() - server_time_ms
-
-	Where:
-	- server_time_ms is the server-side event timestamp ("E").
-	- get_current_time_ms() is the actual receipt time on the local machine.
-
-	🕒 This difference reflects:
-		• Network propagation delay
-		• OS-level socket queuing
-		• Python event loop scheduling
-	and thus represents a realistic approximation of one-way latency.
-
-	Behavior:
-	- Maintains a rolling deque of latency samples per symbol.
-	- Once LATENCY_SAMPLE_MIN samples exist:
-		• Computes median latency per symbol.
-		• If all medians < LATENCY_THRESHOLD_MS, sets EVENT_LATENCY_VALID.
-		• If excessive latency or disconnection, clears the signal.
-
-	🎯 Purpose:
-	- EVENT_LATENCY_VALID acts as a global flow control flag.
-	- Used by gate_streaming_by_latency() to pause/resume 
-	order book streaming via EVENT_STREAM_ENABLE.
-
-	🔄 Backoff:
-	- On disconnection or failure, retries with exponential backoff and jitter.
-
-	📌 Notes:
-	- This is not a true RTT (round-trip time) estimate.
-	- But sufficient for gating real-time systems where latency 
-	directly affects snapshot timestamp correctness.
-	"""
 
 	global LATENCY_DICT, MEDIAN_LATENCY_DICT, DEPTH_UPDATE_ID_DICT
 
@@ -809,34 +630,14 @@ async def dashboard_page(request: Request):
 from fastapi import WebSocket, WebSocketDisconnect
 import psutil
 
-DASHBOARD_STREAM_INTERVAL = float(CONFIG.get("DASHBOARD_STREAM_INTERVAL", 0.075))
-MAX_DASHBOARD_CONNECTIONS = int(CONFIG.get("MAX_DASHBOARD_CONNECTIONS", 3))
-MAX_DASHBOARD_SESSION_SEC = int(CONFIG.get("MAX_DASHBOARD_SESSION_SEC", 1800))
-
 ACTIVE_DASHBOARD_LOCK		 = asyncio.Lock()
 ACTIVE_DASHBOARD_CONNECTIONS = 0
-
-HARDWARE_MONITORING_INTERVAL = float(
-	CONFIG.get("HARDWARE_MONITORING_INTERVAL", 1.0)
-)
-
-CPU_PERCENT_DURATION = float(
-	CONFIG.get("CPU_PERCENT_DURATION", 0.2)
-)
 
 NETWORK_LOAD_MBPS:		int   = 0
 CPU_LOAD_PERCENTAGE:	float = 0.0
 MEM_LOAD_PERCENTAGE:	float = 0.0
 STORAGE_PERCENTAGE:		float = 0.0
 GC_TIME_COST_MS:		float = -0.0
-
-GC_INTERVAL_SEC = float(
-	CONFIG.get("GC_INTERVAL_SEC", 60.0)
-)
-
-DESIRED_MAX_SYS_MEM_LOAD = float(
-	CONFIG.get("DESIRED_MAX_SYS_MEM_LOAD", 85.0)
-)
 
 #——————————————————————————————————————————————————————————————————
 
@@ -1222,9 +1023,22 @@ if __name__ == "__main__":
 
 		try:
 
-			initialize_runtime_state()
-			initialize_event_flags()
-			assert_event_flags_initialized()
+			init_runtime_state(
+				LATENCY_DICT,
+				LATENCY_DEQUE_SIZE,
+				MEDIAN_LATENCY_DICT,
+				DEPTH_UPDATE_ID_DICT,
+				LATEST_JSON_FLUSH,
+				JSON_FLUSH_INTERVAL,
+				SNAPSHOTS_QUEUE_DICT,
+				SNAPSHOTS_QUEUE_MAX,
+				SYMBOL_TO_FILE_HANDLES,
+				RECORDS_MERGED_DATES,
+				RECORDS_ZNR_MINUTES,
+				SYMBOLS,
+				logger,
+			)
+			init_event_flags(logger)
 
 			try:
 
