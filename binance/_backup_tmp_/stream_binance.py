@@ -1,6 +1,6 @@
 # stream_binance.py
 
-r"""———————————————————————————————————————————————————————————————
+r"""————————————————————————————————————————————————————————————————————————————
 
 Dashboard URLs:
 	http://localhost:8000/dashboard			dev pc
@@ -14,7 +14,7 @@ Binance websocket:
 	wss://stream.binance.com:9443/stream?
 		streams={symbol}@depth20@100ms
 
-———————————————————————————————————————————————————————————————————
+————————————————————————————————————————————————————————————————————————————————
 
 Dependency:
 	python==3.9.23
@@ -26,11 +26,15 @@ Dependency:
 	psutil==7.0.0
 	memray==1.17.2
 
-————————————————————————————————————————————————————————————————"""
+—————————————————————————————————————————————————————————————————————————————"""
 
 from init import (
 	load_config,
 	init_runtime_state,
+)
+
+from shutdown import (
+	create_shutdown_manager
 )
 
 from util import (
@@ -50,6 +54,10 @@ from latency import (
 from core import (
 	put_snapshot,
 	symbol_dump_snapshot,
+)
+
+from dashboard import (
+	monitor_hardware,
 )
 
 import os, time, random, logging
@@ -93,9 +101,9 @@ logger, queue_listener = set_global_logger()
 	#
 ) = load_config(logger)
 
-#——————————————————————————————————————————————————————————————————
+#———————————————————————————————————————————————————————————————————————————————
 # TODO
-#——————————————————————————————————————————————————————————————————
+#———————————————————————————————————————————————————————————————————————————————
 
 SNAPSHOTS_QUEUE_DICT:   dict[str, asyncio.Queue] = {}
 SYMBOL_TO_FILE_HANDLES: dict[str, tuple[str, TextIOWrapper]] = {}
@@ -110,53 +118,9 @@ DEPTH_UPDATE_ID_DICT:	dict[str, int] = {}
 LATEST_JSON_FLUSH:		dict[str, int] = {}
 JSON_FLUSH_INTERVAL:	dict[str, int] = {}
 
-#——————————————————————————————————————————————————————————————————
-
-import signal, sys
-
-# Global flag to track shutdown state
-_SHUTDOWN_COMPLETE = False
-
-def shutdown_merge_executor(merge_executor, znr_executor):
-	"""
-	Gracefully shuts down both executors with individual logging.
-	"""
-	global _SHUTDOWN_COMPLETE
-	
-	if _SHUTDOWN_COMPLETE:
-		return  # Already shutdown, avoid duplicate calls
-	
-	try:
-		if merge_executor:
-			merge_executor.shutdown(wait=True)
-			logger.info(
-				f"[{my_name()}] MERGE_EXECUTOR "
-				f"shutdown safely complete."
-			)
-	except Exception as e:
-		logger.error(
-			f"[{my_name()}] MERGE_EXECUTOR "
-			f"shutdown failed: {e}",
-			exc_info=True
-		)
-	
-	try:
-		if znr_executor:
-			znr_executor.shutdown(wait=True)
-			logger.info(
-				f"[{my_name()}] ZNR_EXECUTOR "
-				f"shutdown safely complete."
-			)
-	except Exception as e:
-		logger.error(
-			f"[{my_name()}] ZNR_EXECUTOR "
-			f"shutdown failed: {e}",
-			exc_info=True
-		)
-	
-	_SHUTDOWN_COMPLETE = True
-
-#——————————————————————————————————————————————————————————————————
+#———————————————————————————————————————————————————————————————————————————————
+# EOL: TODO
+#———————————————————————————————————————————————————————————————————————————————
 
 from contextlib import asynccontextmanager
 
@@ -167,138 +131,35 @@ async def lifespan(APP):
 		yield
 
 	except KeyboardInterrupt:
-		logger.info("[lifespan] Application terminated by user (Ctrl + C).")
+		logger.info(
+			f"[{my_name()}] Application terminated by user (Ctrl + C)."
+		)
 
 	except Exception as e:
-		logger.error(f"[lifespan] Unhandled exception: {e}", exc_info=True)
+		logger.error(
+			f"[{my_name()}] Unhandled exception: {e}", exc_info=True
+		)
 
 	finally:
-		# Shutdown logic: close all file writers
-		logger.info("[lifespan] Starting graceful shutdown...")
-		
-		for symbol in SYMBOLS:
-			suffix_writer = SYMBOL_TO_FILE_HANDLES.get(symbol)
-			
-			if not suffix_writer:
-				continue  # No writer was created for this symbol
 
-			suffix, writer = suffix_writer
+		# Shutdown logic handled by ShutdownManager
+		# This ensures no duplicate cleanup
 
-			try:
-				if writer:
-					writer.close()
-
+		if 'shutdown_manager' in globals():
+			if not shutdown_manager.is_shutdown_complete():
 				logger.info(
-					f"[lifespan] Closed file for "
-					f"{symbol.upper()} (suffix: {suffix})"
+					f"[{my_name()}] Initiating shutdown via ShutdownManager..."
 				)
+				shutdown_manager.graceful_shutdown()
 
-			except Exception as e:
-				logger.error(
-					f"[lifespan] Failed to close file "
-					f"for {symbol.upper()}: {e}",
-					exc_info=True
-				)
-		
-		logger.info("[lifespan] File handles closed successfully.")
-
-#——————————————————————————————————————————————————————————————————
-
-def graceful_shutdown():
-	"""
-	Unified graceful shutdown function.
-	This is now called by signal handlers.
-	"""
-	global _SHUTDOWN_COMPLETE
-	
-	if _SHUTDOWN_COMPLETE:
-		return  # Already shutdown
-	
-	try:
-		logger.info("[graceful_shutdown] Starting graceful shutdown...")
-		
-		# Close all file handles
-		for symbol in SYMBOLS:
-			suffix_writer = SYMBOL_TO_FILE_HANDLES.get(symbol)
-			
-			if suffix_writer:
-				suffix, writer = suffix_writer
-				
-				try:
-					if writer and not writer.closed:
-						writer.close()
-					
-					logger.info(
-						f"[graceful_shutdown] Closed file for {symbol}"
-					)
-				
-				except Exception as e:
-					logger.error(
-						f"[graceful_shutdown] "
-						f"Failed to close file for {symbol}: {e}"
-					)
-		
-		# Shutdown executors
-		if 'MERGE_EXECUTOR' in globals() and 'ZNR_EXECUTOR' in globals():
-			shutdown_merge_executor(MERGE_EXECUTOR, ZNR_EXECUTOR)
-		
-		logger.info("[graceful_shutdown] Graceful shutdown completed.")
-		
-	except Exception as e:
-		logger.error(f"[graceful_shutdown] Error during shutdown: {e}")
-
-def signal_handler(signum, frame):
-	"""
-	Handle SIGINT (Ctrl+C) and SIGTERM gracefully.
-	"""
-	logger.info(f"[signal_handler] Received signal {signum}. Initiating shutdown...")
-	
-	# Call unified graceful shutdown
-	graceful_shutdown()
-	
-	# Exit cleanly
-	sys.exit(0)
-
-#——————————————————————————————————————————————————————————————————
-# EOL: TODO
-#——————————————————————————————————————————————————————————————————
-
-#——————————————————————————————————————————————————————————————————
-# ⚙️ FastAPI Initialization & Template Binding
-#
-# FastAPI acts as the core runtime backbone for this application.
-# Its presence is structurally required for multiple critical subsystems:
-#
-#   1. 📊 Logging Integration:
-#
-#	  - Logging is routed via `uvicorn.error`, managed by FastAPI's ASGI server.
-#	  - Our logger (`logger = logging.getLogger("uvicorn.error")`) is active
-#		and functional as soon as FastAPI is imported, even before APP launch.
-#
-#   2. 🌐 REST API Endpoints:
-#
-#	  - Provides health checks, JSON-based order book access,
-# 		and real-time UI rendering.
-#
-# ⚠️ Removal of FastAPI would break:
-#
-#	  - Logging infrastructure
-#	  - HTML endpoint: /dashboard
-#
-#   - Even if not all FastAPI features are always used,
-# 	  its presence is mandatory.
-#
-#   - Template directory is resolved via `resource_path()`
-# 	  for PyInstaller compatibility.
-#
-#   - See also: RULESET.md for documentation and code conventions.
-#——————————————————————————————————————————————————————————————————
+		else:
+			logger.warning(
+				f"[{my_name()}] ShutdownManager not available for cleanup"
+			)
 
 APP = FastAPI(lifespan=lifespan)
 
-#——————————————————————————————————————————————————————————————————
-# EXTERNAL DASHBOARD SERVICE
-#——————————————————————————————————————————————————————————————————
+#———————————————————————————————————————————————————————————————————————————————
 
 @APP.get("/dashboard", response_class=HTMLResponse)
 async def dashboard_page(request: Request):
@@ -325,62 +186,9 @@ async def dashboard_page(request: Request):
 		logger.error(f"[dashboard_page] Failed to serve dashboard: {e}", exc_info=True)
 		raise HTTPException(status_code=500, detail="Internal server error")
 
-#——————————————————————————————————————————————————————————————————
-# 📊 Dashboard Monitoring & WebSocket Stream Handler
-#
-# Provides real-time monitoring and WebSocket streaming for system metrics,
-# such as hardware usage and median latency per symbol, to connected clients.
-#
-# Features:
-#	• Hardware Monitoring:
-#		- Tracks CPU, memory, storage, and network usage using `psutil`.
-#		- Updates global metrics asynchronously to avoid blocking the event loop.
-#
-#	• WebSocket Dashboard:
-#		- Streams monitoring data to clients at `/ws/dashboard`.
-#		- Enforces connection limits (`MAX_DASHBOARD_CONNECTIONS`)
-#		  and session timeouts.
-#		- Periodically sends JSON payloads with hardware metrics and
-#		  symbol latency.
-#
-#	• Configuration-Driven:
-#		- All limits, intervals, and backoff strategies are loaded from `.conf`.
-#		- Fully customizable via `get_binance_chart.conf`.
-#
-# Usage:
-#	- Designed for extensibility: add more metrics or endpoints as needed.
-#	- Intended for browser-based dashboards or monitoring tools.
-#
-# Safety & Robustness:
-#	- Hardware monitoring runs asynchronously to prevent blocking.
-#	- WebSocket handler ensures graceful handling of disconnects,
-#	  errors, and cancellations.
-#	- Implements exponential backoff for reconnection attempts.
-#	- All resource management (locks, counters) is thread-safe.
-#
-# Structures:
-#	• Global Metrics:
-#		- NETWORK_LOAD_MBPS: Network bandwidth usage in Mbps.
-#		- CPU_LOAD_PERCENTAGE: CPU usage percentage.
-#		- MEM_LOAD_PERCENTAGE: Memory usage percentage.
-#		- STORAGE_PERCENTAGE: Storage usage percentage.
-#
-#	• WebSocket Configuration:
-#		- DASHBOARD_STREAM_INTERVAL: Interval between data pushes (seconds).
-#		- MAX_DASHBOARD_CONNECTIONS: Max concurrent WebSocket connections.
-#		- MAX_DASHBOARD_SESSION_SEC: Max session duration per client (seconds).
-#
-#	• Locks:
-#		- ACTIVE_DASHBOARD_LOCK: Ensures thread-safe connection tracking.
-#
-# See also:
-#	- monitor_hardware(): Asynchronous hardware monitoring function.
-#	- dashboard(): WebSocket handler for dashboard clients.
-#	- RULESET.md: Documentation and code conventions.
-#——————————————————————————————————————————————————————————————————
+#———————————————————————————————————————————————————————————————————————————————
 
 from fastapi import WebSocket, WebSocketDisconnect
-import psutil
 
 ACTIVE_DASHBOARD_LOCK		 = asyncio.Lock()
 ACTIVE_DASHBOARD_CONNECTIONS = 0
@@ -391,120 +199,7 @@ MEM_LOAD_PERCENTAGE:	float = 0.0
 STORAGE_PERCENTAGE:		float = 0.0
 GC_TIME_COST_MS:		float = -0.0
 
-#——————————————————————————————————————————————————————————————————
-
-async def monitor_hardware():
-
-	"""
-	Hardware monitoring function that runs as an async coroutine.
-	Updates global hardware metrics using psutil with non-blocking operations.
-	For details, see `https://psutil.readthedocs.io/en/latest/`.
-
-	Metrics updated:
-		- NETWORK_LOAD_MBPS:   Network bandwidth in megabits per second
-		- CPU_LOAD_PERCENTAGE: CPU load percentage
-		- MEM_LOAD_PERCENTAGE: Memory usage percentage
-		- STORAGE_PERCENTAGE: Storage usage percentage
-	"""
-
-	global NETWORK_LOAD_MBPS, CPU_LOAD_PERCENTAGE
-	global MEM_LOAD_PERCENTAGE, STORAGE_PERCENTAGE
-	global HARDWARE_MONITORING_INTERVAL, CPU_PERCENT_DURATION
-	global DESIRED_MAX_SYS_MEM_LOAD
-	
-	# Initialize previous network counters for bandwidth calculation
-
-	prev_counters = psutil.net_io_counters()
-	prev_sent	  = prev_counters.bytes_sent
-	prev_recv	  = prev_counters.bytes_recv
-	prev_time	  = time.time()
-	
-	logger.info(
-		f"[monitor_hardware] "
-		f"Hardware monitoring started."
-	)
-	
-	while True:
-
-		try:
-			
-			wt_start = time.time()
-
-			# CPU Usage: blocking call to get CPU load percentage
-
-			CPU_LOAD_PERCENTAGE = await asyncio.to_thread(
-				psutil.cpu_percent, 
-				interval=CPU_PERCENT_DURATION
-			)
-			
-			# Memory Usage
-
-			memory_info = await asyncio.to_thread(psutil.virtual_memory)
-			MEM_LOAD_PERCENTAGE = memory_info.percent
-			
-			# Storage Usage (root filesystem)
-
-			disk_info = await asyncio.to_thread(psutil.disk_usage, '/')
-			STORAGE_PERCENTAGE = disk_info.percent
-			
-			# Network Usage (Mbps)
-
-			curr_time = time.time()
-			counters  = await asyncio.to_thread(psutil.net_io_counters)
-			curr_sent = counters.bytes_sent
-			curr_recv = counters.bytes_recv
-			
-			# Calculate bytes transferred since last measurement
-
-			sent_diff = curr_sent - prev_sent
-			recv_diff = curr_recv - prev_recv
-			time_diff = curr_time - prev_time
-			
-			# Convert to Mbps
-
-			if time_diff > 0:
-
-				total_bytes = sent_diff + recv_diff
-				NETWORK_LOAD_MBPS = (
-					(total_bytes * 8) / (time_diff * 1_000_000)
-				)
-			
-			# Update previous values
-
-			prev_sent = curr_sent
-			prev_recv = curr_recv
-			prev_time = curr_time
-
-			# High Memory Load Warning
-			# Disabled for now since it can confuse memray
-			
-			#if MEM_LOAD_PERCENTAGE > DESIRED_MAX_SYS_MEM_LOAD:
-			#
-			#	logger.warning(
-			#		f"[monitor_hardware]\n"
-			#		f"\t  {MEM_LOAD_PERCENTAGE:.2f}% "
-			#		f"(MEM_LOAD_PERCENTAGE)\n"
-			#		f"\t> {DESIRED_MAX_SYS_MEM_LOAD:.2f}% "
-			#		f"(DESIRED_MAX_SYS_MEM_LOAD)."
-			#	)
-			
-		except Exception as e:
-
-			logger.error(
-				f"[monitor_hardware] "
-				f"Error monitoring hardware: {e}",
-				exc_info=True
-			)
-
-		finally:
-
-			sleep_duration = max(
-				0.0, HARDWARE_MONITORING_INTERVAL - (time.time() - wt_start)
-			)
-
-			await asyncio.sleep(sleep_duration)
-
-#——————————————————————————————————————————————————————————————————
+#———————————————————————————————————————————————————————————————————————————————
 
 @APP.websocket("/ws/dashboard")
 async def dashboard(websocket: WebSocket):
@@ -702,9 +397,9 @@ async def dashboard(websocket: WebSocket):
 
 			await asyncio.sleep(backoff)
 
-#——————————————————————————————————————————————————————————————————
+#———————————————————————————————————————————————————————————————————————————————
 # 🚦 Main Entrypoint & Async Task Orchestration
-#——————————————————————————————————————————————————————————————————
+#———————————————————————————————————————————————————————————————————————————————
 
 if __name__ == "__main__":
 
@@ -712,18 +407,26 @@ if __name__ == "__main__":
 	from uvicorn.server import Server
 	import asyncio
 
-	#──────────────────────────────────────────────────────────────
+	#———————————————————————————————————————————————————————————————————————————
 	# THESE TWO MUST BE WITHIN THE MAIN PROCESS
-	#──────────────────────────────────────────────────────────────
+	#———————————————————————————————————————————————————————————————————————————
 
 	MERGE_EXECUTOR = ProcessPoolExecutor(max_workers=len(SYMBOLS))
 	ZNR_EXECUTOR   = ProcessPoolExecutor(max_workers=len(SYMBOLS))
 
-	# Register signal handlers for graceful shutdown
-	signal.signal(signal.SIGINT, signal_handler)
-	signal.signal(signal.SIGTERM, signal_handler)
+	#———————————————————————————————————————————————————————————————————————————
+	# SHUTDOWN MANAGER SETUP
+	#———————————————————————————————————————————————————————————————————————————
 
-	#──────────────────────────────────────────────────────────────
+	shutdown_manager = create_shutdown_manager(logger)
+	shutdown_manager.register_executors(
+		merge=MERGE_EXECUTOR,
+		znr=ZNR_EXECUTOR
+	)
+	shutdown_manager.register_symbols(SYMBOLS)
+	shutdown_manager.register_signal_handlers()
+
+	#———————————————————————————————————————————————————————————————————————————
 
 	async def main():
 
@@ -749,14 +452,29 @@ if __name__ == "__main__":
 				logger,
 			)
 
-			#——————————————————————————————————————————————————————
+			shutdown_manager.register_file_handles(
+				SYMBOL_TO_FILE_HANDLES
+			)
+			
+			#———————————————————————————————————————————————————————————————————
 			# Launch Asynchronous Coroutines
-			#——————————————————————————————————————————————————————
+			#———————————————————————————————————————————————————————————————————
 
 			try:
 
 				tasks = [
-					asyncio.create_task(monitor_hardware()),
+					asyncio.create_task(
+						monitor_hardware(
+							NETWORK_LOAD_MBPS,
+							CPU_LOAD_PERCENTAGE,
+							MEM_LOAD_PERCENTAGE,
+							STORAGE_PERCENTAGE,
+							HARDWARE_MONITORING_INTERVAL,
+							CPU_PERCENT_DURATION,
+							DESIRED_MAX_SYS_MEM_LOAD,
+							logger,
+						)
+					),
 					asyncio.create_task(
 						estimate_latency(
 							WS_PING_INTERVAL,
@@ -836,9 +554,9 @@ if __name__ == "__main__":
 				)
 				raise SystemExit from e
 
-			#——————————————————————————————————————————————————————
+			#———————————————————————————————————————————————————————————————————
 			# Wait for at least one valid snapshot before serving
-			#——————————————————————————————————————————————————————
+			#———————————————————————————————————————————————————————————————————
 
 			try: await EVENT_1ST_SNAPSHOT.wait()
 			except Exception as e:
@@ -850,9 +568,9 @@ if __name__ == "__main__":
 				)
 				raise SystemExit from e
 
-			#——————————————————————————————————————————————————————
+			#———————————————————————————————————————————————————————————————————
 			# FastAPI
-			#——————————————————————————————————————————————————————
+			#———————————————————————————————————————————————————————————————————
 
 			try:
 
@@ -886,7 +604,7 @@ if __name__ == "__main__":
 				)
 				raise SystemExit from e
 
-		#——————————————————————————————————————————————————————————
+		#———————————————————————————————————————————————————————————————————————
 
 		except Exception as e:
 
@@ -897,7 +615,7 @@ if __name__ == "__main__":
 			)
 			raise SystemExit from e
 
-#——————————————————————————————————————————————————————————————————
+#———————————————————————————————————————————————————————————————————————————————
 
 	try: asyncio.run(main())
 
@@ -918,7 +636,7 @@ if __name__ == "__main__":
 
 	finally: pass
 
-"""————————————————————————————————————————————————————————————————
+"""—————————————————————————————————————————————————————————————————————————————
 
 Infinite Coroutines in the Main Process:
 
@@ -936,7 +654,7 @@ Infinite Coroutines in the Main Process:
 		async def dashboard(websocket: WebSocket)
 		async def monitor_hardware()
 
-———————————————————————————————————————————————————————————————————
+————————————————————————————————————————————————————————————————————————————————
 
 The `memray` Python module @VS Code WSL2 Terminal:
 	sudo apt update
@@ -949,11 +667,11 @@ Run `memray` as follows:
 	memray flamegraph memleak_trace.bin -o memleak_report.html
 	memray stats memleak_trace.bin
 
-———————————————————————————————————————————————————————————————————
+————————————————————————————————————————————————————————————————————————————————
 
 Dashboard URLs:
 - http://localhost:8000/dashboard		dev pc
 - http://192.168.1.107/dashboard		server (internal access)
 - http://c01hyka.duckdns.org/dashboard	server (external access)
 
-————————————————————————————————————————————————————————————————"""
+—————————————————————————————————————————————————————————————————————————————"""

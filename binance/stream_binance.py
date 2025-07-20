@@ -56,6 +56,10 @@ from core import (
 	symbol_dump_snapshot,
 )
 
+from dashboard import (
+	monitor_hardware,
+)
+
 import os, time, random, logging
 import asyncio, certifi
 from datetime import datetime, timezone
@@ -115,6 +119,8 @@ LATEST_JSON_FLUSH:		dict[str, int] = {}
 JSON_FLUSH_INTERVAL:	dict[str, int] = {}
 
 #———————————————————————————————————————————————————————————————————————————————
+# EOL: TODO
+#———————————————————————————————————————————————————————————————————————————————
 
 from contextlib import asynccontextmanager
 
@@ -125,58 +131,34 @@ async def lifespan(APP):
 		yield
 
 	except KeyboardInterrupt:
-		logger.info("[lifespan] Application terminated by user (Ctrl + C).")
+		logger.info(
+			f"[{my_name()}] Application terminated by user (Ctrl + C)."
+		)
 
 	except Exception as e:
-		logger.error(f"[lifespan] Unhandled exception: {e}", exc_info=True)
+		logger.error(
+			f"[{my_name()}] Unhandled exception: {e}", exc_info=True
+		)
 
 	finally:
+
 		# Shutdown logic handled by ShutdownManager
 		# This ensures no duplicate cleanup
+
 		if 'shutdown_manager' in globals():
 			if not shutdown_manager.is_shutdown_complete():
-				logger.info("[lifespan] Initiating shutdown via ShutdownManager...")
+				logger.info(
+					f"[{my_name()}] Initiating shutdown via ShutdownManager..."
+				)
 				shutdown_manager.graceful_shutdown()
-		else:
-			logger.warning("[lifespan] ShutdownManager not available for cleanup")
 
-#———————————————————————————————————————————————————————————————————————————————
-# EOL: TODO
-#———————————————————————————————————————————————————————————————————————————————
-# ⚙️ FastAPI Initialization & Template Binding
-#
-# FastAPI acts as the core runtime backbone for this application.
-# Its presence is structurally required for multiple critical subsystems:
-#
-#   1. 📊 Logging Integration:
-#
-#	  - Logging is routed via `uvicorn.error`, managed by FastAPI's ASGI server.
-#	  - Our logger (`logger = logging.getLogger("uvicorn.error")`) is active
-#		and functional as soon as FastAPI is imported, even before APP launch.
-#
-#   2. 🌐 REST API Endpoints:
-#
-#	  - Provides health checks, JSON-based order book access,
-# 		and real-time UI rendering.
-#
-# ⚠️ Removal of FastAPI would break:
-#
-#	  - Logging infrastructure
-#	  - HTML endpoint: /dashboard
-#
-#   - Even if not all FastAPI features are always used,
-# 	  its presence is mandatory.
-#
-#   - Template directory is resolved via `resource_path()`
-# 	  for PyInstaller compatibility.
-#
-#   - See also: RULESET.md for documentation and code conventions.
-#———————————————————————————————————————————————————————————————————————————————
+		else:
+			logger.warning(
+				f"[{my_name()}] ShutdownManager not available for cleanup"
+			)
 
 APP = FastAPI(lifespan=lifespan)
 
-#———————————————————————————————————————————————————————————————————————————————
-# EXTERNAL DASHBOARD SERVICE
 #———————————————————————————————————————————————————————————————————————————————
 
 @APP.get("/dashboard", response_class=HTMLResponse)
@@ -205,61 +187,8 @@ async def dashboard_page(request: Request):
 		raise HTTPException(status_code=500, detail="Internal server error")
 
 #———————————————————————————————————————————————————————————————————————————————
-# 📊 Dashboard Monitoring & WebSocket Stream Handler
-#
-# Provides real-time monitoring and WebSocket streaming for system metrics,
-# such as hardware usage and median latency per symbol, to connected clients.
-#
-# Features:
-#	• Hardware Monitoring:
-#		- Tracks CPU, memory, storage, and network usage using `psutil`.
-#		- Updates global metrics asynchronously to avoid blocking the event loop.
-#
-#	• WebSocket Dashboard:
-#		- Streams monitoring data to clients at `/ws/dashboard`.
-#		- Enforces connection limits (`MAX_DASHBOARD_CONNECTIONS`)
-#		  and session timeouts.
-#		- Periodically sends JSON payloads with hardware metrics and
-#		  symbol latency.
-#
-#	• Configuration-Driven:
-#		- All limits, intervals, and backoff strategies are loaded from `.conf`.
-#		- Fully customizable via `get_binance_chart.conf`.
-#
-# Usage:
-#	- Designed for extensibility: add more metrics or endpoints as needed.
-#	- Intended for browser-based dashboards or monitoring tools.
-#
-# Safety & Robustness:
-#	- Hardware monitoring runs asynchronously to prevent blocking.
-#	- WebSocket handler ensures graceful handling of disconnects,
-#	  errors, and cancellations.
-#	- Implements exponential backoff for reconnection attempts.
-#	- All resource management (locks, counters) is thread-safe.
-#
-# Structures:
-#	• Global Metrics:
-#		- NETWORK_LOAD_MBPS: Network bandwidth usage in Mbps.
-#		- CPU_LOAD_PERCENTAGE: CPU usage percentage.
-#		- MEM_LOAD_PERCENTAGE: Memory usage percentage.
-#		- STORAGE_PERCENTAGE: Storage usage percentage.
-#
-#	• WebSocket Configuration:
-#		- DASHBOARD_STREAM_INTERVAL: Interval between data pushes (seconds).
-#		- MAX_DASHBOARD_CONNECTIONS: Max concurrent WebSocket connections.
-#		- MAX_DASHBOARD_SESSION_SEC: Max session duration per client (seconds).
-#
-#	• Locks:
-#		- ACTIVE_DASHBOARD_LOCK: Ensures thread-safe connection tracking.
-#
-# See also:
-#	- monitor_hardware(): Asynchronous hardware monitoring function.
-#	- dashboard(): WebSocket handler for dashboard clients.
-#	- RULESET.md: Documentation and code conventions.
-#———————————————————————————————————————————————————————————————————————————————
 
 from fastapi import WebSocket, WebSocketDisconnect
-import psutil
 
 ACTIVE_DASHBOARD_LOCK		 = asyncio.Lock()
 ACTIVE_DASHBOARD_CONNECTIONS = 0
@@ -269,119 +198,6 @@ CPU_LOAD_PERCENTAGE:	float = 0.0
 MEM_LOAD_PERCENTAGE:	float = 0.0
 STORAGE_PERCENTAGE:		float = 0.0
 GC_TIME_COST_MS:		float = -0.0
-
-#———————————————————————————————————————————————————————————————————————————————
-
-async def monitor_hardware():
-
-	"""
-	Hardware monitoring function that runs as an async coroutine.
-	Updates global hardware metrics using psutil with non-blocking operations.
-	For details, see `https://psutil.readthedocs.io/en/latest/`.
-
-	Metrics updated:
-		- NETWORK_LOAD_MBPS:   Network bandwidth in megabits per second
-		- CPU_LOAD_PERCENTAGE: CPU load percentage
-		- MEM_LOAD_PERCENTAGE: Memory usage percentage
-		- STORAGE_PERCENTAGE: Storage usage percentage
-	"""
-
-	global NETWORK_LOAD_MBPS, CPU_LOAD_PERCENTAGE
-	global MEM_LOAD_PERCENTAGE, STORAGE_PERCENTAGE
-	global HARDWARE_MONITORING_INTERVAL, CPU_PERCENT_DURATION
-	global DESIRED_MAX_SYS_MEM_LOAD
-	
-	# Initialize previous network counters for bandwidth calculation
-
-	prev_counters = psutil.net_io_counters()
-	prev_sent	  = prev_counters.bytes_sent
-	prev_recv	  = prev_counters.bytes_recv
-	prev_time	  = time.time()
-	
-	logger.info(
-		f"[monitor_hardware] "
-		f"Hardware monitoring started."
-	)
-	
-	while True:
-
-		try:
-			
-			wt_start = time.time()
-
-			# CPU Usage: blocking call to get CPU load percentage
-
-			CPU_LOAD_PERCENTAGE = await asyncio.to_thread(
-				psutil.cpu_percent, 
-				interval=CPU_PERCENT_DURATION
-			)
-			
-			# Memory Usage
-
-			memory_info = await asyncio.to_thread(psutil.virtual_memory)
-			MEM_LOAD_PERCENTAGE = memory_info.percent
-			
-			# Storage Usage (root filesystem)
-
-			disk_info = await asyncio.to_thread(psutil.disk_usage, '/')
-			STORAGE_PERCENTAGE = disk_info.percent
-			
-			# Network Usage (Mbps)
-
-			curr_time = time.time()
-			counters  = await asyncio.to_thread(psutil.net_io_counters)
-			curr_sent = counters.bytes_sent
-			curr_recv = counters.bytes_recv
-			
-			# Calculate bytes transferred since last measurement
-
-			sent_diff = curr_sent - prev_sent
-			recv_diff = curr_recv - prev_recv
-			time_diff = curr_time - prev_time
-			
-			# Convert to Mbps
-
-			if time_diff > 0:
-
-				total_bytes = sent_diff + recv_diff
-				NETWORK_LOAD_MBPS = (
-					(total_bytes * 8) / (time_diff * 1_000_000)
-				)
-			
-			# Update previous values
-
-			prev_sent = curr_sent
-			prev_recv = curr_recv
-			prev_time = curr_time
-
-			# High Memory Load Warning
-			# Disabled for now since it can confuse memray
-			
-			#if MEM_LOAD_PERCENTAGE > DESIRED_MAX_SYS_MEM_LOAD:
-			#
-			#	logger.warning(
-			#		f"[monitor_hardware]\n"
-			#		f"\t  {MEM_LOAD_PERCENTAGE:.2f}% "
-			#		f"(MEM_LOAD_PERCENTAGE)\n"
-			#		f"\t> {DESIRED_MAX_SYS_MEM_LOAD:.2f}% "
-			#		f"(DESIRED_MAX_SYS_MEM_LOAD)."
-			#	)
-			
-		except Exception as e:
-
-			logger.error(
-				f"[monitor_hardware] "
-				f"Error monitoring hardware: {e}",
-				exc_info=True
-			)
-
-		finally:
-
-			sleep_duration = max(
-				0.0, HARDWARE_MONITORING_INTERVAL - (time.time() - wt_start)
-			)
-
-			await asyncio.sleep(sleep_duration)
 
 #———————————————————————————————————————————————————————————————————————————————
 
@@ -647,7 +463,18 @@ if __name__ == "__main__":
 			try:
 
 				tasks = [
-					asyncio.create_task(monitor_hardware()),
+					asyncio.create_task(
+						monitor_hardware(
+							NETWORK_LOAD_MBPS,
+							CPU_LOAD_PERCENTAGE,
+							MEM_LOAD_PERCENTAGE,
+							STORAGE_PERCENTAGE,
+							HARDWARE_MONITORING_INTERVAL,
+							CPU_PERCENT_DURATION,
+							DESIRED_MAX_SYS_MEM_LOAD,
+							logger,
+						)
+					),
 					asyncio.create_task(
 						estimate_latency(
 							WS_PING_INTERVAL,

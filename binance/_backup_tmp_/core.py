@@ -1,6 +1,6 @@
 # core.py
 
-#——————————————————————————————————————————————————————————————————
+#———————————————————————————————————————————————————————————————————————————————
 
 from util import (
 	my_name,				# For exceptions with 0 Lebesgue measure
@@ -21,7 +21,7 @@ from collections import OrderedDict
 from typing import Optional
 from concurrent.futures import ProcessPoolExecutor
 
-#——————————————————————————————————————————————————————————————————
+#———————————————————————————————————————————————————————————————————————————————
 
 #	 '2025-06-27_13-15'
 # -> '2025-06-27'
@@ -36,7 +36,7 @@ def get_date_from_suffix(suffix: str) -> str:
 			f"from suffix '{suffix}': {e}"
 		) from e
 
-#——————————————————————————————————————————————————————————————————
+#———————————————————————————————————————————————————————————————————————————————
 
 def proc_zip_n_remove_jsonl(
 	lob_dir:	  str,
@@ -98,7 +98,7 @@ def proc_zip_n_remove_jsonl(
 			exc_info=True
 		)
 
-#——————————————————————————————————————————————————————————————————
+#———————————————————————————————————————————————————————————————————————————————
 
 def symbol_consolidate_a_day(
 	symbol:	  str,
@@ -304,7 +304,7 @@ def symbol_consolidate_a_day(
 			f"for {day_str} (took {timer.tock():.5f} sec)."
 		)
 
-#——————————————————————————————————————————————————————————————————
+#———————————————————————————————————————————————————————————————————————————————
 
 async def symbol_dump_snapshot(
 	symbol:					str,
@@ -324,7 +324,7 @@ async def symbol_dump_snapshot(
 	logger:					logging.Logger,
 ):
 
-	#——————————————————————————————————————————————————————————————————
+	#———————————————————————————————————————————————————————————————————————————————
 
 	def safe_close_file_muted(
 		f: TextIOWrapper
@@ -334,7 +334,7 @@ async def symbol_dump_snapshot(
 			try:   f.close()
 			except Exception: pass
 
-	#——————————————————————————————————————————————————————————————————
+	#———————————————————————————————————————————————————————————————————————————————
 
 	def safe_close_jsonl(
 		f: TextIOWrapper
@@ -356,7 +356,7 @@ async def symbol_dump_snapshot(
 			safe_close_file_muted(f)
 			return False
 
-	#——————————————————————————————————————————————————————————————————
+	#———————————————————————————————————————————————————————————————————————————————
 	
 	def refresh_file_handle(
 		file_path: str,
@@ -402,7 +402,7 @@ async def symbol_dump_snapshot(
 
 		return json_writer
 
-	#——————————————————————————————————————————————————————————————————
+	#———————————————————————————————————————————————————————————————————————————————
 
 	def pop_and_close_handle(
 		handles: dict[str, tuple[str, TextIOWrapper]],
@@ -417,7 +417,7 @@ async def symbol_dump_snapshot(
 
 		except Exception: pass
 
-	#——————————————————————————————————————————————————————————————————
+	#———————————————————————————————————————————————————————————————————————————————
 
 	async def fetch_snapshot(
 		queue:  asyncio.Queue,
@@ -435,7 +435,7 @@ async def symbol_dump_snapshot(
 			)
 			return None
 
-	#——————————————————————————————————————————————————————————————————
+	#———————————————————————————————————————————————————————————————————————————————
 
 	def get_file_suffix(
 		interval_min: int,
@@ -465,7 +465,7 @@ async def symbol_dump_snapshot(
 
 			return "invalid_suffix"
 
-	#——————————————————————————————————————————————————————————————————
+	#———————————————————————————————————————————————————————————————————————————————
 
 	def get_suffix_n_date(
 		save_interval_min: int,
@@ -497,7 +497,7 @@ async def symbol_dump_snapshot(
 
 			return None, None
 	
-	#——————————————————————————————————————————————————————————————————
+	#———————————————————————————————————————————————————————————————————————————————
 
 	def gen_file_path(
 		symbol_upper: str,
@@ -524,7 +524,7 @@ async def symbol_dump_snapshot(
 			)
 			return None
 
-	#——————————————————————————————————————————————————————————————————
+	#———————————————————————————————————————————————————————————————————————————————
 
 	def flush_snapshot(
 		json_writer: TextIOWrapper,
@@ -574,7 +574,7 @@ async def symbol_dump_snapshot(
 
 			return False
 		
-	#——————————————————————————————————————————————————————————————————
+	#———————————————————————————————————————————————————————————————————————————————
 
 	def memorize_treated(
 		records: dict[str, OrderedDict[str, None]],
@@ -596,7 +596,7 @@ async def symbol_dump_snapshot(
 				f"for symbol='{symbol}', to_rec='{to_rec}': {e}"
 			) from e
 
-	#——————————————————————————————————————————————————————————————————
+	#———————————————————————————————————————————————————————————————————————————————
 
 	queue = snapshots_queue_dict[symbol]
 	symbol_upper = symbol.upper()
@@ -779,7 +779,7 @@ async def symbol_dump_snapshot(
 
 		del snapshot, file_path
 
-#——————————————————————————————————————————————————————————————————
+#———————————————————————————————————————————————————————————————————————————————
 
 from collections import deque
 
@@ -862,25 +862,22 @@ async def put_snapshot(		# @depth20@100ms
 						bids = data.get("bids", [])
 						asks = data.get("asks", [])
 
-						#──────────────────────────────────────────
-						# Binance partial streams like
-						# `@depth20@100ms` do NOT include the
-						# server-side event timestamp ("E").
-						# Thus, we must rely on local receipt time
-						# corrected by estimated network latency
-						# and computation time among coroutines.
-						#──────────────────────────────────────────
-						# TODO: The difference between the current
-						# time and the previous time right before
-						# defining `snapshot` is expected to be
-						# 100ms. The difference higher than 100ms
-						# is due to the computation time for
-						# the snapshot to be defined within the
-						# whole main process, which much be
-						# utilized to define `lat_ms`. The first
-						# `raw` must be discarded to measure
-						# the difference and define `lat_ms`.
-						#──────────────────────────────────────────
+						#———————————————————————————————————————————————————————
+						# Binance partial streams like `@depth20@100ms` do NOT
+						# include the server-side event timestamp ("E"). Thus,
+						# we must rely on local receipt time corrected by
+						# estimated network latency and computation time among
+						# coroutines.
+						#———————————————————————————————————————————————————————
+						# TODO: The difference between the current time and the
+						# previous time right before defining `snapshot` is
+						# expected to be 100ms. The difference higher than 100ms
+						# is due to the computation time for the snapshot to be
+						# defined within the whole main process, which much be
+						# utilized to define `lat_ms`. The first `raw` must be
+						# discarded to measure the difference and define 
+						# `lat_ms`.
+						#———————————————————————————————————————————————————————
 
 						lat_ms = max(
 							0, median_latency_dict.get(
@@ -905,12 +902,11 @@ async def put_snapshot(		# @depth20@100ms
 							],
 						}
 
-						#──────────────────────────────────────────
-						# `.qsize()` is less than or equal to one
-						# almost surely, meaning that
-						# `snapshots_queue_dict` is being quickly
+						#———————————————————————————————————————————————————————
+						# `.qsize()` is less than or equal to one almost surely,
+						# meaning that `snapshots_queue_dict` is being quickly
 						# consumed via `.get()`.
-						#──────────────────────────────────────────
+						#———————————————————————————————————————————————————————
 						
 						await snapshots_queue_dict[
 							current_symbol
@@ -971,11 +967,11 @@ async def put_snapshot(		# @depth20@100ms
 
 		finally:
 
-			#——————————————————————————————————————————————————————
+			#———————————————————————————————————————————————————————————————————
 			# Informational close log; `async with` ensures ws is
 			# closed. Use last known symbol purely for context
 			# (may be UNKNOWN).
-			#——————————————————————————————————————————————————————
+			#———————————————————————————————————————————————————————————————————
 
 			sym = (
 				current_symbol
@@ -987,4 +983,4 @@ async def put_snapshot(		# @depth20@100ms
 				f"WebSocket connection closed."
 			)
 
-#——————————————————————————————————————————————————————————————————
+#———————————————————————————————————————————————————————————————————————————————
