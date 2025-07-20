@@ -1,3 +1,7 @@
+# init.py
+
+#——————————————————————————————————————————————————————————————————
+
 import logging, asyncio
 
 from collections import OrderedDict, deque
@@ -30,7 +34,6 @@ def load_config(
 	int,			# latency_sample_min
 	int, 			# latency_threshold_ms
 	float,			# latency_signal_sleep
-	float,  		# latency_gate_sleep
 	#
 	int,			# base_backoff
 	int,			# max_backoff
@@ -95,7 +98,6 @@ def load_config(
 		int,			# latency_sample_min
 		int, 			# latency_threshold_ms
 		float,			# latency_signal_sleep
-		float,  		# latency_gate_sleep
 		#
 		int,			# base_backoff
 		int,			# max_backoff
@@ -129,7 +131,6 @@ def load_config(
 			latency_sample_min   = int(config.get("LATENCY_SAMPLE_MIN"))
 			latency_threshold_ms = int(config.get("LATENCY_THRESHOLD_MS"))
 			latency_signal_sleep = float(config.get("LATENCY_SIGNAL_SLEEP"))
-			latency_gate_sleep	 = float(config.get("LATENCY_GATE_SLEEP"))		# TODO: Is this really necessary?
 
 			base_backoff		= int(config.get("BASE_BACKOFF"))
 			max_backoff			= int(config.get("MAX_BACKOFF"))
@@ -161,7 +162,6 @@ def load_config(
 				latency_sample_min,
 				latency_threshold_ms,
 				latency_signal_sleep,
-				latency_gate_sleep,
 				#
 				base_backoff,
 				max_backoff,
@@ -226,7 +226,6 @@ def load_config(
 			#
 			latency_deque_size, latency_sample_min,
 			latency_threshold_ms, latency_signal_sleep,
-			latency_gate_sleep,
 			#
 			base_backoff, max_backoff,
 			reset_cycle_after, reset_backoff_level,
@@ -265,7 +264,6 @@ def load_config(
 			#
 			latency_deque_size, latency_sample_min,
 			latency_threshold_ms, latency_signal_sleep,
-			latency_gate_sleep,
 			#
 			base_backoff, max_backoff,
 			reset_cycle_after, reset_backoff_level,
@@ -305,7 +303,11 @@ def init_runtime_state(
 	records_znr_minutes:	dict[str, OrderedDict[str]],
 	symbols:				list[str],
 	logger:					logging.Logger,
-):
+) -> tuple[
+	asyncio.Event,
+	asyncio.Event,
+	asyncio.Event,
+]:
 
 	try:
 
@@ -364,6 +366,16 @@ def init_runtime_state(
 		logger.info(
 			f"[{my_name()}] "
 			f"Runtime state initialized."
+		)
+
+		event_1st_snapshot  = asyncio.Event()
+		event_latency_valid = asyncio.Event()
+		event_stream_enable = asyncio.Event()
+
+		return (
+			event_1st_snapshot,
+			event_latency_valid,
+			event_stream_enable,
 		)
 
 	except Exception as e:

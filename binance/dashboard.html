@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>Binance Dashboard</title>
+	<style>
+		body {
+			font-family: Arial, sans-serif;
+			margin: 20px;
+		}
+		table {
+			width: 100%;
+			border-collapse: collapse;
+			margin-bottom: 20px;
+		}
+		th, td {
+			border: 1px solid #ddd;
+			padding: 8px;
+			text-align: center;
+		}
+		th {
+			background-color: #f4f4f4;
+		}
+		tr:nth-child(even) {
+			background-color: #f9f9f9;
+		}
+		#lastUpdated {
+			margin-top: 10px;
+			font-size: 14px;
+			color: #555;
+		}
+		.section-title {
+			margin-top: 30px;
+			margin-bottom: 10px;
+			font-size: 18px;
+			font-weight: bold;
+		}
+	</style>
+</head>
+<body>
+	<h1>Binance Dashboard</h1>
+	<div id="lastUpdated">Last Updated: N/A</div>
+	
+	<div class="section-title">Hardware Metrics</div>
+	<table id="hardwareMetricsTable">
+		<thead>
+			<tr>
+				<th>Metric</th>
+				<th>Value</th>
+			</tr>
+		</thead>
+		<tbody>
+			<tr>
+				<td>Network Usage</td>
+				<td id="networkUsage">0 Mbps</td>
+			</tr>
+			<tr>
+				<td>CPU Usage</td>
+				<td id="cpuUsage">0.0%</td>
+			</tr>
+			<tr>
+				<td>Memory Usage</td>
+				<td id="memoryUsage">0.0%</td>
+			</tr>
+			<tr>
+				<td>Storage Usage</td>
+				<td id="storageUsage">0.0%</td>
+			</tr>
+			<tr>
+				<td>GC Time Cost</td>
+				<td id="gcTimeCost">0.0 (us)</td>
+			</tr>
+		</tbody>
+	</table>
+
+	<div class="section-title">Symbol Metrics</div>
+	<table id="symbolMetricsTable">
+		<thead>
+			<tr>
+				<th>Symbol</th>
+				<th>Median Latency (ms)</th>
+				<th>Flush Interval (ms)</th>
+				<th id="queueSizeHeader">Queue Size (Total: 0)</th>
+			</tr>
+		</thead>
+		<tbody>
+			<!-- Rows will be dynamically added here -->
+		</tbody>
+	</table>
+
+	<script>
+		const ws = new WebSocket(`ws://${window.location.host}/ws/dashboard`);
+
+		ws.onopen = () => {
+			console.log("WebSocket connection established.");
+		};
+
+		ws.onmessage = (event) => {
+			const data = JSON.parse(event.data);
+
+			// Update GC Time Cost
+			if (data.gc_time_cost_ms !== undefined) {
+				document.getElementById("gcTimeCost").textContent = `${data.gc_time_cost_ms.toFixed(2)} ms`;
+			}
+
+			const medLatency = data.med_latency;
+			const flushInterval = data.flush_interval;
+            const queueSize = data.queue_size;
+            const queueSizeTotal = data.queue_size_total;
+			const hardware = data.hardware;
+			const lastUpdated = data.last_updated;
+
+			// Update hardware metrics
+			if (hardware) {
+				document.getElementById("networkUsage").textContent = `${hardware.network_mbps.toFixed(2)} Mbps`;
+				document.getElementById("cpuUsage").textContent = `${hardware.cpu_percent.toFixed(2)}%`;
+				document.getElementById("memoryUsage").textContent = `${hardware.memory_percent.toFixed(2)}%`;
+				document.getElementById("storageUsage").textContent = `${hardware.storage_percent.toFixed(2)}%`;
+			}
+
+			// Update symbol metrics table
+			const symbolTableBody = document.querySelector("#symbolMetricsTable tbody");
+			symbolTableBody.innerHTML = ""; // Clear existing rows
+
+			for (const symbol in medLatency) {
+				const row = document.createElement("tr");
+				const symbolCell = document.createElement("td");
+				const latencyCell = document.createElement("td");
+				const flushCell = document.createElement("td");
+                const queueCell = document.createElement("td");
+
+				symbolCell.textContent = symbol.toUpperCase();
+				latencyCell.textContent = medLatency[symbol];
+				flushCell.textContent = flushInterval[symbol];
+				queueCell.textContent = queueSize ? queueSize[symbol] : 0;
+
+				row.appendChild(symbolCell);
+				row.appendChild(latencyCell);
+				row.appendChild(flushCell);
+				row.appendChild(queueCell);
+				symbolTableBody.appendChild(row);
+			}
+
+			document.getElementById("queueSizeHeader").textContent = `Queue Size (Total: ${queueSizeTotal ?? 0})`;
+
+			const formattedTime = new Date(lastUpdated).toISOString().slice(0, 19) + "Z";
+			document.querySelector("#lastUpdated").textContent = `Last Updated: ${formattedTime}`;
+		};
+
+		ws.onerror = (error) => {
+			console.error("WebSocket error:", error);
+		};
+
+		ws.onclose = () => {
+			console.log("WebSocket connection closed.");
+		};
+	</script>
+</body>
+</html>

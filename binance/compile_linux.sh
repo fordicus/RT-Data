@@ -4,7 +4,7 @@
 # 🚀 Linux Build Script for stream_binance.py
 #
 # 📦 Creates a self-contained executable (PyInstaller, onefile)
-# 🧩 Includes: app.conf + stream_binance_dashboard.html
+# 🧩 Includes: app.conf + dashboard.html
 # 🧪 Requires: Python 3.9.23 and activated 'binance' environment
 # 🧱 Assumes: Conda or venv-based activation
 #
@@ -74,7 +74,7 @@ pyinstaller \
   --noconfirm \
   --hidden-import=uvicorn \
   --add-data "$(python -m certifi):." \
-  --add-data "stream_binance_dashboard.html:." \
+  --add-data "dashboard.html:." \
   --add-data "app.conf:." \
   stream_binance.py
 

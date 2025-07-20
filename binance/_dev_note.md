@@ -2,10 +2,10 @@
 
 1. **TODO-HOTFIX**
 
-	*	⚛️ Fire-and-Forget / GIL-Free / Atomic Process Concurrency for `zip_and_remove`  
-	*	The top trading-volume symbol alone sufficies for the latency measurement:
-		*	mean & variance from a deque
-		*	simplest possible implementation of `estimate_latency()`
+	*	latency measurement:
+		*	Line-873 of `core.py`: computation time
+		*	Line-96 of `latency.py`: `estimate_latency()` in process pool
+			*	mean & variance from a deque as scalars in `multiprocessing`
 
 2. **EXTERNAL DASHBOARD SERVICE**
 

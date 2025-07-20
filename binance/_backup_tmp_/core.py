@@ -38,7 +38,7 @@ def get_date_from_suffix(suffix: str) -> str:
 
 #——————————————————————————————————————————————————————————————————
 
-def safe_zip_n_remove_jsonl(
+def proc_zip_n_remove_jsonl(
 	lob_dir:	  str,
 	symbol_upper: str,
 	last_suffix:  str,
@@ -681,7 +681,7 @@ async def symbol_dump_snapshot(
 					)
 
 					znr_executor.submit(	# pickle
-						safe_zip_n_remove_jsonl,
+						proc_zip_n_remove_jsonl,
 						lob_dir, symbol_upper, 
 						last_suffix
 					)
@@ -783,7 +783,7 @@ async def symbol_dump_snapshot(
 
 from collections import deque
 
-async def put_snapshot(		# @depth20@100ms snapshots
+async def put_snapshot(		# @depth20@100ms
 	snapshots_queue_dict:	dict[str, asyncio.Queue],
 	event_stream_enable:	asyncio.Event,
 	latency_dict:			dict[str, deque[int]],
@@ -802,7 +802,9 @@ async def put_snapshot(		# @depth20@100ms snapshots
 
 	"""————————————————————————————————————————————————————————————
 	CORE FUNCTIONALITY:
-		await snapshots_queue_dict[symbol].put(snapshot)
+		await snapshots_queue_dict[
+			current_symbol
+		].put(snapshot)
 	———————————————————————————————————————————————————————————————
 	HINT:
 		asyncio.Queue(maxsize=SNAPSHOTS_QUEUE_MAX)
@@ -865,9 +867,21 @@ async def put_snapshot(		# @depth20@100ms snapshots
 						# `@depth20@100ms` do NOT include the
 						# server-side event timestamp ("E").
 						# Thus, we must rely on local receipt time
-						# corrected by estimated network latency.
+						# corrected by estimated network latency
+						# and computation time among coroutines.
 						#──────────────────────────────────────────
-						
+						# TODO: The difference between the current
+						# time and the previous time right before
+						# defining `snapshot` is expected to be
+						# 100ms. The difference higher than 100ms
+						# is due to the computation time for
+						# the snapshot to be defined within the
+						# whole main process, which much be
+						# utilized to define `lat_ms`. The first
+						# `raw` must be discarded to measure
+						# the difference and define `lat_ms`.
+						#──────────────────────────────────────────
+
 						lat_ms = max(
 							0, median_latency_dict.get(
 								current_symbol, 0

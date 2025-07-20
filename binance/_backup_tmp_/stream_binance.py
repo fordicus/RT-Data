@@ -42,13 +42,18 @@ from util import (
 	set_global_logger,
 )
 
+from latency import (
+	gate_streaming_by_latency,
+	estimate_latency,
+)
+
 from core import (
 	put_snapshot,
 	symbol_dump_snapshot,
 )
 
-import os, time, random, statistics, logging
-import websockets, asyncio, certifi, json
+import os, time, random, logging
+import asyncio, certifi
 from datetime import datetime, timezone
 from collections import deque
 from io import TextIOWrapper
@@ -73,7 +78,6 @@ logger, queue_listener = set_global_logger()
 	#
 	LATENCY_DEQUE_SIZE, LATENCY_SAMPLE_MIN,
 	LATENCY_THRESHOLD_MS, LATENCY_SIGNAL_SLEEP,
-	LATENCY_GATE_SLEEP,
 	#
 	BASE_BACKOFF, MAX_BACKOFF,
 	RESET_CYCLE_AFTER, RESET_BACKOFF_LEVEL,
@@ -106,371 +110,51 @@ DEPTH_UPDATE_ID_DICT:	dict[str, int] = {}
 LATEST_JSON_FLUSH:		dict[str, int] = {}
 JSON_FLUSH_INTERVAL:	dict[str, int] = {}
 
-EVENT_1ST_SNAPSHOT:		asyncio.Event
-EVENT_LATENCY_VALID:	asyncio.Event
-EVENT_STREAM_ENABLE:	asyncio.Event
-EVENT_FLAGS_INITIALIZED = False
-
-##——————————————————————————————————————————————————————————————————
-# TODO
 #——————————————————————————————————————————————————————————————————
 
-def init_event_flags(
-	logger: logging.Logger
-):
+import signal, sys
 
-	global EVENT_1ST_SNAPSHOT
-	global EVENT_LATENCY_VALID
-	global EVENT_STREAM_ENABLE
-	global EVENT_FLAGS_INITIALIZED
+# Global flag to track shutdown state
+_SHUTDOWN_COMPLETE = False
 
+def shutdown_merge_executor(merge_executor, znr_executor):
+	"""
+	Gracefully shuts down both executors with individual logging.
+	"""
+	global _SHUTDOWN_COMPLETE
+	
+	if _SHUTDOWN_COMPLETE:
+		return  # Already shutdown, avoid duplicate calls
+	
 	try:
-
-		EVENT_1ST_SNAPSHOT  = asyncio.Event()
-		EVENT_LATENCY_VALID = asyncio.Event()
-		EVENT_STREAM_ENABLE = asyncio.Event()
-		EVENT_FLAGS_INITIALIZED = True
-
-		logger.info(
-			f"[{my_name()}] Event flags initialized."
-		)
-		# return (
-		# 	EVENT_1ST_SNAPSHOT,
-		# 	EVENT_LATENCY_VALID,
-		# 	EVENT_STREAM_ENABLE,
-		# 	EVENT_FLAGS_INITIALIZED,
-		# )
-
-	except Exception as e:
-
-		logger.error(
-			f"[{my_name()}] Failed to "
-			f"initialize event flags: {e}",
-			exc_info=True
-		)
-		raise SystemExit
-
-def assert_event_flags_init():
-
-	if not EVENT_FLAGS_INITIALIZED:
-
-		logger.critical(
-			f"[{my_name()}] "
-			f"Event flags not initialized."
-		)
-		raise SystemExit
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-#——————————————————————————————————————————————————————————————————
-# 🕓 Latency Control: Measurement, Thresholding, and Flow Gate
-#——————————————————————————————————————————————————————————————————
-
-async def gate_streaming_by_latency() -> None:
-
-	has_logged_warmup = False  # Initial launch flag
-
-	while True:
-
-		try:
-
-			# Check latency and streaming flags
-
-			latency_passed = EVENT_LATENCY_VALID.is_set()
-			stream_currently_on = EVENT_STREAM_ENABLE.is_set()
-			has_any_latency = all(
-				len(LATENCY_DICT[s]) > 0 for s in SYMBOLS
-			)
-
-			if latency_passed and not stream_currently_on:
-
-				logger.info(
-					"[gate_streaming_by_latency] "
-					f"Latency normalized. "
-					f"Enable order book stream.\n"
-				)
-
-				EVENT_STREAM_ENABLE.set()
-				has_logged_warmup = False
-
-			elif not latency_passed:
-
-				if not has_any_latency and not has_logged_warmup:
-
-					logger.info(
-						f"[gate_streaming_by_latency] "
-						f"Warming up latency measurements...\n"
-					)
-
-					has_logged_warmup = True
-
-				elif has_any_latency and stream_currently_on:
-
-					logger.warning(
-						f"[gate_streaming_by_latency] "
-						f"Latency degraded. "
-						f"Pausing order book stream."
-					)
-
-					EVENT_STREAM_ENABLE.clear()
-
-			await asyncio.sleep(LATENCY_SIGNAL_SLEEP)
-
-		except Exception as e:
-
-			logger.error(
-				"[gate_streaming_by_latency] "
-				f"Exception in latency gate: "
-				f"{e}",
-				exc_info=True
-			)
-
-			await asyncio.sleep(LATENCY_GATE_SLEEP)
-
-#——————————————————————————————————————————————————————————————————
-
-async def estimate_latency() -> None:
-
-	global LATENCY_DICT, MEDIAN_LATENCY_DICT, DEPTH_UPDATE_ID_DICT
-
-	url = (
-		"wss://stream.binance.com:9443/stream?"
-		+ "streams=" + "/".join(f"{symbol}@depth" for symbol in SYMBOLS)
-	)
-
-	reconnect_attempt = 0
-
-	while True:
-
-		try:
-
-			async with websockets.connect(
-				url,
-				ping_interval = WS_PING_INTERVAL,
-				ping_timeout  = WS_PING_TIMEOUT
-			) as ws:
-
-				logger.info(
-					f"[estimate_latency] "
-					f"Connected to:\n{format_ws_url(url, '(@depth)')}\n"
-				)
-
-				reconnect_attempt = 0  # Reset retry counter
-
-				async for raw_msg in ws:
-
-					try:
-
-						message = json.loads(raw_msg)
-						data = message.get("data", {})
-						server_time_ms = data.get("E")
-
-						if server_time_ms is None:
-
-							continue  # Drop malformed message
-
-						stream_name = message.get("stream", "")
-						symbol = stream_name.split("@", 1)[0].lower()
-
-						if symbol not in SYMBOLS:
-
-							continue  # Ignore unexpected symbols
-
-						update_id = data.get("u")
-
-						if ((update_id is None) or
-							(update_id <= DEPTH_UPDATE_ID_DICT.get(symbol, 0))
-						):
-
-							continue  # Duplicate or out-of-order update
-
-						DEPTH_UPDATE_ID_DICT[symbol] = update_id
-					
-						# ─────────────────────────────────────────────────────────────────
-						# Estimate latency (difference between client and server clocks)
-						# ─────────────────────────────────────────────────────────────────
-						# `get_current_time_ms() - server_time_ms` approximates one-way
-						# latency (network + kernel + event loop) at the point of message
-						# receipt. While not a true RTT, it reflects realistic downstream
-						# delay and is sufficient for latency gating decisions in practice.
-						# ─────────────────────────────────────────────────────────────────
-
-						latency_ms = get_current_time_ms() - server_time_ms
-
-						LATENCY_DICT[symbol].append(latency_ms)
-
-						if len(LATENCY_DICT[symbol]) >= LATENCY_SAMPLE_MIN:
-
-							MEDIAN_LATENCY_DICT[symbol] = int(
-								statistics.median(LATENCY_DICT[symbol])
-							)
-
-							if all(
-								(	(len(LATENCY_DICT[s]) >= LATENCY_SAMPLE_MIN) and
-									(
-										statistics.median(LATENCY_DICT[s]) 
-										< LATENCY_THRESHOLD_MS
-									)
-								)	for s in SYMBOLS
-							):
-
-								if not EVENT_LATENCY_VALID.is_set():
-
-									EVENT_LATENCY_VALID.set()
-
-									logger.info(
-										"[estimate_latency] "
-										f"Latency OK — all symbols within threshold. "
-										f"Event set."
-									)
-
-					except Exception as e:
-
-						logger.warning(
-							f"[estimate_latency] "
-							f"Failed to process message: {e}",
-							exc_info=True
-						)
-
-						continue
-
-		except Exception as e:
-
-			reconnect_attempt += 1
-
-			logger.warning(
-				f"[estimate_latency] "
-				f"WebSocket connection error (attempt {reconnect_attempt}): {e}",
-				exc_info=True
-			)
-
-			EVENT_LATENCY_VALID.clear()
-
-			for symbol in SYMBOLS:
-
-				LATENCY_DICT[symbol].clear()
-				DEPTH_UPDATE_ID_DICT[symbol] = 0
-
-			backoff_sec = (
-				min(MAX_BACKOFF, BASE_BACKOFF * (2 ** reconnect_attempt))
-				+ random.uniform(0, 1)
-			)
-
-			if reconnect_attempt > RESET_CYCLE_AFTER:
-
-				reconnect_attempt = RESET_BACKOFF_LEVEL
-
-			logger.warning(
-				f"[estimate_latency] "
-				f"Retrying in {backoff_sec:.1f} seconds "
-				f"(attempt {reconnect_attempt})..."
-			)
-
-			await asyncio.sleep(backoff_sec)
-
-		finally:
-
+		if merge_executor:
+			merge_executor.shutdown(wait=True)
 			logger.info(
-				f"[estimate_latency] "
-				f"WebSocket connection closed."
+				f"[{my_name()}] MERGE_EXECUTOR "
+				f"shutdown safely complete."
 			)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-#——————————————————————————————————————————————————————————————————
-# 🛑 Graceful Shutdown Handlers (FastAPI Lifespan & Merge Executor)
-#
-# Ensures all background merge processes and file writers are safely closed
-# and all data is flushed to disk on application shutdown.
-#
-# Responsibilities:
-#   • Registers an atexit handler to gracefully shutdown the ProcessPoolExecutor,
-#	 waiting for all merge tasks to complete.
-#   • Implements FastAPI lifespan context to close all open file writers for
-#	 each symbol, guaranteeing no snapshot data loss on exit.
-#
-# Notes:
-#   - Replaces deprecated @APP.on_event("shutdown") with modern lifespan context.
-#   - Guarantees data integrity and resource cleanup across all shutdown scenarios.
-#   - See also: RULESET.md for documentation and code conventions.
-#——————————————————————————————————————————————————————————————————
-
-import atexit
-
-def shutdown_merge_executor():
-
-	try:
-		MERGE_EXECUTOR.shutdown(wait=True)
-		logger.info(f"[main] MERGE_EXECUTOR shutdown safely complete.")
-
 	except Exception as e:
 		logger.error(
-			f"[main] MERGE_EXECUTOR shutdown failed: {e}",
+			f"[{my_name()}] MERGE_EXECUTOR "
+			f"shutdown failed: {e}",
 			exc_info=True
 		)
+	
 	try:
-		ZNR_EXECUTOR.shutdown(wait=True)
-		logger.info(f"[main] ZNR_EXECUTOR shutdown safely complete.")
-
+		if znr_executor:
+			znr_executor.shutdown(wait=True)
+			logger.info(
+				f"[{my_name()}] ZNR_EXECUTOR "
+				f"shutdown safely complete."
+			)
 	except Exception as e:
 		logger.error(
-			f"[main] ZNR_EXECUTOR shutdown failed: {e}",
+			f"[{my_name()}] ZNR_EXECUTOR "
+			f"shutdown failed: {e}",
 			exc_info=True
 		)
-
-atexit.register(shutdown_merge_executor)
+	
+	_SHUTDOWN_COMPLETE = True
 
 #——————————————————————————————————————————————————————————————————
 
@@ -478,51 +162,106 @@ from contextlib import asynccontextmanager
 
 @asynccontextmanager
 async def lifespan(APP):
-
 	try:
-
 		# Startup logic (if any) goes here
-
 		yield
 
 	except KeyboardInterrupt:
-
 		logger.info("[lifespan] Application terminated by user (Ctrl + C).")
 
 	except Exception as e:
-
 		logger.error(f"[lifespan] Unhandled exception: {e}", exc_info=True)
 
 	finally:
-
 		# Shutdown logic: close all file writers
-
+		logger.info("[lifespan] Starting graceful shutdown...")
+		
 		for symbol in SYMBOLS:
-
 			suffix_writer = SYMBOL_TO_FILE_HANDLES.get(symbol)
 			
 			if not suffix_writer:
-
 				continue  # No writer was created for this symbol
 
 			suffix, writer = suffix_writer
 
 			try:
-
 				if writer:
-
 					writer.close()
 
 				logger.info(
-					f"[shutdown] Closed file for {symbol} (suffix: {suffix})"
+					f"[lifespan] Closed file for "
+					f"{symbol.upper()} (suffix: {suffix})"
 				)
 
 			except Exception as e:
-				
 				logger.error(
-					f"[shutdown] Failed to close file for {symbol}: {e}",
+					f"[lifespan] Failed to close file "
+					f"for {symbol.upper()}: {e}",
 					exc_info=True
 				)
+		
+		logger.info("[lifespan] File handles closed successfully.")
+
+#——————————————————————————————————————————————————————————————————
+
+def graceful_shutdown():
+	"""
+	Unified graceful shutdown function.
+	This is now called by signal handlers.
+	"""
+	global _SHUTDOWN_COMPLETE
+	
+	if _SHUTDOWN_COMPLETE:
+		return  # Already shutdown
+	
+	try:
+		logger.info("[graceful_shutdown] Starting graceful shutdown...")
+		
+		# Close all file handles
+		for symbol in SYMBOLS:
+			suffix_writer = SYMBOL_TO_FILE_HANDLES.get(symbol)
+			
+			if suffix_writer:
+				suffix, writer = suffix_writer
+				
+				try:
+					if writer and not writer.closed:
+						writer.close()
+					
+					logger.info(
+						f"[graceful_shutdown] Closed file for {symbol}"
+					)
+				
+				except Exception as e:
+					logger.error(
+						f"[graceful_shutdown] "
+						f"Failed to close file for {symbol}: {e}"
+					)
+		
+		# Shutdown executors
+		if 'MERGE_EXECUTOR' in globals() and 'ZNR_EXECUTOR' in globals():
+			shutdown_merge_executor(MERGE_EXECUTOR, ZNR_EXECUTOR)
+		
+		logger.info("[graceful_shutdown] Graceful shutdown completed.")
+		
+	except Exception as e:
+		logger.error(f"[graceful_shutdown] Error during shutdown: {e}")
+
+def signal_handler(signum, frame):
+	"""
+	Handle SIGINT (Ctrl+C) and SIGTERM gracefully.
+	"""
+	logger.info(f"[signal_handler] Received signal {signum}. Initiating shutdown...")
+	
+	# Call unified graceful shutdown
+	graceful_shutdown()
+	
+	# Exit cleanly
+	sys.exit(0)
+
+#——————————————————————————————————————————————————————————————————
+# EOL: TODO
+#——————————————————————————————————————————————————————————————————
 
 #——————————————————————————————————————————————————————————————————
 # ⚙️ FastAPI Initialization & Template Binding
@@ -563,11 +302,12 @@ APP = FastAPI(lifespan=lifespan)
 
 @APP.get("/dashboard", response_class=HTMLResponse)
 async def dashboard_page(request: Request):
+
 	"""Dashboard HTML 페이지 서빙"""
 	try:
 		# HTML 파일 경로를 resource_path를 통해 가져오기
 		html_path = resource_path(
-			"stream_binance_dashboard.html",
+			"dashboard.html",
 			logger
 		)
 
@@ -963,56 +703,6 @@ async def dashboard(websocket: WebSocket):
 			await asyncio.sleep(backoff)
 
 #——————————————————————————————————————————————————————————————————
-# ⏱️ Timed Watchdog for Graceful Profiling Shutdown
-#——————————————————————————————————————————————————————————————————
-
-def graceful_shutdown():
-
-	"""
-	Graceful shutdown function for profiling mode.
-	"""
-
-	try:
-
-		# Close all file handles
-
-		for symbol in SYMBOLS:
-
-			suffix_writer = SYMBOL_TO_FILE_HANDLES.get(symbol)
-
-			if suffix_writer:
-
-				suffix, writer = suffix_writer
-
-				try:
-
-					if writer:
-						writer.close()
-
-					logger.info(
-						f"[graceful_shutdown] Closed file for {symbol}"
-					)
-
-				except Exception as e:
-
-					logger.error(
-						f"[graceful_shutdown] "
-						f"Failed to close file for {symbol}: {e}"
-					)
-		
-		shutdown_merge_executor()
-		
-		logger.info(
-			f"[graceful_shutdown] Graceful shutdown completed."
-		)
-		
-	except Exception as e:
-
-		logger.error(
-			f"[graceful_shutdown] Error during shutdown: {e}"
-		)
-
-#——————————————————————————————————————————————————————————————————
 # 🚦 Main Entrypoint & Async Task Orchestration
 #——————————————————————————————————————————————————————————————————
 
@@ -1022,20 +712,28 @@ if __name__ == "__main__":
 	from uvicorn.server import Server
 	import asyncio
 
-	# ───────────────────────────────────────────────────────────────────────────
+	#──────────────────────────────────────────────────────────────
 	# THESE TWO MUST BE WITHIN THE MAIN PROCESS
-	# ───────────────────────────────────────────────────────────────────────────
+	#──────────────────────────────────────────────────────────────
 
 	MERGE_EXECUTOR = ProcessPoolExecutor(max_workers=len(SYMBOLS))
 	ZNR_EXECUTOR   = ProcessPoolExecutor(max_workers=len(SYMBOLS))
 
-	# ───────────────────────────────────────────────────────────────────────────
+	# Register signal handlers for graceful shutdown
+	signal.signal(signal.SIGINT, signal_handler)
+	signal.signal(signal.SIGTERM, signal_handler)
+
+	#──────────────────────────────────────────────────────────────
 
 	async def main():
 
 		try:
 
-			init_runtime_state(
+			(
+				EVENT_1ST_SNAPSHOT,
+				EVENT_LATENCY_VALID,
+				EVENT_STREAM_ENABLE,
+			) = init_runtime_state(
 				LATENCY_DICT,
 				LATENCY_DEQUE_SIZE,
 				MEDIAN_LATENCY_DICT,
@@ -1050,108 +748,129 @@ if __name__ == "__main__":
 				SYMBOLS,
 				logger,
 			)
-			init_event_flags(logger)
-			assert_event_flags_init()
+
+			#——————————————————————————————————————————————————————
+			# Launch Asynchronous Coroutines
+			#——————————————————————————————————————————————————————
 
 			try:
 
 				tasks = [
 					asyncio.create_task(monitor_hardware()),
-					asyncio.create_task(estimate_latency()),
-					asyncio.create_task(gate_streaming_by_latency()),
+					asyncio.create_task(
+						estimate_latency(
+							WS_PING_INTERVAL,
+							WS_PING_TIMEOUT,
+							DEPTH_UPDATE_ID_DICT,
+							LATENCY_DICT,
+							LATENCY_SAMPLE_MIN,
+							MEDIAN_LATENCY_DICT,
+							LATENCY_THRESHOLD_MS,
+							EVENT_LATENCY_VALID,
+							BASE_BACKOFF,
+							MAX_BACKOFF,
+							RESET_CYCLE_AFTER,
+							RESET_BACKOFF_LEVEL,
+							SYMBOLS,
+							logger,
+						)
+					),
+					asyncio.create_task(
+						gate_streaming_by_latency(
+							EVENT_LATENCY_VALID,
+							EVENT_STREAM_ENABLE,
+							LATENCY_DICT,
+							LATENCY_SIGNAL_SLEEP,
+							SYMBOLS,
+							logger,
+						)
+					),
+					asyncio.create_task(
+						put_snapshot(	# @depth20@100ms
+							SNAPSHOTS_QUEUE_DICT,
+							EVENT_STREAM_ENABLE,
+							LATENCY_DICT,
+							MEDIAN_LATENCY_DICT,
+							EVENT_1ST_SNAPSHOT,
+							MAX_BACKOFF, 
+							BASE_BACKOFF,
+							RESET_CYCLE_AFTER,
+							RESET_BACKOFF_LEVEL,
+							WS_URL,
+							WS_PING_INTERVAL,
+							WS_PING_TIMEOUT,
+							SYMBOLS,
+							logger,
+						)
+					),
+					*[
+						asyncio.create_task(
+							symbol_dump_snapshot(
+								symbol,
+								SAVE_INTERVAL_MIN,
+								SNAPSHOTS_QUEUE_DICT,
+								EVENT_STREAM_ENABLE,
+								LOB_DIR,
+								SYMBOL_TO_FILE_HANDLES,
+								JSON_FLUSH_INTERVAL,
+								LATEST_JSON_FLUSH,
+								PURGE_ON_DATE_CHANGE,
+								MERGE_EXECUTOR,
+								RECORDS_MERGED_DATES,
+								ZNR_EXECUTOR,
+								RECORDS_ZNR_MINUTES,
+								RECORDS_MAX,
+								logger,
+							)
+						)
+						for symbol in SYMBOLS
+					],
 				]
 
 			except Exception as e:
 
 				logger.critical(
-					f"[main] Unhandled exception: {e}",
+					f"[{my_name()}] Failed to launch "
+					f"async coroutines: {e}",
 					exc_info=True
 				)
-				sys.exit(1)
+				raise SystemExit from e
 
-			try:
-
-				asyncio.create_task(
-					put_snapshot(	# @depth20@100ms snapshots
-						SNAPSHOTS_QUEUE_DICT,
-						EVENT_STREAM_ENABLE,
-						LATENCY_DICT,
-						MEDIAN_LATENCY_DICT,
-						EVENT_1ST_SNAPSHOT,
-						MAX_BACKOFF, 
-						BASE_BACKOFF,
-						RESET_CYCLE_AFTER,
-						RESET_BACKOFF_LEVEL,
-						WS_URL,
-						WS_PING_INTERVAL,
-						WS_PING_TIMEOUT,
-						SYMBOLS,
-						logger,
-					)
-				)
-
-				for symbol in SYMBOLS:
-
-					asyncio.create_task(
-						symbol_dump_snapshot(
-							symbol,
-							SAVE_INTERVAL_MIN,
-							SNAPSHOTS_QUEUE_DICT,
-							EVENT_STREAM_ENABLE,
-							LOB_DIR,
-							SYMBOL_TO_FILE_HANDLES,
-							JSON_FLUSH_INTERVAL,
-							LATEST_JSON_FLUSH,
-							PURGE_ON_DATE_CHANGE,
-							MERGE_EXECUTOR, RECORDS_MERGED_DATES,
-							ZNR_EXECUTOR,   RECORDS_ZNR_MINUTES,
-							RECORDS_MAX,
-							logger,
-						)
-					)
-
-			except Exception as e:
-
-				logger.error(
-					f"[main] Failed to launch symbol_dump_snapshot tasks: {e}",
-					exc_info=True
-				)
-
-				sys.exit(1)
-
+			#——————————————————————————————————————————————————————
 			# Wait for at least one valid snapshot before serving
+			#——————————————————————————————————————————————————————
 
-			try:
-
-				await EVENT_1ST_SNAPSHOT.wait()
-
+			try: await EVENT_1ST_SNAPSHOT.wait()
 			except Exception as e:
 
 				logger.error(
-					f"[main] Error while waiting for EVENT_1ST_SNAPSHOT: {e}",
+					f"[{my_name()}] Error while "
+					f"waiting for EVENT_1ST_SNAPSHOT: {e}",
 					exc_info=True
 				)
+				raise SystemExit from e
 
-				sys.exit(1)
-
+			#——————————————————————————————————————————————————————
 			# FastAPI
+			#——————————————————————————————————————————————————————
 
 			try:
 
 				logger.info(
-					f"[main] FastAPI server starts. Try:\n"
-					f"\thttp://localhost:8000/orderbook/{SYMBOLS[0]}\n"
+					f"[{my_name()}] FastAPI server starts. Try:\n"
+					f"\thttp://localhost:8000/orderbook/"
+					f"{SYMBOLS[0]}\n"
 				)
 
 				cfg = Config(
-					app			= APP,
-					host		= "0.0.0.0",
-					port		= 8000,			# todo: avoid hardcoding
-					lifespan	= "on",
-					use_colors	= True,
-					log_level	= "warning",
-					workers		= os.cpu_count(),
-					loop		= "asyncio",	# todo: `uvicorn` if Linux
+					app		   = APP,
+					host	   = "0.0.0.0",
+					port	   = 8000,	# TODO: avoid hardcoding
+					lifespan   = "on",
+					use_colors = True,
+					log_level  = "warning",
+					workers	   = os.cpu_count(),
+					loop	   = "asyncio",	# TODO: `uvicorn`
 				)
 
 				server = Server(cfg)
@@ -1160,40 +879,46 @@ if __name__ == "__main__":
 
 			except Exception as e:
 
-				logger.error(
-					f"[main] FastAPI server failed to start: {e}",
+				logger.critical(
+					f"[{my_name()}] FastAPI server "
+					f"failed to start: {e}",
 					exc_info=True
 				)
+				raise SystemExit from e
 
-				sys.exit(1)
+		#——————————————————————————————————————————————————————————
 
 		except Exception as e:
 
 			logger.critical(
-				f"[main] Unhandled exception in main(): {e}",
+				f"[{my_name()}] "
+				f"Unhandled exception: {e}",
 				exc_info=True
 			)
+			raise SystemExit from e
 
-			sys.exit(1)
+#——————————————————————————————————————————————————————————————————
 
-	try:
-
-		asyncio.run(main())
+	try: asyncio.run(main())
 
 	except KeyboardInterrupt:
 
-		logger.info("[main] Application terminated by user (Ctrl + C).")
-		
+		logger.info(
+			f"[__main__] Application terminated "
+			f"by user (Ctrl + C)."
+		)
+
 	except Exception as e:
 
-		logger.critical(f"[main] Unhandled exception: {e}", exc_info=True)
-		sys.exit(1)
+		logger.critical(
+			f"[__main__] Unhandled exception: {e}",
+			exc_info=True
+		)
+		raise SystemExit from e
 
-	finally:
-		
-		pass
+	finally: pass
 
-""" ————————————————————————————————————————————————————————————————————————————
+"""————————————————————————————————————————————————————————————————
 
 Infinite Coroutines in the Main Process:
 
@@ -1211,7 +936,7 @@ Infinite Coroutines in the Main Process:
 		async def dashboard(websocket: WebSocket)
 		async def monitor_hardware()
 
-————————————————————————————————————————————————————————————————————————————————
+———————————————————————————————————————————————————————————————————
 
 The `memray` Python module @VS Code WSL2 Terminal:
 	sudo apt update
@@ -1224,11 +949,11 @@ Run `memray` as follows:
 	memray flamegraph memleak_trace.bin -o memleak_report.html
 	memray stats memleak_trace.bin
 
-————————————————————————————————————————————————————————————————————————————————
+———————————————————————————————————————————————————————————————————
 
 Dashboard URLs:
 - http://localhost:8000/dashboard		dev pc
 - http://192.168.1.107/dashboard		server (internal access)
 - http://c01hyka.duckdns.org/dashboard	server (external access)
 
-———————————————————————————————————————————————————————————————————————————— """
+————————————————————————————————————————————————————————————————"""
