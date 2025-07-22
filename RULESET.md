@@ -27,6 +27,18 @@
 | G7   | **DO NOT DELETE** — Do not remove any comment or code block marked with this phrase unless it's demonstrably obsolete. |
 | G8   | **No Canvas (ChatGPT Only)** — Scripts, outputs, and updates must be shown in this chat session, not in canvas panels. |
 | G9   | **Strict Adherence to Rules** — All AI agents must strictly follow the rules outlined in this document when collaborating on code-related tasks. |
+| G10  | **Context Separators for Readability** — Use horizontal separators (e.g., `#———————————————————————————————————————————————————————————————————————————————`) to visually divide logical sections in code. |
+| G10a | **Separator Hierarchy** — Use nested separators with decreasing lengths to indicate sub-contexts. For example:            |
+|      | - Level 1: `#———————————————————————————————————————————————————————————————————————————————` (80 dashes)                          |
+|      | - Level 2: `#———————————————————————————————————————————————————————————————————————————` (72 dashes)                          |
+|      | - Level 3: `#———————————————————————————————————————————————————————————————————————` (64 dashes)                          |
+|      | - Level 4: `#———————————————————————————————————————————————————————————————————` (56 dashes)                          |
+|      | - Level 5: `#———————————————————————————————————————————————————————————————` (48 dashes)                          |
+| G10b | **Usage Scope** — Use separators to:                                                                                      |
+|      | - Divide major sections (e.g., functions, classes, or logical blocks).                                                    |
+|      | - Highlight nested contexts (e.g., loops, branches, or helper functions).                                                 |
+|      | - Separate inline comments or explanatory blocks from the main code.                                                     |
+| G10c | **Consistency** — Ensure separators are consistently applied across all files in the project.                             |
 
 ---
 
@@ -127,6 +139,30 @@ Think of it as a persistent onboarding layer for both your teammates and your fu
 | Emphasis         | Use `NOTE:` or `IMPORTANT:` — do not use Markdown formatting.                                                     |
 | Inline comments  | Write concise English (≤ 80 chars), tab-indented, placed above multi-line logic with a blank line before/after.   |
 | Safe edits       | You may reformat or comment, but must not alter logic or behavior.                                                |
+| Inline comments  | Write concise English (≤ 80 chars), tab-indented, placed above multi-line logic with a blank line before/after.   |
+| Context Separators | Use horizontal separators to divide logical sections. Follow the hierarchy:                                     |
+|                  | - Level 1: `#———————————————————————————————————————————————————————————————————————————————` (80 dashes)                          |
+|                  | - Level 2: `#———————————————————————————————————————————————————————————————————————————` (72 dashes)                          |
+|                  | - Level 3: `#———————————————————————————————————————————————————————————————————————` (64 dashes)                          |
+|                  | - Level 4: `#———————————————————————————————————————————————————————————————————` (56 dashes)                          |
+|                  | - Level 5: `#———————————————————————————————————————————————————————————————` (48 dashes)                          |
+|                  | **Example Usage:**                                                                                               |
+|                  | ```python                                                                                                        |
+|                  | #———————————————————————————————————————————————————————————————————————————————                              |
+|                  | # Main Function                                                                                                  |
+|                  | #———————————————————————————————————————————————————————————————————————————————                              |
+|                  | def main():                                                                                                      |
+|                  |     #———————————————————————————————————————————————————————————————————————————                          |
+|                  |     # Initialization                                                                                             |
+|                  |     #———————————————————————————————————————————————————————————————————————————                          |
+|                  |     config = load_config()                                                                                       |
+|                  |                                                                                                                  |
+|                  |     #———————————————————————————————————————————————————————————————————————                              |
+|                  |     # Processing Loop                                                                                           |
+|                  |     #———————————————————————————————————————————————————————————————————————                              |
+|                  |     for item in data:                                                                                           |
+|                  |         process(item)                                                                                           |
+|                  | ```   
 
 ---
 

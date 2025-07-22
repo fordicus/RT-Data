@@ -89,6 +89,7 @@ from core import (
 
 from dashboard import (
 	monitor_hardware,
+	create_dashboard_server,
 )
 
 import os, time, random, logging
@@ -98,8 +99,6 @@ from collections import deque
 from io import TextIOWrapper
 from collections import OrderedDict
 from concurrent.futures import ProcessPoolExecutor
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse
 
 os.environ["SSL_CERT_FILE"] = certifi.where()
 
@@ -153,285 +152,6 @@ JSON_FLUSH_INTERVAL:	dict[str, int] = {}
 # EOL: TODO
 #———————————————————————————————————————————————————————————————————————————————
 
-from contextlib import asynccontextmanager
-
-@asynccontextmanager
-async def lifespan(APP):
-	try:
-		# Startup logic (if any) goes here
-		yield
-
-	except KeyboardInterrupt:
-		logger.info(
-			f"[{my_name()}] Application terminated by user (Ctrl + C)."
-		)
-
-	except Exception as e:
-		logger.error(
-			f"[{my_name()}] Unhandled exception: {e}", exc_info=True
-		)
-
-	finally:
-
-		# Shutdown logic handled by ShutdownManager
-		# This ensures no duplicate cleanup
-
-		if 'shutdown_manager' in globals():
-			if not shutdown_manager.is_shutdown_complete():
-				logger.info(
-					f"[{my_name()}] Initiating shutdown via ShutdownManager..."
-				)
-				shutdown_manager.graceful_shutdown()
-
-		else:
-			logger.warning(
-				f"[{my_name()}] ShutdownManager not available for cleanup"
-			)
-
-APP = FastAPI(lifespan=lifespan)
-
-#———————————————————————————————————————————————————————————————————————————————
-
-@APP.get("/dashboard", response_class=HTMLResponse)
-async def dashboard_page(request: Request):
-
-	"""Dashboard HTML 페이지 서빙"""
-	try:
-		# HTML 파일 경로를 resource_path를 통해 가져오기
-		html_path = resource_path(
-			"dashboard.html",
-			logger
-		)
-
-		if not os.path.exists(html_path):
-			logger.error(f"[dashboard_page] HTML file not found: {html_path}")
-			raise HTTPException(status_code=500, detail="Dashboard HTML file missing")
-
-		# HTML 파일 읽기
-		with open(html_path, "r", encoding="utf-8") as f:
-			dashboard_html = f.read()
-
-		return HTMLResponse(content=dashboard_html)
-
-	except Exception as e:
-		logger.error(f"[dashboard_page] Failed to serve dashboard: {e}", exc_info=True)
-		raise HTTPException(status_code=500, detail="Internal server error")
-
-#———————————————————————————————————————————————————————————————————————————————
-
-from fastapi import WebSocket, WebSocketDisconnect
-
-ACTIVE_DASHBOARD_LOCK		 = asyncio.Lock()
-ACTIVE_DASHBOARD_CONNECTIONS = 0
-
-NETWORK_LOAD_MBPS:		int   = 0
-CPU_LOAD_PERCENTAGE:	float = 0.0
-MEM_LOAD_PERCENTAGE:	float = 0.0
-STORAGE_PERCENTAGE:		float = 0.0
-GC_TIME_COST_MS:		float = -0.0
-
-#———————————————————————————————————————————————————————————————————————————————
-
-@APP.websocket("/ws/dashboard")
-async def dashboard(websocket: WebSocket):
-
-	"""
-	📊 Streams dashboard monitoring data to WebSocket clients.
-
-	🛠️ Features:
-	- Logs disconnects and errors, then waits before allowing reconnection.
-	- Designed for extensibility: supports adding more metrics as needed.
-
-	📌 Notes:
-	- Handles connection limits and session timeouts gracefully.
-	- Ensures thread-safe resource management for active connections.
-	"""
-
-	global DASHBOARD_STREAM_INTERVAL, MAX_DASHBOARD_CONNECTIONS
-	global ACTIVE_DASHBOARD_CONNECTIONS, ACTIVE_DASHBOARD_LOCK
-
-	global SYMBOLS, MEDIAN_LATENCY_DICT, JSON_FLUSH_INTERVAL
-	global NETWORK_LOAD_MBPS, CPU_LOAD_PERCENTAGE
-	global MEM_LOAD_PERCENTAGE, STORAGE_PERCENTAGE
-	global GC_TIME_COST_MS
-
-	reconnect_attempt = 0  # Track consecutive accept failures for backoff
-
-	while True:
-
-		try:
-
-			# ── Limit concurrent dashboard connections
-
-			async with ACTIVE_DASHBOARD_LOCK:
-
-				if ACTIVE_DASHBOARD_CONNECTIONS >= MAX_DASHBOARD_CONNECTIONS:
-
-					await websocket.close(
-						code = 1008,
-						reason = "Too many dashboard clients connected."
-					)
-
-					logger.warning(
-						"[dashboard] "
-						"Connection refused: too many clients."
-					)
-					return
-
-				ACTIVE_DASHBOARD_CONNECTIONS += 1
-
-			try:
-
-				# Attempt to accept a new WebSocket connection
-				# from a dashboard client
-
-				await websocket.accept()
-				reconnect_attempt = 0		# Reset backoff on successful accept
-
-				# Track session start time for session timeout
-				
-				start_time_ms  = get_current_time_ms()
-				
-				max_session_ms = (
-					MAX_DASHBOARD_SESSION_SEC * 1000 if MAX_DASHBOARD_SESSION_SEC > 0
-					else None
-				)
-				
-				# Main data push loop: send metrics until client disconnects, 
-				# error, or session timeout
-
-				while True:
-
-					try:
-						# Construct the monitoring payload
-						# add more fields as needed
-
-						data = {
-							"med_latency": {
-								symbol: MEDIAN_LATENCY_DICT.get(symbol, 0)
-								for symbol in SYMBOLS
-							},
-							"flush_interval": {
-								symbol: JSON_FLUSH_INTERVAL.get(symbol, 0)
-								for symbol in SYMBOLS
-							},
-							"queue_size": {
-								symbol: SNAPSHOTS_QUEUE_DICT[symbol].qsize()
-								for symbol in SYMBOLS
-							},
-							"queue_size_total": sum(
-								SNAPSHOTS_QUEUE_DICT[symbol].qsize()
-								for symbol in SYMBOLS
-							),
-							"hardware": {
-								"network_mbps":	   round(NETWORK_LOAD_MBPS, 2),
-								"cpu_percent":	   CPU_LOAD_PERCENTAGE,
-								"memory_percent":  MEM_LOAD_PERCENTAGE,
-								"storage_percent": STORAGE_PERCENTAGE
-							},
-							"gc_time_cost_ms": GC_TIME_COST_MS,
-							"last_updated": ms_to_datetime(
-								get_current_time_ms()
-							).isoformat()
-						}
-
-						# Send the JSON payload to the connected client
-
-						await websocket.send_json(data)
-
-						# Check session duration only if MAX_DASHBOARD_SESSION_SEC > 0
-						
-						if max_session_ms is not None:
-							
-							current_time_ms = get_current_time_ms()
-							
-							if current_time_ms - start_time_ms > max_session_ms:
-								
-								await websocket.close(
-									code=1000,
-									reason="Session time limit reached."
-								)
-								
-								break
-
-						# Wait for the configured interval before sending the next update
-
-						await asyncio.sleep(DASHBOARD_STREAM_INTERVAL)
-
-					except WebSocketDisconnect:
-
-						# Client closed the connection (normal case)
-
-						logger.info(
-							f"[dashboard] "
-							f"WebSocket client disconnected."
-						)
-						break
-
-					except asyncio.CancelledError:
-
-						# Task was cancelled (e.g., server shutdown)
-
-						logger.info(
-							f"[dashboard] "
-							f"WebSocket handler task cancelled."
-						)
-						break
-
-					except Exception as e:
-
-						# Log unexpected errors, then break to allow reconnection
-
-						logger.warning(
-							f"[dashboard] WebSocket error: {e}",
-							exc_info=True
-						)
-						break
-
-				# Exit inner loop: client disconnected, error, or session timeout
-				# Outer loop allows for reconnection attempts if desired
-
-				break	# Remove this break to allow
-						# the same client to reconnect in-place
-
-			finally:
-
-				# ── Decrement connection count on disconnect or error
-
-				async with ACTIVE_DASHBOARD_LOCK:
-					ACTIVE_DASHBOARD_CONNECTIONS -= 1
-
-		except Exception as e:
-
-			# Accept failed (e.g., handshake error, resource exhaustion)
-
-			reconnect_attempt += 1
-			logger.warning(
-				f"[dashboard] "
-				f"Accept failed (attempt {reconnect_attempt}): {e}",
-				exc_info=True
-			)
-
-			# Exponential backoff with jitter to avoid tight reconnect loops
-
-			backoff = min(
-				MAX_BACKOFF, BASE_BACKOFF * (2 ** reconnect_attempt)
-			) + random.uniform(0, 1)
-
-			if reconnect_attempt > RESET_CYCLE_AFTER:
-				reconnect_attempt = RESET_BACKOFF_LEVEL
-
-			logger.info(
-				f"[dashboard] "
-				f"Retrying accept in {backoff:.1f} seconds..."
-			)
-
-			await asyncio.sleep(backoff)
-
-#———————————————————————————————————————————————————————————————————————————————
-# 🚦 Main Entrypoint & Async Task Orchestration
-#———————————————————————————————————————————————————————————————————————————————
-
 if __name__ == "__main__":
 
 	from uvicorn.config import Config
@@ -463,6 +183,8 @@ if __name__ == "__main__":
 
 		try:
 
+			#———————————————————————————————————————————————————————————————————
+
 			(
 				EVENT_1ST_SNAPSHOT,
 				EVENT_LATENCY_VALID,
@@ -486,6 +208,34 @@ if __name__ == "__main__":
 			shutdown_manager.register_file_handles(
 				SYMBOL_TO_FILE_HANDLES
 			)
+
+			#———————————————————————————————————————————————————————————————————
+			# 대시보드 서버 설정
+			#———————————————————————————————————————————————————————————————————
+			
+			dashboard_config = {
+				'DASHBOARD_STREAM_INTERVAL': DASHBOARD_STREAM_INTERVAL,
+				'MAX_DASHBOARD_CONNECTIONS': MAX_DASHBOARD_CONNECTIONS,
+				'MAX_DASHBOARD_SESSION_SEC': MAX_DASHBOARD_SESSION_SEC,
+				'BASE_BACKOFF': BASE_BACKOFF,
+				'MAX_BACKOFF': MAX_BACKOFF,
+				'RESET_CYCLE_AFTER': RESET_CYCLE_AFTER,
+				'RESET_BACKOFF_LEVEL': RESET_BACKOFF_LEVEL,
+			}
+			
+			dashboard_state = {
+				'SYMBOLS': SYMBOLS,
+				'SNAPSHOTS_QUEUE_DICT': SNAPSHOTS_QUEUE_DICT,
+				'MEDIAN_LATENCY_DICT': MEDIAN_LATENCY_DICT,
+				'JSON_FLUSH_INTERVAL': JSON_FLUSH_INTERVAL,
+			}
+			
+			dashboard_server = create_dashboard_server(
+				state_refs=dashboard_state,
+				config=dashboard_config,
+				shutdown_manager=shutdown_manager,
+				logger=logger
+			)
 			
 			#———————————————————————————————————————————————————————————————————
 			# Launch Asynchronous Coroutines
@@ -496,10 +246,7 @@ if __name__ == "__main__":
 				tasks = [
 					asyncio.create_task(
 						monitor_hardware(
-							NETWORK_LOAD_MBPS,
-							CPU_LOAD_PERCENTAGE,
-							MEM_LOAD_PERCENTAGE,
-							STORAGE_PERCENTAGE,
+							dashboard_server,
 							HARDWARE_MONITORING_INTERVAL,
 							CPU_PERCENT_DURATION,
 							DESIRED_MAX_SYS_MEM_LOAD,
@@ -607,23 +354,21 @@ if __name__ == "__main__":
 
 				logger.info(
 					f"[{my_name()}] FastAPI server starts. Try:\n"
-					f"\thttp://localhost:8000/orderbook/"
-					f"{SYMBOLS[0]}\n"
+					f"\thttp://localhost:8000/dashboard\n"
 				)
 
 				cfg = Config(
-					app		   = APP,
-					host	   = "0.0.0.0",
-					port	   = 8000,	# TODO: avoid hardcoding
-					lifespan   = "on",
-					use_colors = True,
-					log_level  = "warning",
-					workers	   = os.cpu_count(),
-					loop	   = "asyncio",	# TODO: `uvicorn`
+					app=dashboard_server.app,  # 변경: APP → dashboard_server.app
+					host="0.0.0.0",
+					port=8000,
+					lifespan="on",
+					use_colors=True,
+					log_level="warning",
+					workers=os.cpu_count(),
+					loop="asyncio",
 				)
 
 				server = Server(cfg)
-
 				await server.serve()
 
 			except Exception as e:
