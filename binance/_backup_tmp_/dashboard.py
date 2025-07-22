@@ -61,11 +61,11 @@ class DashboardServer:
 		# Hardware Monitoring Variables (Class-Level)
 		#———————————————————————————————————————————————————————————————————————
 		
-		self.network_load_mbps: float = 0.0
+		self.network_load_mbps:	  float = 0.0
 		self.cpu_load_percentage: float = 0.0
 		self.mem_load_percentage: float = 0.0
-		self.storage_percentage: float = 0.0
-		self.gc_time_cost_ms: float = -0.0
+		self.storage_percentage:  float = 0.0
+		self.gc_time_cost_ms:	  float = -0.0
 		
 		#———————————————————————————————————————————————————————————————————————
 		# FastAPI App Creation
@@ -83,21 +83,32 @@ class DashboardServer:
 		
 		@asynccontextmanager
 		async def lifespan(app):
+
 			try:
+
 				yield
+
 			except KeyboardInterrupt:
+
 				self.logger.info(
-					f"[{my_name()}] Application terminated by user (Ctrl + C)."
+					f"[{my_name()}] "
+					f"Application terminated by user (Ctrl + C)."
 				)
+
 			except Exception as e:
+
 				self.logger.error(
-					f"[{my_name()}] Unhandled exception: {e}", exc_info=True
+					f"[{my_name()}] Unhandled exception: {e}",
+					exc_info=True
 				)
+
 			finally:
+
 				if (
 					self.shutdown_manager
 					and not self.shutdown_manager.is_shutdown_complete()
 				):
+
 					self.logger.info(
 						f"[{my_name()}] "
 						f"Initiating shutdown via ShutdownManager..."
@@ -110,8 +121,17 @@ class DashboardServer:
 		
 		# Register routes
 
-		app.get("/dashboard", response_class=HTMLResponse)(self._dashboard_page)
-		app.websocket("/ws/dashboard")(self._dashboard_websocket)
+		app.get(
+			"/dashboard",
+			response_class=HTMLResponse
+		)(
+			self._dashboard_page
+		)
+		app.websocket(
+			"/ws/dashboard"
+		)(
+			self._dashboard_websocket
+		)
 		
 		return app
 
@@ -119,15 +139,23 @@ class DashboardServer:
 	# Dashboard Page Handler
 	#———————————————————————————————————————————————————————————————————————————
 	
+	def _read_html_file(self, html_path: str) -> str:
+
+		"""Synchronous file reading helper for async delegation."""
+
+		with open(html_path, "r", encoding="utf-8") as f:
+
+			return f.read()
+	
 	async def _dashboard_page(self, request: Request):
 
-		"""Serve the dashboard HTML page."""
+		"""Serve the dashboard HTML page with async file I/O."""
 
 		try:
 
 			html_path = resource_path("dashboard.html", self.logger)
 			
-			if not os.path.exists(html_path):
+			if not await asyncio.to_thread(os.path.exists, html_path):
 
 				self.logger.error(
 					f"[{my_name()}] HTML file not found: {html_path}"
@@ -137,9 +165,11 @@ class DashboardServer:
 					detail="Dashboard HTML file missing"
 				)
 			
-			with open(html_path, "r", encoding="utf-8") as f:
+			# Use async file reading to yield control
 
-				dashboard_html = f.read()
+			dashboard_html = await asyncio.to_thread(
+				self._read_html_file, html_path
+			)
 			
 			return HTMLResponse(content=dashboard_html)
 			
@@ -155,10 +185,71 @@ class DashboardServer:
 			)
 
 	#———————————————————————————————————————————————————————————————————————————
+	# Monitoring Data Builder
+	#———————————————————————————————————————————————————————————————————————————
+
+	async def _build_monitoring_data(self) -> dict:
+
+		"""
+		Build monitoring data with async yield points for better GIL sharing.
+		"""
+		
+		# Build median latency data with yield point
+
+		med_latency = {}
+
+		for symbol in self.state['SYMBOLS']:
+
+			med_latency[symbol] = self.state[
+				'MEDIAN_LATENCY_DICT'
+			].get(symbol, 0)
+			await asyncio.sleep(0)
+		
+		# Build flush interval data with yield point
+
+		flush_interval = {}
+		for symbol in self.state['SYMBOLS']:
+			flush_interval[symbol] = self.state[
+				'JSON_FLUSH_INTERVAL'
+			].get(symbol, 0)
+			await asyncio.sleep(0)
+		
+		# Build queue size data with yield point
+
+		queue_size = {}
+		queue_size_total = 0
+
+		for symbol in self.state['SYMBOLS']:
+			size = self.state['SNAPSHOTS_QUEUE_DICT'][symbol].qsize()
+			queue_size[symbol] = size
+			queue_size_total += size
+			await asyncio.sleep(0)
+		
+		return {
+			"med_latency":		med_latency,
+			"flush_interval":	flush_interval,
+			"queue_size":		queue_size,
+			"queue_size_total": queue_size_total,
+			"hardware": {
+				"network_mbps":	   round(self.network_load_mbps, 2),
+				"cpu_percent":	   self.cpu_load_percentage,
+				"memory_percent":  self.mem_load_percentage,
+				"storage_percent": self.storage_percentage
+			},
+			"gc_time_cost_ms": self.gc_time_cost_ms,
+			"last_updated":	   ms_to_datetime(
+				get_current_time_ms()
+			).isoformat()
+		}
+
+	#———————————————————————————————————————————————————————————————————————————
 	# WebSocket Handler
 	#———————————————————————————————————————————————————————————————————————————
 	
-	async def _dashboard_websocket(self, websocket: WebSocket):
+	async def _dashboard_websocket(
+		self, websocket: WebSocket
+	):
+
 		"""
 		Dashboard WebSocket handler.
 		"""
@@ -166,18 +257,23 @@ class DashboardServer:
 		reconnect_attempt = 0
 		
 		while True:
+
 			try:
+
 				# Limit connections (atomic operation without locks)
+
 				if (
 					self.active_connections 
 					>= self.config['MAX_DASHBOARD_CONNECTIONS']
 				):
+
 					await websocket.close(
 						code=1008,
 						reason="Too many dashboard clients connected."
 					)
 					self.logger.warning(
-						f"[{my_name()}] Connection refused: too many clients."
+						f"[{my_name()}] "
+						f"Connection refused: too many clients."
 					)
 					return
 				
@@ -188,6 +284,7 @@ class DashboardServer:
 					reconnect_attempt = 0
 					
 					# Track session time
+
 					start_time_ms = get_current_time_ms()
 					max_session_ms = (
 						self.config['MAX_DASHBOARD_SESSION_SEC'] * 1000 
@@ -201,52 +298,9 @@ class DashboardServer:
 
 						try:
 
-							# Construct monitoring data (using class variables)
+							# Build monitoring data with async yield points
 
-							data = {
-								"med_latency": {
-									symbol: self.state[
-										'MEDIAN_LATENCY_DICT'
-									].get(symbol, 0)
-									for symbol in self.state['SYMBOLS']
-								},
-								"flush_interval": {
-									symbol: self.state[
-										'JSON_FLUSH_INTERVAL'
-									].get(symbol, 0)
-									for symbol in self.state['SYMBOLS']
-								},
-								"queue_size": {
-									symbol: self.state[
-										'SNAPSHOTS_QUEUE_DICT'
-									][symbol].qsize()
-									for symbol in self.state['SYMBOLS']
-								},
-								"queue_size_total": sum(
-									self.state[
-										'SNAPSHOTS_QUEUE_DICT'
-									][symbol].qsize()
-									for symbol in self.state['SYMBOLS']
-								),
-								"hardware": {
-									"network_mbps":	   (
-										round(self.network_load_mbps, 2)
-									),
-									"cpu_percent":	   (
-										self.cpu_load_percentage
-									),
-									"memory_percent":  (
-										self.mem_load_percentage
-									),
-									"storage_percent": (
-										self.storage_percentage
-									)
-								},
-								"gc_time_cost_ms": self.gc_time_cost_ms,
-								"last_updated": ms_to_datetime(
-									get_current_time_ms()
-								).isoformat()
-							}
+							data = await self._build_monitoring_data()
 							
 							await websocket.send_json(data)
 							
@@ -266,7 +320,7 @@ class DashboardServer:
 										reason="Session time limit reached."
 									)
 									break
-
+							
 							await asyncio.sleep(
 								self.config['DASHBOARD_STREAM_INTERVAL']
 							)
@@ -291,7 +345,8 @@ class DashboardServer:
 
 							self.logger.warning(
 								f"[{my_name()}] "
-								f"WebSocket error: {e}", exc_info=True
+								f"WebSocket error: {e}",
+								exc_info=True
 							)
 							break
 					
@@ -302,7 +357,9 @@ class DashboardServer:
 					self.active_connections -= 1  # Atomic operation
 					
 			except Exception as e:
+
 				reconnect_attempt += 1
+
 				self.logger.warning(
 					f"[{my_name()}] Accept failed "
 					f"(attempt {reconnect_attempt}): {e}",
@@ -310,16 +367,21 @@ class DashboardServer:
 				)
 				
 				# Exponential backoff
+
 				backoff = min(
 					self.config['MAX_BACKOFF'], 
 					self.config['BASE_BACKOFF'] * (2 ** reconnect_attempt)
 				) + random.uniform(0, 1)
 				
-				if reconnect_attempt > self.config['RESET_CYCLE_AFTER']:
+				if (
+					reconnect_attempt
+					> self.config['RESET_CYCLE_AFTER']
+				):
 					reconnect_attempt = self.config['RESET_BACKOFF_LEVEL']
 				
 				self.logger.info(
-					f"[{my_name()}] Retrying accept in {backoff:.1f} seconds..."
+					f"[{my_name()}] "
+					f"Retrying accept in {backoff:.1f} seconds..."
 				)
 				await asyncio.sleep(backoff)
 
@@ -328,10 +390,10 @@ class DashboardServer:
 #———————————————————————————————————————————————————————————————————————————————
 
 async def monitor_hardware(
-	dashboard_server: DashboardServer,  # Pass DashboardServer instance
+	dashboard_server: DashboardServer,		# Pass DashboardServer instance
 	hardware_monitoring_interval: float,
-	cpu_percent_duration: float,
-	desired_max_sys_mem_load: float,
+	cpu_percent_duration:		  float,
+	desired_max_sys_mem_load:	  float,
 	logger: logging.Logger,
 ):
 
@@ -400,28 +462,44 @@ async def monitor_hardware(
 	prev_recv = prev_counters.bytes_recv
 	prev_time = time.time()
 
-	logger.info(f"[{my_name()}] Hardware monitoring started.")
+	logger.info(
+		f"[{my_name()}] Hardware monitoring started."
+	)
 
 	while True:
+
 		try:
 			wt_start = time.time()
 
-			# Update class variables directly
+			# Batch async operations with yield points between each
+
 			dashboard_server.cpu_load_percentage = await get_cpu_load()
+			await asyncio.sleep(0)
+			
 			dashboard_server.mem_load_percentage = await get_memory_load()
+			await asyncio.sleep(0)
+			
 			dashboard_server.storage_percentage = await get_storage_load()
+			await asyncio.sleep(0)
+			
 			(
 				dashboard_server.network_load_mbps,
 				prev_sent, prev_recv, prev_time,
-			) = await get_network_load(prev_sent, prev_recv, prev_time)
-
+			) = await get_network_load(
+				prev_sent, prev_recv, prev_time
+			)
+			await asyncio.sleep(0)
+			
 		except Exception as e:
+
 			logger.error(
 				f"[{my_name()}] Error monitoring hardware: {e}",
 				exc_info=True,
 			)
+			await asyncio.sleep(0)
 
 		finally:
+
 			sleep_duration = max(
 				0.0,
 				(
@@ -439,6 +517,7 @@ def create_dashboard_server(
 	shutdown_manager, 
 	logger: logging.Logger
 ) -> DashboardServer:
+
 	"""
 	Factory function for creating a dashboard server instance.
 	
@@ -451,6 +530,12 @@ def create_dashboard_server(
 	Returns:
 		DashboardServer: Configured dashboard server instance.
 	"""
-	return DashboardServer(state_refs, config, shutdown_manager, logger)
+
+	return DashboardServer(
+		state_refs,
+		config,
+		shutdown_manager,
+		logger,
+	)
 
 #———————————————————————————————————————————————————————————————————————————————
