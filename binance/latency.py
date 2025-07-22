@@ -9,6 +9,7 @@ from collections import deque
 from typing import Optional
 from util import (
 	my_name,
+	NanoTimer,
 	get_current_time_ms,
 	format_ws_url,
 )
@@ -154,6 +155,28 @@ async def estimate_latency(
 
 					try:
 
+						#———————————————————————————————————————————————————————
+						# LATENCY MEASUREMENT ACCURACY & SYSTEM REQUIREMENTS
+						#———————————————————————————————————————————————————————
+						# From
+						# 	`message = json.loads(raw_msg)`
+						# to
+						#	median_latency_dict[symbol] = int(
+						#		statistics.median(
+						#			latency_dict[symbol]
+						#		)
+						#	),
+						# execution time is sub-millisec. even on basic Python
+						# interpreter without optimization. This ensures
+						# accurate network latency measurement with negligible
+						# computational delay.
+						#———————————————————————————————————————————————————————
+						# Time Synchronization: Client system uses Chrony with
+						# trusted local time servers. Since latency measurement
+						# relies on `get_current_time_ms(): time.time_ns()`,
+						# accurate system clock synchronization is essential.
+						#———————————————————————————————————————————————————————
+
 						message = json.loads(raw_msg)
 						data = message.get("data", {})
 						server_time_ms = data.get("E")
@@ -176,6 +199,8 @@ async def estimate_latency(
 							 depth_update_id_dict.get(symbol, 0))
 						): continue  # duplicate or out-of-order
 
+						#———————————————————————————————————————————————————————
+
 						depth_update_id_dict[symbol] = update_id
 
 						latency_ms = (
@@ -195,6 +220,8 @@ async def estimate_latency(
 								)
 							)
 
+							#———————————————————————————————————————————————————
+
 							if all(
 								(	
 									(
@@ -213,6 +240,7 @@ async def estimate_latency(
 								if not event_latency_valid.is_set():
 
 									event_latency_valid.set()
+
 									logger.info(
 										f"[{my_name()}] "
 										f"Latency OK — "
@@ -223,6 +251,8 @@ async def estimate_latency(
 							else:
 
 								event_latency_valid.clear()
+
+							#———————————————————————————————————————————————————
 
 					except Exception as e:
 

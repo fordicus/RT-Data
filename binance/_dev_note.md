@@ -1,22 +1,15 @@
 ### TODO
 
-1. **TODO-HOTFIX**
+1. **TODO**
 
-	*	latency measurement:
-		*	Line-873 of `core.py`: computation time
-		*	Line-96 of `latency.py`: `estimate_latency()` in process pool
-			*	mean & variance from a deque as scalars in `multiprocessing`
-
-2. **EXTERNAL DASHBOARD SERVICE**
-
-   * duckdns는 신뢰할 수 없음
-   * UptimeRobot이 대시보드 포트를 모니터링하도록 설정
-   * 모니터링 지표 중 문제 발생 시 텔레그렘 메시지 전송
-
-3. **홈서버 관리 가이드 통합 (RT-Data 저장소)**
-
-- dashboard_page() 함수 디플로이 관련 세팅 문서에 통합
-	- 홈서버 관리 가이드 문서를 RT-Data Git 저장소에 통합 및 정리
+	*	orjson
+	*	uvloop 
+	*	무엇을 모니터링 할 것인가 결정
+	*	모니터링 지표 중 문제 발생 시 텔레그렘 메시지 전송, e.g.,
+		*	`comp_delay_ms` in `put_snapshot`
+		*	`median_latency_dict` in `estimate_latency`
+	*	duckdns는 신뢰할 수 없음
+	*	UptimeRobot이 대시보드 포트를 모니터링하도록 설정
 
 ---
 <br></br>
@@ -28,10 +21,7 @@
 | 구간                                             | 현재 동작                                   | 병목 원인                                       | 개선안                                                                                                           |
 | ---------------------------------------------- | --------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
 | **① JSON 직렬화**                                 | `json.dumps(..., separators=(",",":"))` | 순수 Python 구현 + GIL                          | **`orjson.dumps` 또는 `msgspec.json.encode`** 사용 (둘 다 Rust 백엔드) → 5-15× 빠름, GC 압력 감소 ([GitHub][1], [GitHub][2]) |
-| **② 매 스냅샷마다 `flush()`**                        | OS 버퍼를 강제로 비워 디스크 syscall 호출            | SSD라도 수천 OPS로 제한                            | **Flush 주기를 타임/건수로 완화**   `if queue.qsize() % 100 == 0: json_writer.flush()`                                  |
-| **③ 즉시 압축(zip\_and\_remove)**                  | 현재 루프 스레드에서 ZIP 수행                      | CPU 집약 + 디스크 I/O 중첩                         | **`loop.run_in_executor()`** 로 백그라운드에 오프로드 (ThreadPool 1-2개면 충분)                                              |
 | **④ 매번 `os.makedirs(tmp_dir, exist_ok=True)`** | 이미 존재하는 폴더에도 시스템콜                       | 불필요 syscall                                 | 전 회차 `current_dir` 캐싱 후 바뀔 때만 생성                                                                              |
-| **⑤ 과도한 `del` 호출**                             | “GC 빨리 돌리자” 의도                          | CPython 참조 카운트는 블록 끝에서 이미 0; `del` 자체도 오버헤드 | 읽기성 + 속도 모두 ↓ → **대부분 제거**                                                                                    |
 
 ---
 
@@ -86,30 +76,14 @@ async def symbol_dump_snapshot(symbol: str) -> None:
 2. **Buffered writer 직접 지정**
    `open(file_path, "ab", buffering=1024*1024)` (바이너리 + 1 MiB 버퍼) 후 `orjson.dumps` 결과를 그대로 `.write()`
    → 텍스트 모드보다 변환 단계 하나 줄어듭니다.
-3. **압축 형식 변경**: 하루치 파일을 **zstd(‐T0)** 로 압축하면 CPU 사용량은 비슷하거나 적고, 속도는 2-4×.
-   `python-zstandard` 가 GIL 해제를 지원해 백그라운드 스레드 효율이 좋습니다.
-4. **msgspec.Struct** 를 정의해 스냅샷의 스키마가 고정돼 있다면
+3. **msgspec.Struct** 를 정의해 스냅샷의 스키마가 고정돼 있다면
    `encode(snapshot_struct)` 가 단순 dict보다 추가 20-30 % 가속을 보여줍니다 ([jcristharif.com][3]).
-5. **멀티-프로세스?**
-   디스크 쓰기 자체가 병목이라면 공정하게 분산 가능. 하지만 파일-핸들 회전 로직이 복잡해져 ROI가 떨어집니다.
-
----
-
-## 4. “완전히 다른 언어”가 필요한 경우
-
-* **초당 수만 스냅샷** 이상 → Python I/O 스레드도 버거우면
-
-  * **Rust** 로 writer 스레드를 작성하고 `PyO3` 로 노출 (orjson이 이미 이런 방식).
-  * **Go**: 고루틴 + 채널로 디스크 라이터 분리.
-  * **Cython**: 큰 효과는 `zip_and_remove` 같은 CPU-핫스팟에 한정.
-* 하지만 **I/O 제한(SSD 쓰기, 압축)** 이 병목이면 언어 바꿔도 큰 이득은 없습니다. 먼저 위 Python 튜닝으로 실제 디바이스 한계까지 끌어올려 보시는 걸 권장합니다.
 
 ---
 
 ### TL;DR
 
 * `orjson`/`msgspec` 로 직렬화 교체 + flush 주기 완화 + ZIP 백그라운드화 ⇒ **대부분의 실전 환경에서 5-10× TPS 상승**
-* 나머지는 “디스크 자체가 감당 못 할 때” 고민해도 늦지 않아요.
 
 [1]: https://github.com/ijl/orjson?utm_source=chatgpt.com "ijl/orjson: Fast, correct Python JSON library supporting ... - GitHub"
 [2]: https://github.com/jcrist/msgspec?utm_source=chatgpt.com "jcrist/msgspec: A fast serialization and validation library, with builtin ..."

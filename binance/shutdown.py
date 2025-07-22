@@ -55,9 +55,9 @@ class ShutdownManager:
 		self.logger = logger
 		self._shutdown_complete = False
 		self._lock = threading.Lock()
-		self._executors: Dict[str, ProcessPoolExecutor] = {}
+		self._executors:	Dict[str, ProcessPoolExecutor] = {}
 		self._file_handles: Dict[str, Tuple[str, TextIOWrapper]] = {}
-		self._symbols: list = []
+		self._symbols:		list = []
 		self._custom_cleanup_callbacks: list = []
 	
 	#———————————————————————————————————————————————————————————————————————————
@@ -66,6 +66,7 @@ class ShutdownManager:
 		self, 
 		**executors: ProcessPoolExecutor
 	) -> None:
+
 		"""
 		Register executors for shutdown management.
 		
@@ -74,6 +75,7 @@ class ShutdownManager:
 		"""
 		
 		with self._lock:
+
 			self._executors.update(executors)
 	
 	#———————————————————————————————————————————————————————————————————————————
@@ -82,6 +84,7 @@ class ShutdownManager:
 		self, 
 		file_handles: Dict[str, Tuple[str, TextIOWrapper]]
 	) -> None:
+
 		"""
 		Register file handles for cleanup.
 		
@@ -90,11 +93,13 @@ class ShutdownManager:
 		"""
 		
 		with self._lock:
+
 			self._file_handles = file_handles
 	
 	#———————————————————————————————————————————————————————————————————————————
 	
 	def register_symbols(self, symbols: list) -> None:
+
 		"""
 		Register symbols list for file cleanup.
 		
@@ -103,6 +108,7 @@ class ShutdownManager:
 		"""
 		
 		with self._lock:
+
 			self._symbols = symbols.copy()
 	
 	#———————————————————————————————————————————————————————————————————————————
@@ -111,6 +117,7 @@ class ShutdownManager:
 		self, 
 		callback: Callable[[], None]
 	) -> None:
+
 		"""
 		Add custom cleanup callback to be executed during shutdown.
 		
@@ -119,21 +126,25 @@ class ShutdownManager:
 		"""
 		
 		with self._lock:
+
 			self._custom_cleanup_callbacks.append(callback)
 	
 	#———————————————————————————————————————————————————————————————————————————
 	
 	def is_shutdown_complete(self) -> bool:
+
 		"""
 		Check if shutdown has been completed.
 		"""
 		
 		with self._lock:
+
 			return self._shutdown_complete
 	
 	#———————————————————————————————————————————————————————————————————————————
 	
 	def shutdown_executors(self) -> None:
+
 		"""
 		Gracefully shutdown all registered executors with individual 
 		logging. Thread-safe and prevents duplicate shutdown attempts.
@@ -142,6 +153,7 @@ class ShutdownManager:
 		# Get executors copy with lock, then release lock before shutdown
 		
 		with self._lock:
+
 			executors_copy = dict(self._executors)
 		
 		for name, executor in executors_copy.items():
@@ -173,6 +185,7 @@ class ShutdownManager:
 	#———————————————————————————————————————————————————————————————————————————
 	
 	def close_file_handles(self) -> None:
+		
 		"""
 		Close all registered file handles safely.
 		"""
@@ -180,6 +193,7 @@ class ShutdownManager:
 		# Get data copies with lock, then release lock before file operations
 		
 		with self._lock:
+
 			symbols_copy = list(self._symbols)
 			file_handles_copy = dict(self._file_handles)
 		
@@ -210,6 +224,7 @@ class ShutdownManager:
 	#———————————————————————————————————————————————————————————————————————————
 	
 	def run_custom_cleanup(self) -> None:
+
 		"""
 		Execute all registered custom cleanup callbacks.
 		"""
@@ -230,6 +245,7 @@ class ShutdownManager:
 	#———————————————————————————————————————————————————————————————————————————
 	
 	def graceful_shutdown(self) -> None:
+
 		"""
 		Perform complete graceful shutdown sequence.
 		Thread-safe and idempotent.
@@ -260,6 +276,7 @@ class ShutdownManager:
 			# 4. Mark shutdown as complete (with lock)
 			
 			with self._lock:
+
 				self._shutdown_complete = True
 			
 			self.logger.info(
@@ -280,6 +297,7 @@ class ShutdownManager:
 	#———————————————————————————————————————————————————————————————————————————
 	
 	def signal_handler(self, signum: int, frame) -> None:
+
 		"""
 		Signal handler for SIGINT/SIGTERM.
 		
@@ -294,14 +312,17 @@ class ShutdownManager:
 		)
 		
 		# Perform graceful shutdown
+
 		self.graceful_shutdown()
 		
 		# Exit cleanly
+
 		sys.exit(0)
 	
 	#———————————————————————————————————————————————————————————————————————————
 	
 	def register_signal_handlers(self) -> None:
+
 		"""
 		Register signal handlers for graceful shutdown.
 		"""
@@ -317,6 +338,7 @@ class ShutdownManager:
 #———————————————————————————————————————————————————————————————————————————————
 
 def create_shutdown_manager(logger: logging.Logger) -> ShutdownManager:
+	
 	"""
 	Create and return a new ShutdownManager instance.
 	
