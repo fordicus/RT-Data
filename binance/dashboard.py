@@ -119,15 +119,20 @@ class DashboardServer:
 	# Dashboard Page Handler
 	#———————————————————————————————————————————————————————————————————————————
 	
+	def _read_html_file(self, html_path: str) -> str:
+		"""Synchronous file reading helper for async delegation."""
+		with open(html_path, "r", encoding="utf-8") as f:
+			return f.read()
+	
 	async def _dashboard_page(self, request: Request):
 
-		"""Serve the dashboard HTML page."""
+		"""Serve the dashboard HTML page with async file I/O."""
 
 		try:
 
 			html_path = resource_path("dashboard.html", self.logger)
 			
-			if not os.path.exists(html_path):
+			if not await asyncio.to_thread(os.path.exists, html_path):
 
 				self.logger.error(
 					f"[{my_name()}] HTML file not found: {html_path}"
@@ -137,9 +142,10 @@ class DashboardServer:
 					detail="Dashboard HTML file missing"
 				)
 			
-			with open(html_path, "r", encoding="utf-8") as f:
-
-				dashboard_html = f.read()
+			# Use async file reading to yield control
+			dashboard_html = await asyncio.to_thread(
+				self._read_html_file, html_path
+			)
 			
 			return HTMLResponse(content=dashboard_html)
 			
@@ -153,6 +159,57 @@ class DashboardServer:
 				status_code=500,
 				detail="Internal server error"
 			)
+
+	#———————————————————————————————————————————————————————————————————————————
+	# Monitoring Data Builder
+	#———————————————————————————————————————————————————————————————————————————
+
+	async def _build_monitoring_data(self) -> dict:
+		"""
+		Build monitoring data with async yield points for better GIL sharing.
+		"""
+		
+		# Build median latency data with yield point
+		med_latency = {}
+		for symbol in self.state['SYMBOLS']:
+			med_latency[symbol] = self.state[
+				'MEDIAN_LATENCY_DICT'
+			].get(symbol, 0)
+			await asyncio.sleep(0)  # Yield control to other coroutines
+		
+		# Build flush interval data with yield point
+		flush_interval = {}
+		for symbol in self.state['SYMBOLS']:
+			flush_interval[symbol] = self.state[
+				'JSON_FLUSH_INTERVAL'
+			].get(symbol, 0)
+			await asyncio.sleep(0)  # Yield control to other coroutines
+		
+		# Build queue size data with yield point
+		queue_size = {}
+		queue_size_total = 0
+		for symbol in self.state['SYMBOLS']:
+			size = self.state['SNAPSHOTS_QUEUE_DICT'][symbol].qsize()
+			queue_size[symbol] = size
+			queue_size_total += size
+			await asyncio.sleep(0)  # Yield control to other coroutines
+		
+		return {
+			"med_latency": med_latency,
+			"flush_interval": flush_interval,
+			"queue_size": queue_size,
+			"queue_size_total": queue_size_total,
+			"hardware": {
+				"network_mbps": round(self.network_load_mbps, 2),
+				"cpu_percent": self.cpu_load_percentage,
+				"memory_percent": self.mem_load_percentage,
+				"storage_percent": self.storage_percentage
+			},
+			"gc_time_cost_ms": self.gc_time_cost_ms,
+			"last_updated": ms_to_datetime(
+				get_current_time_ms()
+			).isoformat()
+		}
 
 	#———————————————————————————————————————————————————————————————————————————
 	# WebSocket Handler
@@ -201,52 +258,8 @@ class DashboardServer:
 
 						try:
 
-							# Construct monitoring data (using class variables)
-
-							data = {
-								"med_latency": {
-									symbol: self.state[
-										'MEDIAN_LATENCY_DICT'
-									].get(symbol, 0)
-									for symbol in self.state['SYMBOLS']
-								},
-								"flush_interval": {
-									symbol: self.state[
-										'JSON_FLUSH_INTERVAL'
-									].get(symbol, 0)
-									for symbol in self.state['SYMBOLS']
-								},
-								"queue_size": {
-									symbol: self.state[
-										'SNAPSHOTS_QUEUE_DICT'
-									][symbol].qsize()
-									for symbol in self.state['SYMBOLS']
-								},
-								"queue_size_total": sum(
-									self.state[
-										'SNAPSHOTS_QUEUE_DICT'
-									][symbol].qsize()
-									for symbol in self.state['SYMBOLS']
-								),
-								"hardware": {
-									"network_mbps":	   (
-										round(self.network_load_mbps, 2)
-									),
-									"cpu_percent":	   (
-										self.cpu_load_percentage
-									),
-									"memory_percent":  (
-										self.mem_load_percentage
-									),
-									"storage_percent": (
-										self.storage_percentage
-									)
-								},
-								"gc_time_cost_ms": self.gc_time_cost_ms,
-								"last_updated": ms_to_datetime(
-									get_current_time_ms()
-								).isoformat()
-							}
+							# Build monitoring data with async yield points
+							data = await self._build_monitoring_data()
 							
 							await websocket.send_json(data)
 							
@@ -267,9 +280,25 @@ class DashboardServer:
 									)
 									break
 
-							await asyncio.sleep(
-								self.config['DASHBOARD_STREAM_INTERVAL']
+							# Dynamic sleep adjustment based on system load
+							base_interval = self.config['DASHBOARD_STREAM_INTERVAL']
+							
+							# Longer sleep if queues are busy
+							# (indicating high main process load)
+							total_queue_size = sum(
+								self.state['SNAPSHOTS_QUEUE_DICT'][symbol].qsize()
+								for symbol in self.state['SYMBOLS']
 							)
+							
+							# Adaptive sleep: longer when system is busier
+							if total_queue_size > 1000:
+								sleep_multiplier = 2.0  # Double sleep time
+							elif total_queue_size > 500:
+								sleep_multiplier = 1.5  # 50% longer
+							else:
+								sleep_multiplier = 1.0  # Normal
+							
+							await asyncio.sleep(base_interval * sleep_multiplier)
 							
 						except WebSocketDisconnect:
 
@@ -406,20 +435,28 @@ async def monitor_hardware(
 		try:
 			wt_start = time.time()
 
-			# Update class variables directly
+			# Batch async operations with yield points between each
 			dashboard_server.cpu_load_percentage = await get_cpu_load()
+			await asyncio.sleep(0)  # Yield to other coroutines
+			
 			dashboard_server.mem_load_percentage = await get_memory_load()
+			await asyncio.sleep(0)  # Yield to other coroutines
+			
 			dashboard_server.storage_percentage = await get_storage_load()
+			await asyncio.sleep(0)  # Yield to other coroutines
+			
 			(
 				dashboard_server.network_load_mbps,
 				prev_sent, prev_recv, prev_time,
 			) = await get_network_load(prev_sent, prev_recv, prev_time)
+			await asyncio.sleep(0)  # Yield to other coroutines
 
 		except Exception as e:
 			logger.error(
 				f"[{my_name()}] Error monitoring hardware: {e}",
 				exc_info=True,
 			)
+			await asyncio.sleep(0)  # Yield even on error
 
 		finally:
 			sleep_duration = max(
@@ -429,7 +466,8 @@ async def monitor_hardware(
 					- (time.time() - wt_start)
 				),
 			)
-			await asyncio.sleep(sleep_duration)
+			# Use longer minimum sleep for better yielding
+			await asyncio.sleep(max(sleep_duration, 0.1))
 
 #———————————————————————————————————————————————————————————————————————————————
 
