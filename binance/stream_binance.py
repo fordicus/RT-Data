@@ -139,9 +139,8 @@ SYMBOL_TO_FILE_HANDLES: dict[str, tuple[str, TextIOWrapper]] = {}
 RECORDS_MERGED_DATES:	dict[str, OrderedDict[str]] = {}
 RECORDS_ZNR_MINUTES:	dict[str, OrderedDict[str]] = {}
 
-LATENCY_DICT:			dict[str, deque[int]] = {}
+PUT_SNAPSHOT_INTERVAL:	dict[str, deque[int]] = {}
 MEDIAN_LATENCY_DICT:	dict[str, int] = {}
-DEPTH_UPDATE_ID_DICT:	dict[str, int] = {}
 
 LATEST_JSON_FLUSH:		dict[str, int] = {}
 JSON_FLUSH_INTERVAL:	dict[str, int] = {}
@@ -186,12 +185,10 @@ if __name__ == "__main__":
 				EVENT_LATENCY_VALID,
 				EVENT_STREAM_ENABLE,
 			) = init_runtime_state(
-				LATENCY_DICT,
-				LATENCY_DEQUE_SIZE,
 				MEDIAN_LATENCY_DICT,
-				DEPTH_UPDATE_ID_DICT,
 				LATEST_JSON_FLUSH,
 				JSON_FLUSH_INTERVAL,
+				PUT_SNAPSHOT_INTERVAL,
 				SNAPSHOTS_QUEUE_DICT,
 				SNAPSHOTS_QUEUE_MAX,
 				SYMBOL_TO_FILE_HANDLES,
@@ -221,9 +218,10 @@ if __name__ == "__main__":
 			
 			dashboard_state = {
 				'SYMBOLS': SYMBOLS,
-				'SNAPSHOTS_QUEUE_DICT': SNAPSHOTS_QUEUE_DICT,
-				'MEDIAN_LATENCY_DICT': MEDIAN_LATENCY_DICT,
-				'JSON_FLUSH_INTERVAL': JSON_FLUSH_INTERVAL,
+				'SNAPSHOTS_QUEUE_DICT':  SNAPSHOTS_QUEUE_DICT,
+				'MEDIAN_LATENCY_DICT':   MEDIAN_LATENCY_DICT,
+				'JSON_FLUSH_INTERVAL':   JSON_FLUSH_INTERVAL,
+				'PUT_SNAPSHOT_INTERVAL': PUT_SNAPSHOT_INTERVAL,
 			}
 			
 			dashboard_server = create_dashboard_server(
@@ -253,8 +251,7 @@ if __name__ == "__main__":
 						estimate_latency(
 							WS_PING_INTERVAL,
 							WS_PING_TIMEOUT,
-							DEPTH_UPDATE_ID_DICT,
-							LATENCY_DICT,
+							LATENCY_DEQUE_SIZE,
 							LATENCY_SAMPLE_MIN,
 							MEDIAN_LATENCY_DICT,
 							LATENCY_THRESHOLD_MS,
@@ -271,7 +268,7 @@ if __name__ == "__main__":
 						gate_streaming_by_latency(
 							EVENT_LATENCY_VALID,
 							EVENT_STREAM_ENABLE,
-							LATENCY_DICT,
+							MEDIAN_LATENCY_DICT,
 							LATENCY_SIGNAL_SLEEP,
 							SYMBOLS,
 							logger,
@@ -279,9 +276,9 @@ if __name__ == "__main__":
 					),
 					asyncio.create_task(
 						put_snapshot(	# @depth20@100ms
+							PUT_SNAPSHOT_INTERVAL,
 							SNAPSHOTS_QUEUE_DICT,
 							EVENT_STREAM_ENABLE,
-							LATENCY_DICT,
 							MEDIAN_LATENCY_DICT,
 							EVENT_1ST_SNAPSHOT,
 							MAX_BACKOFF, 

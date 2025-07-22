@@ -290,12 +290,10 @@ def load_config(
 #———————————————————————————————————————————————————————————————————————————————
 
 def init_runtime_state(
-	latency_dict:			dict[str, deque[int]],
-	latency_deque_size:		int,
 	median_latency_dict:	dict[str, int],
-	depth_update_id_dict:	dict[str, int],
 	latest_json_flush:		dict[str, int],
 	json_flush_interval:	dict[str, int],
+	put_snapshot_interval:	dict[str, deque[int]],
 	snapshots_queue_dict:	dict[str, asyncio.Queue],
 	snapshots_queue_max:	int,
 	symbol_to_file_handles: dict[str, tuple[str, TextIOWrapper]],
@@ -311,21 +309,9 @@ def init_runtime_state(
 
 	try:
 
-		latency_dict.clear()
-		latency_dict.update({
-			symbol: deque(maxlen=latency_deque_size)
-			for symbol in symbols
-		})
-
 		median_latency_dict.clear()
 		median_latency_dict.update({
-			symbol: 0
-			for symbol in symbols
-		})
-
-		depth_update_id_dict.clear()
-		depth_update_id_dict.update({
-			symbol: 0
+			symbol: None
 			for symbol in symbols
 		})
 
@@ -338,6 +324,12 @@ def init_runtime_state(
 		json_flush_interval.clear()
 		json_flush_interval.update({
 			symbol: 0
+			for symbol in symbols
+		})
+
+		put_snapshot_interval.clear()
+		put_snapshot_interval.update({
+			symbol: deque(maxlen=1)
 			for symbol in symbols
 		})
 

@@ -784,9 +784,9 @@ async def symbol_dump_snapshot(
 from collections import deque
 
 async def put_snapshot(		# @depth20@100ms
+	put_snapshot_interval:	dict[str, deque[int]],
 	snapshots_queue_dict:	dict[str, asyncio.Queue],
 	event_stream_enable:	asyncio.Event,
-	latency_dict:			dict[str, deque[int]],
 	median_latency_dict:	dict[str, int],
 	event_1st_snapshot:		asyncio.Event,
 	max_backoff:			int, 
@@ -798,12 +798,13 @@ async def put_snapshot(		# @depth20@100ms
 	ws_ping_timeout:		int,
 	symbols:				list,
 	logger:					logging.Logger,
+	base_interval_ms:		int = 100,
 ):
 
 	"""————————————————————————————————————————————————————————————
 	CORE FUNCTIONALITY:
 		await snapshots_queue_dict[
-			current_symbol
+			cur_symbol
 		].put(snapshot)
 	———————————————————————————————————————————————————————————————
 	HINT:
@@ -812,11 +813,26 @@ async def put_snapshot(		# @depth20@100ms
 
 	ws_retry_cnt = 0
 
+	measured_interval_ms: dict[str, int] = {}
+	measured_interval_ms.clear()
+	measured_interval_ms.update({
+		symbol: None
+		for symbol in symbols
+	})
+	
+	prev_snapshot_time_ms: dict[str, int] = {}
+	prev_snapshot_time_ms.clear()
+	prev_snapshot_time_ms.update({
+		symbol: None
+		for symbol in symbols
+	})
+
 	while True:
 
-		current_symbol = "UNKNOWN"
+		cur_symbol = "UNKNOWN"
 
 		try:
+
 			async with websockets.connect(
 				ws_url,
 				ping_interval = ws_ping_interval,
@@ -831,25 +847,24 @@ async def put_snapshot(		# @depth20@100ms
 				ws_retry_cnt = 0
 
 				async for raw in ws:
+
 					try:
+
 						msg	= json.loads(raw)
 						stream = msg.get("stream", "")
-						current_symbol = (
+						cur_symbol = (
 							stream.split("@", 1)[0]
 							or "UNKNOWN"
 						).lower()
 
-						# out of scope
-						if current_symbol not in symbols:
-							continue
-
-						# drop if (gate closed) 
-						# or (no latency samples)
+						if cur_symbol not in symbols:
+							continue	# out of scope
+						
 						if (
-							(not event_stream_enable.is_set()) or
-							(not latency_dict.get(
-								current_symbol, [])
-							)
+							# drop if (gate closed) 
+							# or (no median_latency available)
+							(not event_stream_enable.is_set())
+							or (median_latency_dict[cur_symbol] == None)
 						):
 							continue
 
@@ -879,19 +894,52 @@ async def put_snapshot(		# @depth20@100ms
 						# `lat_ms`.
 						#———————————————————————————————————————————————————————
 
+						cur_time_ms = get_current_time_ms()
+
+						if prev_snapshot_time_ms[cur_symbol] is not None:
+
+							measured_interval_ms[cur_symbol] = (
+								cur_time_ms
+								- prev_snapshot_time_ms[cur_symbol]
+							)
+							prev_snapshot_time_ms[
+								cur_symbol
+							] = cur_time_ms
+
+						else:
+
+							prev_snapshot_time_ms[
+								cur_symbol
+							] = cur_time_ms
+
+							continue
+
+						put_snapshot_interval[cur_symbol].append(
+							measured_interval_ms[cur_symbol]
+						)
+
+						#———————————————————————————————————————————————————————
+						
 						lat_ms = max(
 							0, median_latency_dict.get(
-								current_symbol, 0
+								cur_symbol, 0
 							)
+						)
+
+						comp_delay_ms = max(0,
+							measured_interval_ms[cur_symbol]
+							- base_interval_ms
 						)
 						
 						latency_adjusted_time = (
-							get_current_time_ms() - lat_ms
+							cur_time_ms - (lat_ms + comp_delay_ms)
 						)
+
+						#———————————————————————————————————————————————————————
 
 						snapshot = {
 							"lastUpdateId": last_update,
-							"eventTime": latency_adjusted_time,
+							"eventTime":	latency_adjusted_time,
 							"bids": [
 								[float(p), float(q)]
 								for p, q in bids
@@ -909,7 +957,7 @@ async def put_snapshot(		# @depth20@100ms
 						#———————————————————————————————————————————————————————
 						
 						await snapshots_queue_dict[
-							current_symbol
+							cur_symbol
 						].put(snapshot)
 
 						# 1st snapshot gate for FastAPI readiness
@@ -919,8 +967,8 @@ async def put_snapshot(		# @depth20@100ms
 
 					except Exception as e:
 						sym = (
-							current_symbol
-							if current_symbol in symbols
+							cur_symbol
+							if cur_symbol in symbols
 							else "UNKNOWN"
 						)
 						logger.warning(
@@ -938,8 +986,8 @@ async def put_snapshot(		# @depth20@100ms
 			# websocket-level error → exponential backoff + retry
 			ws_retry_cnt += 1
 			sym = (
-				current_symbol
-				if current_symbol in symbols
+				cur_symbol
+				if cur_symbol in symbols
 				else "UNKNOWN"
 			)
 
@@ -974,8 +1022,8 @@ async def put_snapshot(		# @depth20@100ms
 			#———————————————————————————————————————————————————————————————————
 
 			sym = (
-				current_symbol
-				if current_symbol in symbols
+				cur_symbol
+				if cur_symbol in symbols
 				else "UNKNOWN"
 			)
 			logger.info(

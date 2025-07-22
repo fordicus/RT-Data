@@ -18,7 +18,7 @@ from util import (
 async def gate_streaming_by_latency(
 	event_latency_valid:  asyncio.Event,
 	event_stream_enable:  asyncio.Event,
-	latency_dict:		  dict[str, deque[int]],
+	median_latency_dict:  dict[str, int],
 	latency_signal_sleep: float,
 	symbols:			  list[str],
 	logger:				  logging.Logger,
@@ -32,8 +32,10 @@ async def gate_streaming_by_latency(
 
 			latency_passed = event_latency_valid.is_set()
 			stream_currently_on = event_stream_enable.is_set()
-			has_any_latency = all(
-				len(latency_dict[s]) > 0 for s in symbols
+			has_all_latency = all(
+				median_latency_dict[s]
+				is not None
+				for s in symbols
 			)
 
 			if (
@@ -53,7 +55,7 @@ async def gate_streaming_by_latency(
 			elif not latency_passed:
 
 				if (
-					not has_any_latency
+					not has_all_latency
 					and not has_logged_warmup
 				):
 
@@ -66,7 +68,7 @@ async def gate_streaming_by_latency(
 					has_logged_warmup = True
 
 				elif (
-					has_any_latency
+					has_all_latency
 					and stream_currently_on
 				):
 
@@ -96,8 +98,7 @@ async def gate_streaming_by_latency(
 async def estimate_latency(
 	ws_ping_interval:		Optional[int],
 	ws_ping_timeout:		Optional[int],
-	depth_update_id_dict:	dict[str, int],
-	latency_dict:			dict[str, deque[int]],
+	latency_deque_size:		int,
 	latency_sample_min:		int,
 	median_latency_dict:	dict[str, int],
 	latency_threshold_ms:	int,
@@ -116,6 +117,20 @@ async def estimate_latency(
 	)
 
 	reconnect_attempt = 0
+
+	depth_update_id_dict: dict[str, int] = {}
+	depth_update_id_dict.clear()
+	depth_update_id_dict.update({
+		symbol: 0
+		for symbol in symbols
+	})
+
+	latency_dict: dict[str, deque[int]] = {}
+	latency_dict.clear()
+	latency_dict.update({
+		symbol: deque(maxlen=latency_deque_size)
+		for symbol in symbols
+	})
 
 	while True:
 
@@ -204,6 +219,10 @@ async def estimate_latency(
 										f"All symbols within "
 										f"threshold. Event set."
 									)
+							
+							else:
+
+								event_latency_valid.clear()
 
 					except Exception as e:
 

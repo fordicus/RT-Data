@@ -189,24 +189,19 @@ class DashboardServer:
 	#———————————————————————————————————————————————————————————————————————————
 
 	async def _build_monitoring_data(self) -> dict:
-
 		"""
 		Build monitoring data with async yield points for better GIL sharing.
 		"""
 		
 		# Build median latency data with yield point
-
 		med_latency = {}
-
 		for symbol in self.state['SYMBOLS']:
-
 			med_latency[symbol] = self.state[
 				'MEDIAN_LATENCY_DICT'
 			].get(symbol, 0)
 			await asyncio.sleep(0)
 		
 		# Build flush interval data with yield point
-
 		flush_interval = {}
 		for symbol in self.state['SYMBOLS']:
 			flush_interval[symbol] = self.state[
@@ -214,11 +209,28 @@ class DashboardServer:
 			].get(symbol, 0)
 			await asyncio.sleep(0)
 		
+		# Build snapshot interval data with yield point
+		snapshot_interval = {}
+		for symbol in self.state['SYMBOLS']:
+			interval_deque = self.state['PUT_SNAPSHOT_INTERVAL'].get(symbol)
+			if interval_deque and len(interval_deque) > 0:
+				# Calculate median of recent intervals
+				sorted_intervals = sorted(list(interval_deque))
+				mid = len(sorted_intervals) // 2
+				if len(sorted_intervals) % 2 == 0:
+					median_interval = (
+						sorted_intervals[mid - 1] + sorted_intervals[mid]
+					) // 2
+				else:
+					median_interval = sorted_intervals[mid]
+				snapshot_interval[symbol] = median_interval
+			else:
+				snapshot_interval[symbol] = 0
+			await asyncio.sleep(0)
+		
 		# Build queue size data with yield point
-
 		queue_size = {}
 		queue_size_total = 0
-
 		for symbol in self.state['SYMBOLS']:
 			size = self.state['SNAPSHOTS_QUEUE_DICT'][symbol].qsize()
 			queue_size[symbol] = size
@@ -226,18 +238,19 @@ class DashboardServer:
 			await asyncio.sleep(0)
 		
 		return {
-			"med_latency":		med_latency,
-			"flush_interval":	flush_interval,
-			"queue_size":		queue_size,
-			"queue_size_total": queue_size_total,
+			"med_latency":        med_latency,
+			"flush_interval":     flush_interval,
+			"snapshot_interval":  snapshot_interval,  # ← 추가
+			"queue_size":         queue_size,
+			"queue_size_total":   queue_size_total,
 			"hardware": {
-				"network_mbps":	   round(self.network_load_mbps, 2),
-				"cpu_percent":	   self.cpu_load_percentage,
+				"network_mbps":    round(self.network_load_mbps, 2),
+				"cpu_percent":     self.cpu_load_percentage,
 				"memory_percent":  self.mem_load_percentage,
 				"storage_percent": self.storage_percentage
 			},
 			"gc_time_cost_ms": self.gc_time_cost_ms,
-			"last_updated":	   ms_to_datetime(
+			"last_updated":    ms_to_datetime(
 				get_current_time_ms()
 			).isoformat()
 		}
