@@ -238,19 +238,19 @@ class DashboardServer:
 			await asyncio.sleep(0)
 		
 		return {
-			"med_latency":        med_latency,
-			"flush_interval":     flush_interval,
+			"med_latency":		med_latency,
+			"flush_interval":	 flush_interval,
 			"snapshot_interval":  snapshot_interval,  # ← 추가
-			"queue_size":         queue_size,
+			"queue_size":		 queue_size,
 			"queue_size_total":   queue_size_total,
 			"hardware": {
-				"network_mbps":    round(self.network_load_mbps, 2),
-				"cpu_percent":     self.cpu_load_percentage,
+				"network_mbps":	round(self.network_load_mbps, 2),
+				"cpu_percent":	 self.cpu_load_percentage,
 				"memory_percent":  self.mem_load_percentage,
 				"storage_percent": self.storage_percentage
 			},
 			"gc_time_cost_ms": self.gc_time_cost_ms,
-			"last_updated":    ms_to_datetime(
+			"last_updated":	ms_to_datetime(
 				get_current_time_ms()
 			).isoformat()
 		}

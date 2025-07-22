@@ -878,20 +878,20 @@ async def put_snapshot(		# @depth20@100ms
 						asks = data.get("asks", [])
 
 						#———————————————————————————————————————————————————————
-						# Binance partial streams like `@depth20@100ms` do NOT
-						# include the server-side event timestamp ("E"). Thus,
-						# we must rely on local receipt time corrected by
-						# estimated network latency and computation time among
-						# coroutines.
+						# SERVER TIMESTAMP RECONSTRUCTION FOR PARTIAL STREAMS
 						#———————————————————————————————————————————————————————
-						# TODO: The difference between the current time and the
-						# previous time right before defining `snapshot` is
-						# expected to be 100ms. The difference higher than 100ms
-						# is due to the computation time for the snapshot to be
-						# defined within the whole main process, which much be
-						# utilized to define `lat_ms`. The first `raw` must be
-						# discarded to measure the difference and define 
-						# `lat_ms`.
+						# Problem: Binance `@depth20@100ms` streams lack server
+						# timestamp ("E"), unlike diff depth streams. We must
+						# estimate it from local receipt time with delay
+						# corrections.
+						#———————————————————————————————————————————————————————
+						# Method: `measured_interval_ms[cur_symbol]` should
+						# ideally equal 100ms (stream interval). Any excess
+						# above 100ms represents computational delay from
+						# coroutine scheduling and JSON processing overhead.
+						# This `comp_delay_ms` must be subtracted alongside
+						# network latency (lat_ms) to recover the original
+						# server-side event timestamp.
 						#———————————————————————————————————————————————————————
 
 						cur_time_ms = get_current_time_ms()

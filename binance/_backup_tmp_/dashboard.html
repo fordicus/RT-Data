@@ -108,8 +108,8 @@
 			const medLatency = data.med_latency;
 			const flushInterval = data.flush_interval;
 			const snapshotInterval = data.snapshot_interval;
-            const queueSize = data.queue_size;
-            const queueSizeTotal = data.queue_size_total;
+			const queueSize = data.queue_size;
+			const queueSizeTotal = data.queue_size_total;
 			const hardware = data.hardware;
 			const lastUpdated = data.last_updated;
 
@@ -131,7 +131,7 @@
 				const latencyCell = document.createElement("td");
 				const flushCell = document.createElement("td");
 				const snapshotCell = document.createElement("td");
-                const queueCell = document.createElement("td");
+				const queueCell = document.createElement("td");
 
 				symbolCell.textContent = symbol.toUpperCase();
 				latencyCell.textContent = medLatency[symbol];
