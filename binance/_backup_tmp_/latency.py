@@ -100,9 +100,9 @@ async def estimate_latency(
 	ws_ping_timeout:		Optional[int],
 	latency_deque_size:		int,
 	latency_sample_min:		int,
-	median_latency_dict:	dict[str, int],
+	median_latency_dict:	dict[str, int],			# shared
 	latency_threshold_ms:	int,
-	event_latency_valid:  	asyncio.Event,
+	event_latency_valid:  	asyncio.Event,			# shared
 	base_backoff:			int,
 	max_backoff:			int,
 	reset_cycle_after:		int,
