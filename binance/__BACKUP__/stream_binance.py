@@ -18,14 +18,22 @@ Binance websocket:
 
 Dependency:
 	python==3.11.13
-	pyinstaller==6.14.2
-	pyinstaller-hooks-contrib==2025.7
+	uvloop==0.21.0
 	websockets==15.0.1
+	orjson==3.11.0
 	fastapi==0.116.1
 	uvicorn==0.35.0
 	psutil==7.0.0
+	pyinstaller==6.14.2
+	pyinstaller-hooks-contrib==2025.7
 	memray==1.17.2
 
+Note:
+	`msgspec` could have replaced `orjson`, but based on our tests, the switch
+	was deemed unnecessary. Similarly, `aiofiles` was not utilized for the same
+	reason. Finally, we prefer compatibility in compression format, sticking to
+	the standard `.zip` algorithm.
+	
 ————————————————————————————————————————————————————————————————————————————————
 
 The `memray` Python module @VS Code WSL2 Terminal:
@@ -60,6 +68,7 @@ Infinite Coroutines in the Main Process:
 —————————————————————————————————————————————————————————————————————————————"""
 
 from init import (
+	setup_uvloop,
 	load_config,
 	init_runtime_state,
 )
@@ -100,9 +109,15 @@ from io import TextIOWrapper
 from collections import OrderedDict
 from concurrent.futures import ProcessPoolExecutor
 
+#———————————————————————————————————————————————————————————————————————————————
+
 os.environ["SSL_CERT_FILE"] = certifi.where()
 
 logger, queue_listener = set_global_logger()
+
+setup_uvloop(logger = logger)
+
+#———————————————————————————————————————————————————————————————————————————————
 
 (
 	SYMBOLS,
@@ -237,84 +252,102 @@ if __name__ == "__main__":
 
 			try:
 
-				tasks = [
-					asyncio.create_task(
-						monitor_hardware(
-							dashboard_server,
-							HARDWARE_MONITORING_INTERVAL,
-							CPU_PERCENT_DURATION,
-							DESIRED_MAX_SYS_MEM_LOAD,
-							logger,
-						)
+				latency_task = asyncio.create_task(
+					estimate_latency(
+						WS_PING_INTERVAL,
+						WS_PING_TIMEOUT,
+						LATENCY_DEQUE_SIZE,
+						LATENCY_SAMPLE_MIN,
+						MEDIAN_LATENCY_DICT,
+						LATENCY_THRESHOLD_MS,
+						EVENT_LATENCY_VALID,
+						BASE_BACKOFF,
+						MAX_BACKOFF,
+						RESET_CYCLE_AFTER,
+						RESET_BACKOFF_LEVEL,
+						SYMBOLS,
+						logger,
+					), 
+					name="_estimate_latency_",
+				)
+
+				gate_task = asyncio.create_task(
+					gate_streaming_by_latency(
+						EVENT_LATENCY_VALID,
+						EVENT_STREAM_ENABLE,
+						MEDIAN_LATENCY_DICT,
+						LATENCY_SIGNAL_SLEEP,
+						SYMBOLS,
+						logger,
 					),
-					asyncio.create_task(
-						estimate_latency(
-							WS_PING_INTERVAL,
-							WS_PING_TIMEOUT,
-							LATENCY_DEQUE_SIZE,
-							LATENCY_SAMPLE_MIN,
-							MEDIAN_LATENCY_DICT,
-							LATENCY_THRESHOLD_MS,
-							EVENT_LATENCY_VALID,
-							BASE_BACKOFF,
-							MAX_BACKOFF,
-							RESET_CYCLE_AFTER,
-							RESET_BACKOFF_LEVEL,
-							SYMBOLS,
-							logger,
-						)
+					name="_gate_streaming_by_latency_",
+				)
+
+				snapshot_task = asyncio.create_task(
+					put_snapshot(	# @depth20@100ms
+						PUT_SNAPSHOT_INTERVAL,
+						SNAPSHOTS_QUEUE_DICT,
+						EVENT_STREAM_ENABLE,
+						MEDIAN_LATENCY_DICT,
+						EVENT_1ST_SNAPSHOT,
+						MAX_BACKOFF, 
+						BASE_BACKOFF,
+						RESET_CYCLE_AFTER,
+						RESET_BACKOFF_LEVEL,
+						WS_URL,
+						WS_PING_INTERVAL,
+						WS_PING_TIMEOUT,
+						SYMBOLS,
+						logger,
 					),
-					asyncio.create_task(
-						gate_streaming_by_latency(
-							EVENT_LATENCY_VALID,
-							EVENT_STREAM_ENABLE,
-							MEDIAN_LATENCY_DICT,
-							LATENCY_SIGNAL_SLEEP,
-							SYMBOLS,
-							logger,
-						)
+					name="_put_snapshot_",
+				)
+
+				monitor_hw_task = asyncio.create_task(
+					monitor_hardware(
+						dashboard_server,
+						HARDWARE_MONITORING_INTERVAL,
+						CPU_PERCENT_DURATION,
+						DESIRED_MAX_SYS_MEM_LOAD,
+						logger,
 					),
-					asyncio.create_task(
-						put_snapshot(	# @depth20@100ms
-							PUT_SNAPSHOT_INTERVAL,
+					name="_monitor_hardware_",
+				)
+
+				# Register tasks with shutdown manager
+				shutdown_manager.register_asyncio_tasks(
+					latency_task,
+					gate_task,
+					snapshot_task,
+					monitor_hw_task,
+				)
+
+				dump_tasks = []
+				for symbol in SYMBOLS:
+					task = asyncio.create_task(
+						symbol_dump_snapshot(
+							symbol,
+							SAVE_INTERVAL_MIN,
 							SNAPSHOTS_QUEUE_DICT,
 							EVENT_STREAM_ENABLE,
-							MEDIAN_LATENCY_DICT,
-							EVENT_1ST_SNAPSHOT,
-							MAX_BACKOFF, 
-							BASE_BACKOFF,
-							RESET_CYCLE_AFTER,
-							RESET_BACKOFF_LEVEL,
-							WS_URL,
-							WS_PING_INTERVAL,
-							WS_PING_TIMEOUT,
-							SYMBOLS,
+							LOB_DIR,
+							SYMBOL_TO_FILE_HANDLES,
+							JSON_FLUSH_INTERVAL,
+							LATEST_JSON_FLUSH,
+							PURGE_ON_DATE_CHANGE,
+							MERGE_EXECUTOR,
+							RECORDS_MERGED_DATES,
+							ZNR_EXECUTOR,
+							RECORDS_ZNR_MINUTES,
+							RECORDS_MAX,
 							logger,
-						)
-					),
-					*[
-						asyncio.create_task(
-							symbol_dump_snapshot(
-								symbol,
-								SAVE_INTERVAL_MIN,
-								SNAPSHOTS_QUEUE_DICT,
-								EVENT_STREAM_ENABLE,
-								LOB_DIR,
-								SYMBOL_TO_FILE_HANDLES,
-								JSON_FLUSH_INTERVAL,
-								LATEST_JSON_FLUSH,
-								PURGE_ON_DATE_CHANGE,
-								MERGE_EXECUTOR,
-								RECORDS_MERGED_DATES,
-								ZNR_EXECUTOR,
-								RECORDS_ZNR_MINUTES,
-								RECORDS_MAX,
-								logger,
-							)
-						)
-						for symbol in SYMBOLS
-					],
-				]
+							shutdown_manager,
+						),
+						name=f"{symbol}_dump_snapshot"
+					)
+					dump_tasks.append(task)
+
+				shutdown_manager.register_asyncio_tasks(*dump_tasks)
 
 			except Exception as e:
 
@@ -357,7 +390,7 @@ if __name__ == "__main__":
 					lifespan="on",
 					use_colors=True,
 					log_level="warning",
-					workers=os.cpu_count(),
+					workers=1,
 					loop="asyncio",
 				)
 
@@ -403,6 +436,11 @@ if __name__ == "__main__":
 		)
 		raise SystemExit from e
 
-	finally: pass
+	finally: 
+		# QueueListener 정리 - 스레드 오류 방지
+		try:
+			queue_listener.stop()
+		except Exception:
+			pass  # 조용히 무시
 
 #———————————————————————————————————————————————————————————————————————————————

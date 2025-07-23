@@ -3,7 +3,6 @@
 #———————————————————————————————————————————————————————————————————————————————
 
 import logging, asyncio
-
 from collections import OrderedDict, deque
 from io import TextIOWrapper
 from typing import Optional
@@ -13,6 +12,41 @@ from util import(
 	resource_path,
 	get_current_time_ms,
 )
+
+#———————————————————————————————————————————————————————————————————————————————
+
+def setup_uvloop(
+	logger:  logging.Logger = None,
+	verbose: bool = False,
+) -> bool:
+
+	try:
+
+		import uvloop
+		asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
+
+		to_prt = f"[{my_name()}] uvloop event loop policy enabled."
+		if logger:	  logger.info(to_prt)
+		elif verbose: print(to_prt, flush = True)
+
+		return True
+
+	except ImportError:
+
+		to_prt = (
+			f"[{my_name()}] "
+			f"uvloop not available - using default asyncio."
+		)
+		if logger:	  logger.warning(to_prt)
+		elif verbose: print(to_prt, flush = True)
+		pass
+
+	except Exception as e:
+
+		to_prt = f"[{my_name()}] Failed to setup uvloop: {e}"
+		if logger:	  logger.error(to_prt)
+		elif verbose: print(to_prt, flush = True)
+		return False
 
 #———————————————————————————————————————————————————————————————————————————————
 

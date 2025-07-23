@@ -12,7 +12,7 @@ from util import (
 	get_subprocess_logger
 )
 
-import sys, os, io, asyncio, json
+import sys, os, io, asyncio, orjson
 import shutil, zipfile, logging
 import websockets, time, random
 
@@ -50,7 +50,6 @@ def proc_zip_n_remove_jsonl(
 
 		try:
 
-			# `os.path.exists(src_path) == True` known by Caller
 			zip_path = src_path.replace(".jsonl", ".zip")
 
 			with zipfile.ZipFile(
@@ -64,6 +63,7 @@ def proc_zip_n_remove_jsonl(
 
 			os.remove(src_path)
 
+		except FileNotFoundError: pass
 		except Exception: raise
 
 	#——————————————————————————————————————————————————————————————
@@ -79,16 +79,7 @@ def proc_zip_n_remove_jsonl(
 			f"{symbol_upper}_orderbook_{last_suffix}.jsonl"
 		)
 
-		if os.path.exists(last_jsonl_path):
-
-			zip_and_remove(last_jsonl_path)
-
-		else:
-
-			raise RuntimeError(
-				f"File not found for compression: "
-				f"{last_jsonl_path}"
-			)
+		zip_and_remove(last_jsonl_path)
 
 	except Exception as e:
 
@@ -322,6 +313,7 @@ async def symbol_dump_snapshot(
 	records_znr_minutes:	dict[str, OrderedDict[str, None]],
 	records_max:			int,
 	logger:					logging.Logger,
+	shutdown_manager = None,
 ):
 
 	#———————————————————————————————————————————————————————————————————————————————
@@ -499,7 +491,7 @@ async def symbol_dump_snapshot(
 	
 	#———————————————————————————————————————————————————————————————————————————————
 
-	def gen_file_path(
+	async def gen_file_path(
 		symbol_upper: str,
 		suffix:   str,
 		lob_dir:  str,
@@ -512,7 +504,11 @@ async def symbol_dump_snapshot(
 			temp_dir  = os.path.join(lob_dir, "temporary",
 				f"{symbol_upper}_orderbook_{date_str}",
 			)
-			os.makedirs(temp_dir, exist_ok=True)
+			await asyncio.to_thread(
+				os.makedirs,
+				temp_dir,
+				exist_ok=True,
+			)
 			return os.path.join(temp_dir, file_name)
 
 		except Exception as e:
@@ -534,14 +530,28 @@ async def symbol_dump_snapshot(
 		json_flush_interval:	dict[str, deque[int]],
 		latest_json_flush:		dict[str, int],
 		file_path: str,
+		shutdown_manager = None,
 	) -> bool:
 
 		try:
 
+			# Shutdown 상태 확인 (조기 종료)
+			if (
+				shutdown_manager and
+				shutdown_manager.is_shutting_down()
+			):	return False
+			
+			# 파일 핸들 유효성 확인
+			if json_writer.closed:
+				
+				logger.warning(
+					f"[{my_name()}][{symbol.upper()}] "
+					f"Attempted to write to closed file: {file_path}"
+				)
+				return False
+
 			json_writer.write(
-				json.dumps(snapshot, 
-					separators=(",", ":")
-				) + "\n"
+				orjson.dumps(snapshot).decode() + "\n"
 			)
 			json_writer.flush()
 
@@ -554,6 +564,16 @@ async def symbol_dump_snapshot(
 			latest_json_flush[symbol] = cur_time_ms
 
 			return True
+
+		except ValueError as e:
+
+			if "closed file" in str(e):
+
+				# 파일이 닫힌 경우 조용히 처리 (shutdown 중일 가능성)
+				return False
+
+			else:
+				raise  # 다른 ValueError는 그대로 전파
 
 		except Exception as e:
 
@@ -630,7 +650,7 @@ async def symbol_dump_snapshot(
 			)
 			continue
 
-		file_path = gen_file_path(
+		file_path = await gen_file_path(
 			symbol_upper, suffix,
 			lob_dir, date_str
 		)
@@ -769,6 +789,7 @@ async def symbol_dump_snapshot(
 			json_flush_interval,
 			latest_json_flush,
 			file_path,
+			shutdown_manager,
 		):
 
 			logger.error(
@@ -850,7 +871,7 @@ async def put_snapshot(		# @depth20@100ms
 
 					try:
 
-						msg	= json.loads(raw)
+						msg = orjson.loads(raw)
 						stream = msg.get("stream", "")
 						cur_symbol = (
 							stream.split("@", 1)[0]

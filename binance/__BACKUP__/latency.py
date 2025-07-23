@@ -3,8 +3,8 @@
 #———————————————————————————————————————————————————————————————————————————————
 
 import asyncio, logging
-import websockets, json
-import statistics
+import websockets, orjson
+import statistics, random
 from collections import deque
 from typing import Optional
 from util import (
@@ -159,7 +159,7 @@ async def estimate_latency(
 						# LATENCY MEASUREMENT ACCURACY & SYSTEM REQUIREMENTS
 						#———————————————————————————————————————————————————————
 						# From
-						# 	`message = json.loads(raw_msg)`
+						# 	`message = orjson.loads(raw_msg)`
 						# to
 						#	median_latency_dict[symbol] = int(
 						#		statistics.median(
@@ -177,7 +177,7 @@ async def estimate_latency(
 						# accurate system clock synchronization is essential.
 						#———————————————————————————————————————————————————————
 
-						message = json.loads(raw_msg)
+						message = orjson.loads(raw_msg)
 						data = message.get("data", {})
 						server_time_ms = data.get("E")
 

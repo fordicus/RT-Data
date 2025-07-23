@@ -2,7 +2,7 @@
 
 #———————————————————————————————————————————————————————————————————————————————
 
-import os, asyncio, random, time, statistics, psutil, logging
+import os, asyncio, orjson, random, time, statistics, psutil, logging
 from contextlib import asynccontextmanager
 from collections import deque
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
@@ -59,6 +59,8 @@ class DashboardServer:
 			symbol: deque(maxlen=monitoring_deque_len)
 			for symbol in self.state['SYMBOLS']
 		})
+
+		self._html_cache = None
 		
 		#———————————————————————————————————————————————————————————————————————
 		# Connection Management (No Locks - Atomic Operations under GIL)
@@ -158,29 +160,27 @@ class DashboardServer:
 	
 	async def _dashboard_page(self, request: Request):
 
-		"""Serve the dashboard HTML page with async file I/O."""
-
 		try:
 
-			html_path = resource_path("dashboard.html", self.logger)
-			
-			if not await asyncio.to_thread(os.path.exists, html_path):
+			if self._html_cache is None:
 
-				self.logger.error(
-					f"[{my_name()}] HTML file not found: {html_path}"
-				)
-				raise HTTPException(
-					status_code=500,
-					detail="Dashboard HTML file missing"
-				)
-			
-			# Use async file reading to yield control
+				html_path = resource_path("dashboard.html", self.logger)
+				
+				if not await asyncio.to_thread(os.path.exists, html_path):
 
-			dashboard_html = await asyncio.to_thread(
-				self._read_html_file, html_path
-			)
+					self.logger.error(
+						f"[{my_name()}] HTML file not found: {html_path}"
+					)
+					raise HTTPException(
+						status_code=500,
+						detail="Dashboard HTML file missing"
+					)
+				
+				self._html_cache = await asyncio.to_thread(
+					self._read_html_file, html_path
+				)
 			
-			return HTMLResponse(content=dashboard_html)
+			return HTMLResponse(content=self._html_cache)
 			
 		except Exception as e:
 
@@ -274,7 +274,7 @@ class DashboardServer:
 		"""
 		Dashboard WebSocket handler.
 		"""
-		
+	
 		reconnect_attempt = 0
 		
 		while True:
@@ -323,7 +323,9 @@ class DashboardServer:
 
 							data = await self._build_monitoring_data()
 							
-							await websocket.send_json(data)
+							await websocket.send_text(
+								orjson.dumps(data).decode()
+							)
 							
 							# Check session time
 
