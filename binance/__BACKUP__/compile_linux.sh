@@ -1,104 +1,110 @@
 #!/usr/bin/env bash
 
 #———————————————————————————————————————————————————————————————————————————————
-# 🚀 Linux Build Script for stream_binance.py
+# Linux Build Script for stream_binance.py  (Nuitka one‑file build)
 #
-# 📦 Creates a self-contained executable (PyInstaller, onefile)
-# 🧩 Includes: app.conf + dashboard.html
-# 🧪 Requires: Python 3.9.23 and activated 'binance' environment
-# 🧱 Assumes: Conda or venv-based activation
-#
-# 💡 NOTE: This build uses PyInstaller for portability,
-# 	but may be replaced with Nuitka in future builds for:
-#	- Native code compilation (C backend)
-#	- Better runtime performance
-#	- Smaller binary size
+# Creates a self‑contained native executable (C++ backend, onefile)
+# Includes: app.conf + dashboard.html + certifi CA bundle
+# Statically embeds critical runtime packages (uvicorn, fastapi, websockets,
+#     uvloop, orjson, psutil) to avoid “module not found” surprises.
+# Requires: Python 3.11.13 and activated 'binance' environment
+# Works with Conda or venv activation
 #———————————————————————————————————————————————————————————————————————————————
 
 set -e
 set -o pipefail
+DEBUG=true
+if [[ $DEBUG == true ]]; then
+  set -x
+fi
+
+which ccache &>/dev/null && echo "[INFO] ccache is available and will be used automatically"
+
+>&2 echo "[DEBUG] Script started: $(date)"
+>&2 echo "[DEBUG] CONDA_DEFAULT_ENV=$CONDA_DEFAULT_ENV"
 
 #———————————————————————————————————————————————————————————————————————————————
-# 🧪 Step 1: Environment validation
+# 1) Environment validation
 #———————————————————————————————————————————————————————————————————————————————
-
 if [[ -n "$CONDA_DEFAULT_ENV" ]]; then
 	if [[ "$CONDA_DEFAULT_ENV" != "binance" ]]; then
-		echo "❌ Conda environment is '$CONDA_DEFAULT_ENV', expected 'binance'"
+		echo "Conda environment is '$CONDA_DEFAULT_ENV', expected 'binance'"
 		exit 1
 	fi
-	echo "📦 Conda environment: $CONDA_DEFAULT_ENV"
-	PYTHON="$(which python)"
+	echo "Conda environment: $CONDA_DEFAULT_ENV"
+	PYTHON="/home/c01hyka/anaconda3/envs/binance/bin/python"
 elif [[ -n "$VIRTUAL_ENV" ]]; then
 	ENV_NAME=$(basename "$VIRTUAL_ENV")
 	if [[ "$ENV_NAME" != "binance" ]]; then
-		echo "❌ Virtualenv is '$ENV_NAME', expected 'binance'"
+		echo "Virtualenv is '$ENV_NAME', expected 'binance'"
 		exit 1
 	fi
-	echo "📦 Virtualenv: $ENV_NAME"
+	echo "Virtualenv: $ENV_NAME"
 	PYTHON="$VIRTUAL_ENV/bin/python"
 else
-	echo "❌ No virtual environment or conda environment detected."
-	echo "💡 Please activate the 'binance' environment before running this script."
+	echo "No virtual environment or conda environment detected."
+	echo "Please activate the 'binance' environment before running this script."
 	exit 1
 fi
 
-# Check Python version
+# —— Python version check ————————————————————————————————
+REQ_PY="3.11.13"
 PY_VERSION=$($PYTHON -c 'import platform; print(platform.python_version())')
-if [[ "$PY_VERSION" != "3.11.13" ]]; then
-	echo "❌ Python version is $PY_VERSION — expected 3.9.23"
+if [[ "$PY_VERSION" != "$REQ_PY" ]]; then
+	echo "Python version is $PY_VERSION — required $REQ_PY"
 	exit 1
 fi
-echo "🐍 Python version check passed: $PY_VERSION"
+echo "Python version check passed: $PY_VERSION"
 
 #———————————————————————————————————————————————————————————————————————————————
-# 🧹 Step 2: Pre-build cleanup
+# 2) Build with Nuitka
 #———————————————————————————————————————————————————————————————————————————————
-
-echo "🧹 Pre-build cleanup..."
-rm -rf build/
-rm -rf dist/
-rm -f *.spec
-find . -type f -name "*.pyc" -delete
-find . -type d -name "__pycache__" -exec rm -rf {} +
-
+# --noinclude-default-mode=nofollow \
+#	Avoids accidental inclusion of standard lib modules not explicitly followed.
 #———————————————————————————————————————————————————————————————————————————————
-# ⚙️ Step 3: Build executable
-#———————————————————————————————————————————————————————————————————————————————
-
-echo "⚙️ Building self-contained executable..."
-pyinstaller \
-  --name stream_binance \
+echo "Building native one‑file executable (this may take a while)…"
+stdbuf -oL -eL "$PYTHON" -m nuitka \
   --onefile \
-  --clean \
-  --noconfirm \
-  --hidden-import=uvicorn \
-  --add-data "$(python -m certifi):." \
-  --add-data "dashboard.html:." \
-  --add-data "app.conf:." \
+  --output-filename=stream_binance \
+  --include-data-file=dashboard.html=dashboard.html \
+  --include-data-file=app.conf=app.conf \
+  --include-package=certifi \
+  --include-module=uvicorn \
+  --include-module=fastapi \
+  --include-package=websockets \
+  --include-module=uvloop \
+  --include-module=orjson \
+  --include-module=psutil \
+  --follow-imports \
+  --assume-yes-for-downloads \
+  --lto=no \
+  --noinclude-default-mode=nofollow \
+  --jobs=$(nproc) \
+  --static-libpython=no \
   stream_binance.py
 
 #———————————————————————————————————————————————————————————————————————————————
-# 🧹 Step 4: Post-build cleanup
+# 3) Resource check
 #———————————————————————————————————————————————————————————————————————————————
+if [[ -f _test_resource_path.py ]]; then
+    $PYTHON _test_resource_path.py || echo "[WARNING] Embedded resource test failed"
+else
+    echo "[INFO] _test_resource_path.py not found, skipping resource check."
+fi
 
-echo "🧹 Post-build cleanup..."
-
-# Move final binary to current directory
-mv dist/stream_binance ./stream_binance
-
-# Remove leftover artifacts
-rm -rf build/
-rm -rf dist/
-rm -f *.spec
+#———————————————————————————————————————————————————————————————————————————————
+# 4) Post‑build cleanup
+#———————————————————————————————————————————————————————————————————————————————
+echo "Cleaning up build artifacts…"
+rm -rf stream_binance.dist stream_binance.onefile-build
+rm -f stream_binance.spec
 find . -type f -name "*.pyc" -delete
 find . -type d -name "__pycache__" -exec rm -rf {} +
 
 #———————————————————————————————————————————————————————————————————————————————
-# ✅ Done
+# Done
 #———————————————————————————————————————————————————————————————————————————————
-
 echo ""
-echo "✅ Build complete!"
-echo "📦 Output binary: ./stream_binance"
-echo "🧪 Test it with: ./stream_binance"
+echo "Build complete!"
+echo "Output binary: ./stream_binance"
+echo "Run it with: ./stream_binance"

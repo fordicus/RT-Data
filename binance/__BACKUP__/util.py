@@ -19,28 +19,41 @@ def my_name():
 
 def resource_path(	# Resource Resolver for PyInstaller
 	relative_path:	str,
-	logger:			logging.RootLogger
+	logger: logging.RootLogger = None,
 ) -> str:
 
 	try:
 
-		if not isinstance(logger, logging.Logger):
+		if logger is not None:
+			
+			if not isinstance(logger, logging.Logger):
 
-			raise TypeError(
-				f"logger must be an instance of "
-				f"logging.Logger"
+				raise TypeError(
+					f"logger must be an instance of "
+					f"logging.Logger"
+				)
+
+			logger.info(
+				f"[{my_name()}] Called with "
+				f"relative_path='{relative_path}'"
 			)
 
-		logger.info(
-			f"[{my_name()}] Called with "
-			f"relative_path='{relative_path}'"
+		if hasattr(sys, "_MEIPASS"):		# PyInstaller
+			
+			base_path = sys._MEIPASS
+			
+		elif "__compiled__" in globals():	# Nuitka
+			
+			import nuitka.__main__
+			base_path = os.path.dirname(sys.executable)
+			
+		else:
+			
+			base_path = os.path.abspath(".")
+			
+		return os.path.join(
+			base_path, relative_path
 		)
-
-		base = getattr(sys, "_MEIPASS",
-			os.path.dirname(__file__)
-		)
-
-		return os.path.join(base, relative_path)
 
 	except Exception as e:
 

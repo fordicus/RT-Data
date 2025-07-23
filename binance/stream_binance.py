@@ -253,7 +253,7 @@ if __name__ == "__main__":
 
 			try:
 
-				latency_task = asyncio.create_task(
+				estimate_latency_task = asyncio.create_task(
 					estimate_latency(
 						WS_PING_INTERVAL,
 						WS_PING_TIMEOUT,
@@ -272,7 +272,7 @@ if __name__ == "__main__":
 					name="_estimate_latency_",
 				)
 
-				gate_task = asyncio.create_task(
+				gate_streaming_by_latency_task = asyncio.create_task(
 					gate_streaming_by_latency(
 						EVENT_LATENCY_VALID,
 						EVENT_STREAM_ENABLE,
@@ -284,7 +284,7 @@ if __name__ == "__main__":
 					name="_gate_streaming_by_latency_",
 				)
 
-				snapshot_task = asyncio.create_task(
+				put_snapshot_task = asyncio.create_task(
 					put_snapshot(	# @depth20@100ms
 						PUT_SNAPSHOT_INTERVAL,
 						SNAPSHOTS_QUEUE_DICT,
@@ -304,7 +304,7 @@ if __name__ == "__main__":
 					name="_put_snapshot_",
 				)
 
-				monitor_hw_task = asyncio.create_task(
+				monitor_hardware_task = asyncio.create_task(
 					monitor_hardware(
 						dashboard_server,
 						HARDWARE_MONITORING_INTERVAL,
@@ -316,11 +316,12 @@ if __name__ == "__main__":
 				)
 
 				# Register tasks with shutdown manager
+				
 				shutdown_manager.register_asyncio_tasks(
-					latency_task,
-					gate_task,
-					snapshot_task,
-					monitor_hw_task,
+					estimate_latency_task,
+					gate_streaming_by_latency_task,
+					put_snapshot_task,
+					monitor_hardware_task,
 				)
 
 				dump_tasks = []
@@ -347,8 +348,9 @@ if __name__ == "__main__":
 						name=f"{symbol}_dump_snapshot"
 					)
 					dump_tasks.append(task)
-
-				shutdown_manager.register_asyncio_tasks(*dump_tasks)
+				shutdown_manager.register_asyncio_tasks(
+					*dump_tasks
+				)
 
 			except Exception as e:
 
@@ -438,10 +440,11 @@ if __name__ == "__main__":
 		raise SystemExit from e
 
 	finally: 
-		# QueueListener 정리 - 스레드 오류 방지
+
 		try:
+			
 			queue_listener.stop()
-		except Exception:
-			pass  # 조용히 무시
+
+		except Exception: pass
 
 #———————————————————————————————————————————————————————————————————————————————

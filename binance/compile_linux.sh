@@ -1,19 +1,18 @@
-```bash
 #!/usr/bin/env bash
+
 #———————————————————————————————————————————————————————————————————————————————
-# Linux Build Script for stream_binance.py  (Nuitka one‑file build)
+# Linux Build Script for stream_binance.py (Nuitka one-file build)
 #
-# Creates a self‑contained native executable (C++ backend, onefile)
+# Purpose: Creates a self-contained native executable (C++ backend, onefile)
 # Includes: app.conf + dashboard.html + certifi CA bundle
-# Statically embeds critical runtime packages (uvicorn, fastapi, websockets,
-#     uvloop, orjson, psutil) to avoid “module not found” surprises.
-# Requires: Python 3.11.13 and activated 'binance' environment
-# Works with Conda or venv activation
+# Embeds: uvicorn, fastapi, websockets, uvloop, orjson, psutil
+# Requires: Python 3.11.13 and activated 'binance' environment
+# Compatible: Conda or venv activation
 #———————————————————————————————————————————————————————————————————————————————
 
 set -e
 set -o pipefail
-DEBUG=true
+DEBUG=false
 if [[ $DEBUG == true ]]; then
   set -x
 fi
@@ -24,45 +23,71 @@ which ccache &>/dev/null && echo "[INFO] ccache is available and will be used au
 >&2 echo "[DEBUG] CONDA_DEFAULT_ENV=$CONDA_DEFAULT_ENV"
 
 #———————————————————————————————————————————————————————————————————————————————
-# 1) Environment validation
+# 1) Environment validation and Python path detection
 #———————————————————————————————————————————————————————————————————————————————
+
+echo "Validating build environment..."
+
 if [[ -n "$CONDA_DEFAULT_ENV" ]]; then
 	if [[ "$CONDA_DEFAULT_ENV" != "binance" ]]; then
-		echo "Conda environment is '$CONDA_DEFAULT_ENV', expected 'binance'"
+		echo "[ERROR] Conda environment is '$CONDA_DEFAULT_ENV', expected 'binance'"
+		echo "		Please run: conda activate binance"
 		exit 1
 	fi
-	echo "Conda environment: $CONDA_DEFAULT_ENV"
-	PYTHON="/home/c01hyka/anaconda3/envs/binance/bin/python"
+	if [[ -n "$CONDA_PREFIX" ]]; then
+		PYTHON="$CONDA_PREFIX/bin/python"
+		echo "[OK] Using Conda environment: $CONDA_DEFAULT_ENV"
+		echo "	 Python path is '$PYTHON'"
+	else
+		echo "[ERROR] CONDA_PREFIX not set (conda environment issue)"
+		echo "		Try: conda deactivate && conda activate binance"
+		exit 1
+	fi
 elif [[ -n "$VIRTUAL_ENV" ]]; then
 	ENV_NAME=$(basename "$VIRTUAL_ENV")
 	if [[ "$ENV_NAME" != "binance" ]]; then
-		echo "Virtualenv is '$ENV_NAME', expected 'binance'"
+		echo "[ERROR] Virtualenv is '$ENV_NAME', expected 'binance'"
+		echo "		Please activate the correct environment"
 		exit 1
 	fi
-	echo "Virtualenv: $ENV_NAME"
+	echo "[OK] Using Virtualenv: $ENV_NAME"
 	PYTHON="$VIRTUAL_ENV/bin/python"
+	echo "	 Python path is '$PYTHON'"
 else
-	echo "No virtual environment or conda environment detected."
-	echo "Please activate the 'binance' environment before running this script."
+	echo "[ERROR] No virtual environment or conda environment detected."
+	echo "		Please activate the 'binance' environment before running this script."
+	echo "		- Conda: conda activate binance"
+	echo "		- Venv:  source binance/bin/activate"
 	exit 1
 fi
 
-# —— Python version check ————————————————————————————————
+#———————————————————————————————————————————————————————————————————————————————
+# 2) Python version verification
+#———————————————————————————————————————————————————————————————————————————————
+
+echo "Verifying Python version..."
 REQ_PY="3.11.13"
 PY_VERSION=$($PYTHON -c 'import platform; print(platform.python_version())')
 if [[ "$PY_VERSION" != "$REQ_PY" ]]; then
-	echo "Python version is $PY_VERSION — required $REQ_PY"
+	echo "[ERROR] Python version mismatch:"
+	echo "		Current: $PY_VERSION"
+	echo "		Required: $REQ_PY"
+	echo "		Please install the correct Python version in your environment"
 	exit 1
 fi
-echo "Python version check passed: $PY_VERSION"
+echo "[OK] Python version check passed: $PY_VERSION"
 
 #———————————————————————————————————————————————————————————————————————————————
-# 2) Build with Nuitka
+# 3) Native compilation with Nuitka
 #———————————————————————————————————————————————————————————————————————————————
-# --noinclude-default-mode=nofollow \
-#	Avoids accidental inclusion of standard lib modules not explicitly followed.
-#———————————————————————————————————————————————————————————————————————————————
-echo "Building native one‑file executable (this may take a while)…"
+
+echo ""
+echo "Starting native compilation (this may take 3-5 minutes)..."
+echo "Using $(nproc) CPU cores for parallel compilation"
+echo ""
+
+# The --noinclude-default-mode=nofollow flag prevents accidental inclusion of 
+# standard library modules that aren't explicitly followed, reducing binary size
 stdbuf -oL -eL "$PYTHON" -m nuitka \
   --onefile \
   --output-filename=stream_binance \
@@ -84,28 +109,53 @@ stdbuf -oL -eL "$PYTHON" -m nuitka \
   stream_binance.py
 
 #———————————————————————————————————————————————————————————————————————————————
-# 3) Resource check
+# 4) Embedded resource verification
 #———————————————————————————————————————————————————————————————————————————————
+
+echo "Verifying embedded resources..."
 if [[ -f _test_resource_path.py ]]; then
-    $PYTHON _test_resource_path.py || echo "[WARNING] Embedded resource test failed"
+	if $PYTHON _test_resource_path.py; then
+		echo "[OK] Embedded resource test passed"
+	else
+		echo "[WARNING] Embedded resource test failed - binary may not work correctly"
+	fi
 else
-    echo "[INFO] _test_resource_path.py not found, skipping resource check."
+	echo "[INFO] _test_resource_path.py not found, skipping resource check."
 fi
 
 #———————————————————————————————————————————————————————————————————————————————
-# 4) Post‑build cleanup
+# 5) Post-build cleanup
 #———————————————————————————————————————————————————————————————————————————————
-echo "Cleaning up build artifacts…"
+
+echo "Cleaning up build artifacts..."
 rm -rf stream_binance.dist stream_binance.onefile-build
 rm -f stream_binance.spec
 find . -type f -name "*.pyc" -delete
 find . -type d -name "__pycache__" -exec rm -rf {} +
+echo "[OK] Cleanup completed"
 
 #———————————————————————————————————————————————————————————————————————————————
-# Done
+# 6) Build completion summary
 #———————————————————————————————————————————————————————————————————————————————
-echo ""
-echo "Build complete!"
-echo "Output binary: ./stream_binance"
-echo "Run it with: ./stream_binance"
-```
+
+if [[ -f "./stream_binance" ]]; then
+	BINARY_SIZE=$(du -h "./stream_binance" | cut -f1)
+	echo ""
+	echo "=============================================="
+	echo "BUILD SUCCESSFUL!"
+	echo "=============================================="
+	echo "Output binary: ./stream_binance"
+	echo "Binary size: $BINARY_SIZE"
+	echo "Python version: $PY_VERSION"
+	echo "=============================================="
+	echo ""
+else
+	echo ""
+	echo "=============================================="
+	echo "BUILD FAILED!"
+	echo "=============================================="
+	echo "The binary './stream_binance' was not created."
+	echo "Check the compilation output above for errors."
+	echo "=============================================="
+	exit 1
+fi

@@ -24,9 +24,10 @@ Dependency:
 	fastapi==0.116.1
 	uvicorn==0.35.0
 	psutil==7.0.0
-	pyinstaller==6.14.2
-	pyinstaller-hooks-contrib==2025.7
+	nuitka==2.7.12
 	memray==1.17.2
+		pyinstaller==6.14.2
+		pyinstaller-hooks-contrib==2025.7
 
 Note:
 	`msgspec` could have replaced `orjson`, but based on our tests, the switch

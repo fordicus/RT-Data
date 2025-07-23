@@ -7,7 +7,6 @@ print(
 	"[TEST] dashboard.html exists:",
 	Path(
 		resource_path(
-			"app.conf",
 			"dashboard.html",
 		)
 	).exists()

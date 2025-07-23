@@ -535,13 +535,11 @@ async def symbol_dump_snapshot(
 
 		try:
 
-			# Shutdown 상태 확인 (조기 종료)
 			if (
 				shutdown_manager and
 				shutdown_manager.is_shutting_down()
 			):	return False
 			
-			# 파일 핸들 유효성 확인
 			if json_writer.closed:
 				
 				logger.warning(
@@ -567,13 +565,9 @@ async def symbol_dump_snapshot(
 
 		except ValueError as e:
 
-			if "closed file" in str(e):
+			if "closed file" in str(e): return False
 
-				# 파일이 닫힌 경우 조용히 처리 (shutdown 중일 가능성)
-				return False
-
-			else:
-				raise  # 다른 ValueError는 그대로 전파
+			else: raise  # Propagate any other ValueError
 
 		except Exception as e:
 
@@ -586,6 +580,7 @@ async def symbol_dump_snapshot(
 			try:
 
 				# Invalidate `json_writer` for next iteration
+
 				pop_and_close_handle(
 					symbol_to_file_handles, symbol
 				)
