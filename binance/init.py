@@ -16,6 +16,32 @@ from util import(
 
 #———————————————————————————————————————————————————————————————————————————————
 
+def setup_uvloop(logger: logging.Logger = None) -> bool:
+
+    try:
+
+        import uvloop
+        asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
+        if logger:
+            logger.info(f"[{my_name()}] uvloop event loop policy enabled.")
+        return True
+
+    except ImportError:
+
+        if logger:
+            logger.warning(
+				f"[{my_name()}] uvloop not available - using default asyncio."
+			)
+        pass
+
+    except Exception as e:
+
+        if logger:
+            logger.error(f"[{my_name()}] Failed to setup uvloop: {e}")
+        return False
+
+#———————————————————————————————————————————————————————————————————————————————
+
 def load_config(
 	logger: logging.Logger,
 	config_path: str = "app.conf"

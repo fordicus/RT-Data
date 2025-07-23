@@ -18,12 +18,13 @@ Binance websocket:
 
 Dependency:
 	python==3.11.13
-	pyinstaller==6.14.2
-	pyinstaller-hooks-contrib==2025.7
+	uvloop==0.21.0
 	websockets==15.0.1
 	fastapi==0.116.1
 	uvicorn==0.35.0
 	psutil==7.0.0
+	pyinstaller==6.14.2
+	pyinstaller-hooks-contrib==2025.7
 	memray==1.17.2
 
 ————————————————————————————————————————————————————————————————————————————————
@@ -60,6 +61,7 @@ Infinite Coroutines in the Main Process:
 —————————————————————————————————————————————————————————————————————————————"""
 
 from init import (
+	setup_uvloop,
 	load_config,
 	init_runtime_state,
 )
@@ -100,9 +102,13 @@ from io import TextIOWrapper
 from collections import OrderedDict
 from concurrent.futures import ProcessPoolExecutor
 
+#———————————————————————————————————————————————————————————————————————————————
+
 os.environ["SSL_CERT_FILE"] = certifi.where()
 
 logger, queue_listener = set_global_logger()
+
+setup_uvloop(logger)
 
 (
 	SYMBOLS,
