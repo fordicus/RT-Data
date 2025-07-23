@@ -19,6 +19,7 @@ downloads/
 outputs/
 __unshared__/
 __dev_log__/
+__archive__/
 
 # ========================
 # 🛠️  Build Artifacts
