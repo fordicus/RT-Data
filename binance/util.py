@@ -36,11 +36,20 @@ def resource_path(	# Resource Resolver for PyInstaller
 			f"relative_path='{relative_path}'"
 		)
 
-		base = getattr(sys, "_MEIPASS",
-			os.path.dirname(__file__)
-		)
-
-		return os.path.join(base, relative_path)
+		if hasattr(sys, "_MEIPASS"): # PyInstaller
+			
+			base_path = sys._MEIPASS
+			
+		elif "__compiled__" in globals(): # Nuitka
+			
+			import nuitka.__main__  # just to ensure it's available
+			base_path = os.path.dirname(sys.executable)
+			
+		else:
+			
+			base_path = os.path.abspath(".")
+			
+		return os.path.join(base_path, relative_path)
 
 	except Exception as e:
 
