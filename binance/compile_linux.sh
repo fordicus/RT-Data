@@ -105,7 +105,7 @@ stdbuf -oL -eL "$PYTHON" -m nuitka \
   --lto=no \
   --noinclude-default-mode=nofollow \
   --jobs=$(nproc) \
-  --static-libpython=yes \
+  --static-libpython=no \
   stream_binance.py
 
 #———————————————————————————————————————————————————————————————————————————————

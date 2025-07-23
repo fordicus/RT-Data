@@ -2,11 +2,6 @@
 
 r"""————————————————————————————————————————————————————————————————————————————
 
-Dashboard URLs:
-	http://localhost:8000/dashboard			dev pc
-	http://192.168.1.107/dashboard			internal server
-	http://c01hyka.duckdns.org/dashboard	external server
-
 BinanceWsMan:
 	https://tinyurl.com/BinanceWsMan
 
@@ -26,10 +21,8 @@ Dependency:
 	fastapi==0.116.1
 	uvicorn==0.35.0
 	psutil==7.0.0
-
-	memray==1.17.2
 	nuitka==2.7.12
-		libpython-static==3.11.13
+	memray==1.17.2
 
 Note:
 	`msgspec` could have replaced `orjson`, but based on our tests, the switch

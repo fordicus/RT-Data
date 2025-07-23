@@ -8,4 +8,3 @@ uvicorn==0.35.0
 psutil==7.0.0
 memray==1.17.2
 nuitka==2.7.12
-libpython-static==3.11.13
