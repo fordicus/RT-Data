@@ -856,7 +856,7 @@ async def put_snapshot(		# @depth20@100ms
 			) as ws:
 
 				logger.info(
-					f"[put_snapshot] Connected to:\n"
+					f"[{my_name()}] Connected to:\n"
 					f"{format_ws_url(ws_url, '(depth20@100ms)')}\n"
 				)
 
