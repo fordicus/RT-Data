@@ -109,7 +109,7 @@ os.environ["SSL_CERT_FILE"] = certifi.where()
 
 logger, queue_listener = set_global_logger()
 
-setup_uvloop(logger = logger, verbose = True)
+setup_uvloop(logger = logger)
 
 #———————————————————————————————————————————————————————————————————————————————
 
