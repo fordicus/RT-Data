@@ -28,6 +28,12 @@ Dependency:
 	pyinstaller-hooks-contrib==2025.7
 	memray==1.17.2
 
+Note:
+	`msgspec` could have replaced `orjson`, but based on our tests, the switch
+	was deemed unnecessary. Similarly, `aiofiles` was not utilized for the same
+	reason. Finally, we prefer compatibility in compression format, sticking to
+	the standard `.zip` algorithm.
+	
 ————————————————————————————————————————————————————————————————————————————————
 
 The `memray` Python module @VS Code WSL2 Terminal:

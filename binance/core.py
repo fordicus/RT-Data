@@ -499,7 +499,7 @@ async def symbol_dump_snapshot(
 	
 	#———————————————————————————————————————————————————————————————————————————————
 
-	def gen_file_path(
+	async def gen_file_path(
 		symbol_upper: str,
 		suffix:   str,
 		lob_dir:  str,
@@ -512,7 +512,11 @@ async def symbol_dump_snapshot(
 			temp_dir  = os.path.join(lob_dir, "temporary",
 				f"{symbol_upper}_orderbook_{date_str}",
 			)
-			os.makedirs(temp_dir, exist_ok=True)
+			await asyncio.to_thread(
+				os.makedirs,
+				temp_dir,
+				exist_ok=True,
+			)
 			return os.path.join(temp_dir, file_name)
 
 		except Exception as e:
@@ -628,7 +632,7 @@ async def symbol_dump_snapshot(
 			)
 			continue
 
-		file_path = gen_file_path(
+		file_path = await gen_file_path(
 			symbol_upper, suffix,
 			lob_dir, date_str
 		)
