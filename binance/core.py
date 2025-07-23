@@ -313,6 +313,7 @@ async def symbol_dump_snapshot(
 	records_znr_minutes:	dict[str, OrderedDict[str, None]],
 	records_max:			int,
 	logger:					logging.Logger,
+	shutdown_manager = None,
 ):
 
 	#———————————————————————————————————————————————————————————————————————————————
@@ -529,9 +530,25 @@ async def symbol_dump_snapshot(
 		json_flush_interval:	dict[str, deque[int]],
 		latest_json_flush:		dict[str, int],
 		file_path: str,
+		shutdown_manager = None,
 	) -> bool:
 
 		try:
+
+			# Shutdown 상태 확인 (조기 종료)
+			if (
+				shutdown_manager and
+				shutdown_manager.is_shutting_down()
+			):	return False
+			
+			# 파일 핸들 유효성 확인
+			if json_writer.closed:
+				
+				logger.warning(
+					f"[{my_name()}][{symbol.upper()}] "
+					f"Attempted to write to closed file: {file_path}"
+				)
+				return False
 
 			json_writer.write(
 				orjson.dumps(snapshot).decode() + "\n"
@@ -547,6 +564,16 @@ async def symbol_dump_snapshot(
 			latest_json_flush[symbol] = cur_time_ms
 
 			return True
+
+		except ValueError as e:
+
+			if "closed file" in str(e):
+
+				# 파일이 닫힌 경우 조용히 처리 (shutdown 중일 가능성)
+				return False
+
+			else:
+				raise  # 다른 ValueError는 그대로 전파
 
 		except Exception as e:
 
@@ -762,6 +789,7 @@ async def symbol_dump_snapshot(
 			json_flush_interval,
 			latest_json_flush,
 			file_path,
+			shutdown_manager,
 		):
 
 			logger.error(

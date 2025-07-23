@@ -4,7 +4,7 @@
 
 import asyncio, logging
 import websockets, orjson
-import statistics
+import statistics, random
 from collections import deque
 from typing import Optional
 from util import (
