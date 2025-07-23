@@ -17,12 +17,12 @@ Binance websocket:
 ————————————————————————————————————————————————————————————————————————————————
 
 Dependency:
-	python==3.9.23
+	python==3.11.13
 	pyinstaller==6.14.2
-	pyinstaller==hooks-contrib-2025.5
-	websockets==11.0.3
-	fastapi==0.111.0
-	uvicorn==0.30.1
+	pyinstaller-hooks-contrib==2025.7
+	websockets==15.0.1
+	fastapi==0.116.1
+	uvicorn==0.35.0
 	psutil==7.0.0
 	memray==1.17.2
 

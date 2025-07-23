@@ -1,35 +1,92 @@
-### 1. 소프트웨어의 목적 (Purpose)
+#### 먼저, 3줄 그림 ― 어린이용 요약
 
-* **저지연‧고안정 실시간 주문서(Depth20) 수집**
-  *stream\_binance.py*는 바이낸스 **WebSocket** 스트림(`@depth20@100ms`)을 구독하여 지정한 암호화폐 심볼들의 호가 스냅샷을 **100 ms 간격**으로 받아옵니다 .
-* **네트워크 품질 기반 스트림 제어**
-  별도 **estimate\_latency** 코루틴이 서버‑클라이언트 왕복 지연(latency)을 지속 측정하고, 임계값을 초과하면 **gate\_streaming\_by\_latency**가 스트림 자체를 일시 정지시켜 데이터 불일치와 과부하를 방지합니다 .
-* **안정적 데이터 영속화 및 로깅**
-  수집된 스냅샷은 분(minute) 단위 `.jsonl`로 저장 후 즉시 **zip** 압축하고, 일(日) 단위로 다시 합쳐 하나의 아카이브로 보존하여 디스크 I/O를 최소화합니다 .
-* **실시간 운영 Dashboard 제공**
-  **FastAPI** + **WebSocket** 기반 대시보드가 지연·플러시 주기·큐 크기, 그리고 CPU/메모리/네트워크 부하 등을 시각화해 운영 가시성을 확보합니다 .
-* **프로세스‑안전 종료(Graceful Shutdown)**
-  **ShutdownManager**가 `ProcessPoolExecutor`, 열려 있는 파일 핸들, Signal(SIGINT/SIGTERM)을 한곳에서 관리해 중단 시 데이터 손실과 메모리 누수를 예방합니다 .
-* **보강 도구**
-  ‑ *get\_binance\_chart.py*: 과거 **aggTrades** CSV .zip을 병렬로 내려받아 백필(back‑fill)용 데이터 세트를 구축 .
-  ‑ *fs\_to\_html.py*: 리포 지트리 구조를 HTML로 렌더링하여 문서화 자동화 .
+1. **달리기 신발 갈아끼우기** : 파이썬이 달릴 때 쓰는 운동화를 더 빠른 **uvloop**로 바꾸면 프로그램이 쌩쌩 뛰어요.
+2. **빨대 굵게 바꾸기** : 느린 `json` 빨대 대신 **orjson** 같은 굵은 빨대를 쓰면 숫자·글자를 훨씬 빨리 들이마셔요.
+3. **순서대로 해 보기** : 신발 → 빨대 → 그다음 고급 옵션(메시지팩·새 파이썬) 순으로 갈아끼우면 힘들이지 않고 점점 빨라져요.
 
 ---
 
-### 2. 기술적 방법론 (Technical Methodology)
+## 1 순위별 “가성비” 업그레이드 로드맵
 
-| 서브시스템  | 핵심 기법(영어)                                              | 설명                                                                                                                                                                                |
-| ------ | ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 실시간 수집 | **asyncio**, **websockets**, back‑pressure **Queue**   | `put_snapshot()` 코루틴이 비동기 소켓으로부터 메시지를 해석‑보정(지연, 계산 오버헤드) 후 심볼별 `asyncio.Queue`에 넣습니다 .                                                                                            |
-| 지연 관리  | **statistics.median**, 이벤트 플래그                         | `estimate_latency()`가 심볼별 지연값을 데크(deque)에 쌓아 중앙값을 갱신하고, `gate_streaming_by_latency()`가 두 이벤트(`event_latency_valid`, `event_stream_enable`)를 토글하여 스트림 ON/OFF를 제어합니다 .              |
-| 스냅샷 덤프 | 파일 롤오버, **ProcessPoolExecutor**                        | `symbol_dump_snapshot()`이 분 단위 파일을 열고, 롤오버 시 직전 파일을 닫아 \*\*proc\_zip\_n\_remove\_jsonl()\*\*로 압축·삭제, 일자 변경 시 \*\*symbol\_consolidate\_a\_day()\*\*를 별도 프로세스로 호출해 일일 아카이브를 생성합니다 . |
-| 모니터링   | **FastAPI**, **WebSocket**, **psutil**                 | `DashboardServer`가 `/dashboard` HTML과 `/ws/dashboard` 소켓을 제공하며, `monitor_hardware()`가 CPU·메모리·디스크·네트워크 메트릭을 주기적으로 업데이트합니다 .                                                       |
-| 로깅     | **logging.QueueHandler / QueueListener**, UTC ISO‑8601 | 멀티‑프로세스 안전 로그를 단일 큐에 집계 후 파일(`RotatingFileHandler`)과 콘솔에 동시 출력, 시계열 일관성을 위해 UTC 타임스탬프 사용 .                                                                                        |
-| 종료 처리  | **thread‑safe state**, signal hook                     | `ShutdownManager`가 실행 중인 executor와 파일 핸들을 원자적으로 정리하고, 중복 종료를 방지하는 내부 플래그를 유지합니다 .                                                                                                 |
-| 구성 관리  | `.conf` 파싱                                             | `init.load_config()`가 모든 파라미터(SYMBOLS, interval, backoff 등)를 로드해 런타임에 주입합니다 .                                                                                                     |
+| 우선순위  | 제안                                   | 한-줄 효과                                  | 코드 변경량                                         | 난이도 (1 낮음 \~ 5 높음) | 왜 타당한가                                                                                                                              |
+| ----- | ------------------------------------ | --------------------------------------- | ---------------------------------------------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| **①** | **uvloop** 도입                        | 이벤트루프 자체 가속 (I/O 스루풋 \~1.5–2×)          | `import uvloop; uvloop.install()` 한 줄          | **1**              | Linux·WSL2 환경에선 libuv 엔진이 기본 asyncio 보다 일관되게 빠름 ([PyPI][1])                                                                         |
+| **②** | **orjson** 으로 `json.dumps/loads` 교체  | 직렬화·역직렬화 속도 4–11× 증가                    | `import orjson as json` + 반환값(b → str) 한두 줄 보정 | **2**              | 실코드 호출 지점 `json.dumps` 및 `json.loads` 가 핵심 병목 (예: `flush_snapshot` 쓰기, `put_snapshot` 파싱) . orjson은 현존 가장 빠른 JSON 라이브러리 ([PyPI][2]) |
+| **③** | **msgspec** (JSON + 타입 검증)           | orjson 보다 디코딩·검증이 더 빠름·메모리 감소           | 스키마 정의 + `msgspec.json.encode/decode` 치환       | **3**              | 주문서 구조가 고정이므로 정적 스키마 혜택이 큼 ([GitHub][3])                                                                                            |
+| **④** | **CPython 3.12/3.13 업그레이드** (+PGO)   | 바이트코드 최적화·Free-threading로 5-30 % 전반적 향상 | 가상환경 재빌드, 일부 의존성 리빌드                           | **2**              | 현재 3.9.23 사용  → 최신 런타임만 바꿔도 asyncio·gzip·zipfile 등 표준모듈이 자체 가속                                                                      |
+| **⑤** | **aiofiles + ThreadPoolExecutor 제거** | 파일 I/O 비동기화로 이벤트루프 블로킹 최소화              | `open()`→`aiofiles.open()` 치환 + write await    | **3**              | 분-단위 JSONL 쓰기가 `flush_snapshot` 에서 동기 블로킹                                                                                           |
+| **⑥** | **zstandard 압축**                     | 일자 병합·압축 속도 3×, 압축률 ↑                   | `zipfile`→`zstandard` API 교체                   | **4**              | 하루치 파일 병합·압축 루틴(`symbol_consolidate_a_day`) 병목 해소                                                                                   |
+
+> **실전 적용 팁**
+>
+> * ①–②는 **“주석 2줄 + pip install”** 로 바로 체감 가능.
+> * uvloop 설치 후 **WSL2 Ubuntu** 기준 메모리 사용·CPU 퍼센트 추이를 대시보드로 비교해보면 효과가 명확하다.
+> * orjson `dumps()` 는 **bytes** 를 돌려주므로 `flush_snapshot` 에서 `b"\n"` 로 쓰거나 `bytes.decode()` 한 뒤 쓰도록 살짝 보정한다.
 
 ---
 
-#### 종합 정리
+## 2 각 제안의 기술적 배경과 고려 사항
 
-이 프로그램은 **네트워크 상태를 실시간 감시하며 지연이 허용 범위 내일 때만** 바이낸스 주문서 스트림을 받아 **고해상도(100 ms) LOB 데이터를 안정적으로 축적**하고, 파일 압축·병합을 통해 저장 효율을 높입니다. 또한 **모니터링 대시보드와 안전한 종료 메커니즘**을 갖춰 24×7 운영이 가능한 **프로덕션급 데이터 인프라**를 목표로 설계되었습니다.
+### ① uvloop (이벤트루프 엔진 교체)
+
+* **libuv** 기반 Cython 구현 → 컨텍스트 스위칭·타이머·소켓 폴링이 빠름.
+* `asyncio.run()` 전에 `uvloop.install()` 만 호출하면 끝.
+* 2025년 기준 일부 aiohttp-호환성 이슈가 이슈트래커에 있으니 (예: aiohttp #10494) 테스트 후 롤백 플랜 유지 ([GitHub][4]).
+
+### ② orjson (고속 JSON)
+
+* SIMD (AVX-512)·Rust 구현으로 `json.dumps()` 최대 11×, `loads()` 최대 3× 속도 ([PyPI][5]).
+* **변경 포인트**
+
+  ```python
+  import orjson as json           # 표준 json 대체
+  json.dumps(obj)                 # -> bytes
+  f.write(json.dumps(obj) + b"\n")
+  ```
+* 바이너리 결과는 네트워크·디스크 모두 효율적이라 I/O 부하도 감소.
+
+### ③ msgspec (스키마 + 직렬화)
+
+* 단순 치환만으로도 **orjson ≥ 속도 + 타입검증 0 코스트**.
+* `class Depth20(msgspec.Struct): lastUpdateId: int; eventTime: int; bids: list[tuple[float,float]]; ...` 처럼 선언 후 `msgspec.json.decode(raw, type=Depth20)` 사용.
+
+### ④ 최신 CPython 3.12+
+
+* **PEP 659**(Specializing Adaptive Interpreter)·PGO 빌드, `asyncio` 마이크로 최적화로 기본 루프가 최대 30 % 가속.
+* 종속 패키지(uvicorn, websockets 등) 모두 3.12 wheel 제공 → 이식 용이.
+
+### ⑤ aiofiles
+
+* 현재 `flush_snapshot` 가 매번 동기 `write/flush` 로 루프를 잠근다. `aiofiles.open` 으로 교체하면 파일 I/O 가 별 스레드에서 실행되어 **100 ms** 주기를 더 안정적으로 유지.
+
+### ⑥ zstandard
+
+* `zipfile`(deflate) 대신 **zstd** 는 CPU 효율 좋아 압축-해제 모두 수 배 빠름. 일일 병합·정리 작업 (`symbol_consolidate_a_day`) 시간 단축에 직결.
+
+---
+
+## 3 실행 순서 & 테스트 체크리스트
+
+1. **uvloop** → 단위 부하 테스트 (대시보드 QPS, CPU%)
+2. **orjson** → JSONL 쓰기·읽기 무결성 확인 (sha256 비교).
+3. **msgspec (선택)** → 구조체형 decode latency 측정.
+4. **Python 3.12+ 업그레이드** → `pytest`, 메모리 프로파일(`memray`) 돌려보기.
+5. **aiofiles / zstandard** → 병합·압축 경로별 타임라인 비교.
+
+> **주요 기준** : “코드 난수화 없이 한두 줄로 붙일 수 있는가?” → 위 순서대로 적용하면서 단계별 롤백 가능하도록 Git tag 컷을 권장.
+
+---
+
+### 끝으로 — 왜 “작은 노력 대비 큰 효과” 인가?
+
+* **핫스팟을 정확히 치환** : JSON 파싱·쓰기, 이벤트루프처럼 매 10 ms 마다 실행되는 부분만 교체해도 전체 시스템에 선형으로 이득이 누적됨.
+* **호환성 안전망** : 제안한 라이브러리들은 CPython 3.9+ ABI 호환 binary wheel 제공 → 리빌드 부담 최소.
+* **관측 가능성 확보** : 이미 갖춘 FastAPI 대시보드·`memray` 덕분에 before/after 를 실시간으로 관찰·회귀 테스트할 수 있으므로 도입-검증-롤백 주기가 짧다.
+
+이렇게 단계별로 적용하면 **“최소 리스크 ↔ 최대 체감”** 의 업그레이드를 경험할 수 있을 것입니다. 궁금한 점이나 특정 단계의 코드 예제가 필요하면 언제든 알려 주세요!
+
+[1]: https://pypi.org/project/uvloop/?utm_source=chatgpt.com "uvloop - PyPI"
+[2]: https://pypi.org/project/orjson/?utm_source=chatgpt.com "orjson - PyPI"
+[3]: https://github.com/jcrist/msgspec?utm_source=chatgpt.com "jcrist/msgspec: A fast serialization and validation library, with builtin ..."
+[4]: https://github.com/aio-libs/aiohttp/discussions/10494?utm_source=chatgpt.com "Is it still recommended to use uvloop to improve performance? #10494"
+[5]: https://pypi.org/project/orjson/2.0.1/?utm_source=chatgpt.com "orjson - PyPI"
