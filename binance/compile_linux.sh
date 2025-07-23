@@ -18,8 +18,7 @@ if [[ $DEBUG == true ]]; then
   set -x
 fi
 
-export CC="ccache gcc"
-export CXX="ccache g++"
+which ccache &>/dev/null && echo "[INFO] ccache is available and will be used automatically"
 
 >&2 echo "[DEBUG] Script started: $(date)"
 >&2 echo "[DEBUG] CONDA_DEFAULT_ENV=$CONDA_DEFAULT_ENV"
@@ -60,6 +59,9 @@ echo "Python version check passed: $PY_VERSION"
 #———————————————————————————————————————————————————————————————————————————————
 # 2) Build with Nuitka
 #———————————————————————————————————————————————————————————————————————————————
+# --noinclude-default-mode=nofollow \
+#	Avoids accidental inclusion of standard lib modules not explicitly followed.
+#———————————————————————————————————————————————————————————————————————————————
 echo "Building native one‑file executable (this may take a while)…"
 stdbuf -oL -eL "$PYTHON" -m nuitka \
   --onefile \
@@ -76,7 +78,6 @@ stdbuf -oL -eL "$PYTHON" -m nuitka \
   --follow-imports \
   --assume-yes-for-downloads \
   --lto=no \
-  # Avoids accidental inclusion of standard lib modules not explicitly followed.
   --noinclude-default-mode=nofollow \
   --jobs=$(nproc) \
   --static-libpython=no \
