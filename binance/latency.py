@@ -1,6 +1,23 @@
 # latency.py
 
 #———————————————————————————————————————————————————————————————————————————————
+# Binance latency sanity check
+#———————————————————————————————————————————————————————————————————————————————
+# Observed ≈135 ms one‑way latency (local_recv_ts − server_event_ts) from Swiss.
+#
+# Plausibility:
+#   • Likely route: Switzerland → AWS ap‑northeast‑1 (Tokyo, Spot REST primary)
+#	 or Cloudflare / GCP PoP → Binance WS broker.
+#	 Propagation CH→JP ≈50‑60 ms; add router, TLS, Anycast & broker hops
+#	 ≈10‑25 ms ⇒ practical upper‑bound 100‑140 ms → 135 ms fits.
+#   • Binance exposes several hosts:
+#	   - Primary REST:   api.binance.com  (Tokyo)
+#	   - Alternatives:   api1.binance.com, api‑gcp.binance.com
+#	   - Market data:	data‑api.binance.vision
+#	 All WS endpoints are Anycast, so region may vary per connection.
+#   • Measurement: server_event_ts comes in the WS payload; Chrony‑synced local
+#	 clock, parsing+GC <1 ms, clock skew ±1 ms ⇒ figure is trustworthy.
+#———————————————————————————————————————————————————————————————————————————————
 
 import asyncio, logging
 import websockets, orjson
@@ -11,7 +28,7 @@ from util import (
 	my_name,
 	NanoTimer,
 	get_current_time_ms,
-	format_ws_url,
+	geo, format_ws_url,
 )
 
 #———————————————————————————————————————————————————————————————————————————————
@@ -143,6 +160,13 @@ async def estimate_latency(
 				ping_timeout  = ws_ping_timeout
 			) as ws:
 
+				ip, port = ws.remote_address or ("?", "?")
+				loc = await geo(ip) if ip != "?" else "?"
+
+				logger.info(
+					f"[{my_name()}] Websocket peer {ip}:{port}  ({loc})"
+				)
+				
 				logger.info(
 					f"[{my_name()}] "
 					f"Connected to:\n"

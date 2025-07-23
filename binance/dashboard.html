@@ -67,10 +67,6 @@
 				<td>Storage Usage</td>
 				<td id="storageUsage">0.0%</td>
 			</tr>
-			<tr>
-				<td>GC Time Cost</td>
-				<td id="gcTimeCost">0.0 (us)</td>
-			</tr>
 		</tbody>
 	</table>
 
@@ -99,11 +95,6 @@
 
 		ws.onmessage = (event) => {
 			const data = JSON.parse(event.data);
-
-			// Update GC Time Cost
-			if (data.gc_time_cost_ms !== undefined) {
-				document.getElementById("gcTimeCost").textContent = `${data.gc_time_cost_ms.toFixed(2)} ms`;
-			}
 
 			const medLatency = data.med_latency;
 			const flushInterval = data.flush_interval;

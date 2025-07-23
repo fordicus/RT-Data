@@ -4,14 +4,16 @@
 
 import sys, os, time, inspect, logging, multiprocessing
 import asyncio, uvloop
-
+import aiohttp, socket
+from functools import lru_cache
 from datetime import datetime, timezone
 
 #———————————————————————————————————————————————————————————————————————————————
 # Technical Utilities
 #———————————————————————————————————————————————————————————————————————————————
 
-def my_name():
+def my_name() -> str:
+
 	frame = inspect.stack()[1]
 	return f"{frame.function}:{frame.lineno}"
 
@@ -146,6 +148,57 @@ class NanoTimer:
 	def __exit__(self, exc_type, exc_value, traceback):
 
 		pass
+
+#———————————————————————————————————————————————————————————————————————————————
+# Web Utilities
+#———————————————————————————————————————————————————————————————————————————————
+
+@lru_cache(maxsize=256)						# cache to hit the API once per IP
+async def geo(ip: str) -> str:
+	"""
+	Return 'City, Country' (or '?' if unknown) for a public IP.
+	Uses the free ip-api.com JSON endpoint (≈ 45 ms median, no key required).
+	"""
+
+	url = (
+		f"http://ip-api.com/json/{ip}?fields=city,country"
+	)   # :contentReference[oaicite:0]{index=0}
+
+	try:
+
+		async with aiohttp.ClientSession(
+			timeout=aiohttp.ClientTimeout(total=2)
+		) as s:
+
+			async with s.get(url) as r:
+
+				if r.status == 200:
+
+					data = await r.json()
+					return (
+						f"{data.get('city') or '?'} "
+						f"{data.get('country') or ''}".strip()
+					)
+
+	except Exception: pass
+
+	# fallback: try reverse‑DNS for AWS / GCP hosts (region code often embedded)
+
+	try:
+
+		# :contentReference[oaicite:1]{index=1}
+		host, *_ = socket.gethostbyaddr(ip)
+
+		# e.g. ec2‑54‑250‑75‑34.ap‑northeast‑1.compute.amazonaws.com
+		# →  ap‑northeast‑1 (Tokyo)
+
+		if ".compute.amazonaws.com" in host:
+
+			region = host.split(".")[-4]	# ap‑northeast‑1
+			return region.replace("-", " ").title()
+
+	except Exception: pass
+	return "?"
 
 #———————————————————————————————————————————————————————————————————————————————
 

@@ -76,7 +76,6 @@ class DashboardServer:
 		self.cpu_load_percentage: float = 0.0
 		self.mem_load_percentage: float = 0.0
 		self.storage_percentage:  float = 0.0
-		self.gc_time_cost_ms:	  float = -0.0
 		
 		#———————————————————————————————————————————————————————————————————————
 		# FastAPI App Creation
@@ -257,7 +256,6 @@ class DashboardServer:
 				"memory_percent":  self.mem_load_percentage,
 				"storage_percent": self.storage_percentage
 			},
-			"gc_time_cost_ms": self.gc_time_cost_ms,
 			"last_updated":	   ms_to_datetime(
 				get_current_time_ms()
 			).isoformat()

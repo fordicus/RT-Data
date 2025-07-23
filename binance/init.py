@@ -77,6 +77,7 @@ def load_config(
 	Optional[int],	# ws_ping_interval
 	Optional[int],	# ws_ping_timeout
 	#
+	int,			# dashboard_port_number
 	float,			# dashboard_stream_interval
 	int,			# max_dashboard_connections
 	int,			# max_dashboard_session_sec
@@ -141,6 +142,7 @@ def load_config(
 		Optional[int],	# ws_ping_interval
 		Optional[int],	# ws_ping_timeout
 		#
+		int,			# dashboard_port_number
 		float,			# dashboard_stream_interval
 		int,			# max_dashboard_connections
 		int,			# max_dashboard_session_sec
@@ -176,6 +178,7 @@ def load_config(
 			if ws_ping_interval == 0: ws_ping_interval = None
 			if ws_ping_timeout  == 0: ws_ping_timeout  = None
 
+			dashboard_port_number		 = int(config.get("DASHBOARD_PORT_NUMBER"))
 			dashboard_stream_interval	 = float(config.get("DASHBOARD_STREAM_INTERVAL"))
 			max_dashboard_connections	 = int(config.get("MAX_DASHBOARD_CONNECTIONS"))
 			max_dashboard_session_sec	 = int(config.get("MAX_DASHBOARD_SESSION_SEC"))
@@ -205,6 +208,7 @@ def load_config(
 				ws_ping_interval,
 				ws_ping_timeout,
 				#
+				dashboard_port_number,
 				dashboard_stream_interval,
 				max_dashboard_connections,
 				max_dashboard_session_sec,
@@ -266,6 +270,7 @@ def load_config(
 			#
 			ws_ping_interval, ws_ping_timeout,
 			#
+			dashboard_port_number,
 			dashboard_stream_interval,
 			max_dashboard_connections,
 			max_dashboard_session_sec,
@@ -304,6 +309,7 @@ def load_config(
 			#
 			ws_ping_interval, ws_ping_timeout,
 			#
+			dashboard_port_number,
 			dashboard_stream_interval,
 			max_dashboard_connections,
 			max_dashboard_session_sec,

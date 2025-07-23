@@ -2,93 +2,11 @@
 
 1. **TODO**
 
-	*	orjson
-	*	uvloop 
-	*	무엇을 모니터링 할 것인가 결정
-	*	모니터링 지표 중 문제 발생 시 텔레그렘 메시지 전송, e.g.,
-		*	`comp_delay_ms` in `put_snapshot`
-		*	`median_latency_dict` in `estimate_latency`
-	*	duckdns는 신뢰할 수 없음
-	*	UptimeRobot이 대시보드 포트를 모니터링하도록 설정
-
----
-<br></br>
-
-아래 아이디어들은 **“기능은 그대로 두고 속도와 자원 사용량만 줄인다”**-는 목표에 맞춰 ROI(기대 효과 ↔ 수정 난도) 순으로 정리했습니다. 대부분 **CPython만으로도 꽤 큰 체감 향상**을 낼 수 있고, 정말로 I/O 한계에 부딪힐 때만 C/Rust 바인딩을 고민해도 늦지 않습니다.
-
-## 1. 가장 큰 병목부터 없애기
-
-| 구간                                             | 현재 동작                                   | 병목 원인                                       | 개선안                                                                                                           |
-| ---------------------------------------------- | --------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| **① JSON 직렬화**                                 | `json.dumps(..., separators=(",",":"))` | 순수 Python 구현 + GIL                          | **`orjson.dumps` 또는 `msgspec.json.encode`** 사용 (둘 다 Rust 백엔드) → 5-15× 빠름, GC 압력 감소 ([GitHub][1], [GitHub][2]) |
-| **④ 매번 `os.makedirs(tmp_dir, exist_ok=True)`** | 이미 존재하는 폴더에도 시스템콜                       | 불필요 syscall                                 | 전 회차 `current_dir` 캐싱 후 바뀔 때만 생성                                                                              |
-
----
-
-## 2. 코드 스케치 (핵심만)
-
-```python
-import orjson     # pip install orjson
-from functools import partial
-from itertools import islice
-from concurrent.futures import ThreadPoolExecutor
-
-# 전역
-ZIP_EXEC = ThreadPoolExecutor(max_workers=2)
-BATCH_SIZE = 100        # 스냅샷 100개마다 디스크 flush
-ENC = partial(orjson.dumps, option=orjson.OPT_APPEND_NEWLINE)  # \n 포함
-
-async def symbol_dump_snapshot(symbol: str) -> None:
-    ...
-    last_flush_cnt = 0
-    
-    while True:
-        snapshot = await queue.get()
-        if not EVENT_STREAM_ENABLE.is_set():
-            continue
-
-        # ==== (1) 핸들 회전 로직은 그대로 ====
-
-        # ==== (2) 직렬화 & 버퍼링 ====
-        json_writer.write(ENC(snapshot))
-        last_flush_cnt += 1
-        if last_flush_cnt >= BATCH_SIZE:
-            json_writer.flush()
-            last_flush_cnt = 0
-
-        # ==== (3) ZIP 작업을 논블로킹으로 ====
-        if last_suffix != suffix and last_suffix is not None:
-            ZIP_EXEC.submit(zip_and_remove, last_file_path)
-```
-
-*`orjson.OPT_APPEND_NEWLINE`* 을 쓰면 `+"\n"`도 필요 없습니다.
-
----
-
-## 3. 추가 미세 튜닝
-
-1. **uvloop**: Linux 기준 `asyncio` 루프를 Cythonized libuv로 교체 → context-switch 적고 타이머 정확도↑.
-
-   ```python
-   import uvloop, asyncio
-   uvloop.install()
-   ```
-2. **Buffered writer 직접 지정**
-   `open(file_path, "ab", buffering=1024*1024)` (바이너리 + 1 MiB 버퍼) 후 `orjson.dumps` 결과를 그대로 `.write()`
-   → 텍스트 모드보다 변환 단계 하나 줄어듭니다.
-3. **msgspec.Struct** 를 정의해 스냅샷의 스키마가 고정돼 있다면
-   `encode(snapshot_struct)` 가 단순 dict보다 추가 20-30 % 가속을 보여줍니다 ([jcristharif.com][3]).
-
----
-
-### TL;DR
-
-* `orjson`/`msgspec` 로 직렬화 교체 + flush 주기 완화 + ZIP 백그라운드화 ⇒ **대부분의 실전 환경에서 5-10× TPS 상승**
-
-[1]: https://github.com/ijl/orjson?utm_source=chatgpt.com "ijl/orjson: Fast, correct Python JSON library supporting ... - GitHub"
-[2]: https://github.com/jcrist/msgspec?utm_source=chatgpt.com "jcrist/msgspec: A fast serialization and validation library, with builtin ..."
-[3]: https://jcristharif.com/msgspec/benchmarks.html?utm_source=chatgpt.com "Benchmarks - msgspec"
-
+	*	Home Server에서 `Chrony`가 얼마나 정확한가 조사하도록.
+	*	가장 쉽게 이상 징후를 포착하는 방법은 무엇인가?
+		*	UptimeRobot이 대시보드 포트를 모니터링하도록 설정
+	*	duckdns는 신뢰할 수 없다
+	*	`symbol_consolidate_a_day` 함수에서 무결성 검증 방법을 강구할 것
 
 ---
 <br></br>

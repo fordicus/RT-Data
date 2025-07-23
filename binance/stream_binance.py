@@ -17,17 +17,19 @@ Binance websocket:
 ————————————————————————————————————————————————————————————————————————————————
 
 Dependency:
+
 	python==3.11.13
 	uvloop==0.21.0
 	websockets==15.0.1
+	aiohttp==3.12.14
 	orjson==3.11.0
 	fastapi==0.116.1
 	uvicorn==0.35.0
 	psutil==7.0.0
-	nuitka==2.7.12
+
 	memray==1.17.2
-		pyinstaller==6.14.2
-		pyinstaller-hooks-contrib==2025.7
+	nuitka==2.7.12
+		libpython-static==3.11.13
 
 Note:
 	`msgspec` could have replaced `orjson`, but based on our tests, the switch
@@ -36,6 +38,12 @@ Note:
 	the standard `.zip` algorithm.
 	
 ————————————————————————————————————————————————————————————————————————————————
+
+For `nuitka`, you'll need:
+	sudo apt update
+		sudo apt install -y build-essential
+		sudo apt install -y patchelf
+		sudo apt install -y ccache
 
 The `memray` Python module @VS Code WSL2 Terminal:
 	sudo apt update
@@ -138,6 +146,7 @@ setup_uvloop(logger = logger)
 	#
 	WS_PING_INTERVAL, WS_PING_TIMEOUT,
 	#
+	DASHBOARD_PORT_NUMBER,
 	DASHBOARD_STREAM_INTERVAL,
 	MAX_DASHBOARD_CONNECTIONS,
 	MAX_DASHBOARD_SESSION_SEC,
@@ -383,18 +392,18 @@ if __name__ == "__main__":
 
 				logger.info(
 					f"[{my_name()}] FastAPI server starts. Try:\n"
-					f"\thttp://localhost:8000/dashboard\n"
+					f"\thttp://localhost:{DASHBOARD_PORT_NUMBER}/dashboard\n"
 				)
 
 				cfg = Config(
-					app=dashboard_server.app,  # 변경: APP → dashboard_server.app
-					host="0.0.0.0",
-					port=8000,
-					lifespan="on",
-					use_colors=True,
-					log_level="warning",
-					workers=1,
-					loop="asyncio",
+					app		   = dashboard_server.app,
+					host	   = "0.0.0.0",
+					port	   = DASHBOARD_PORT_NUMBER,
+					lifespan   = "on",
+					use_colors = True,
+					log_level  = "warning",
+					workers	   = 1,
+					loop	   = "asyncio",
 				)
 
 				server = Server(cfg)
