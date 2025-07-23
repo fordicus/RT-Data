@@ -50,7 +50,6 @@ def proc_zip_n_remove_jsonl(
 
 		try:
 
-			# `os.path.exists(src_path) == True` known by Caller
 			zip_path = src_path.replace(".jsonl", ".zip")
 
 			with zipfile.ZipFile(
@@ -64,6 +63,7 @@ def proc_zip_n_remove_jsonl(
 
 			os.remove(src_path)
 
+		except FileNotFoundError: pass
 		except Exception: raise
 
 	#——————————————————————————————————————————————————————————————
@@ -79,16 +79,7 @@ def proc_zip_n_remove_jsonl(
 			f"{symbol_upper}_orderbook_{last_suffix}.jsonl"
 		)
 
-		if os.path.exists(last_jsonl_path):
-
-			zip_and_remove(last_jsonl_path)
-
-		else:
-
-			raise RuntimeError(
-				f"File not found for compression: "
-				f"{last_jsonl_path}"
-			)
+		zip_and_remove(last_jsonl_path)
 
 	except Exception as e:
 
