@@ -1,8 +1,0 @@
-.git/
-__pycache__/
-desktop.ini
-.gitignore
-push.py
-fs_to_html.ignore
-fs_to_html.py
-_Anaconda Prompt.lnk

@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>Binance Dashboard</title>
+	<style>
+		body {
+			font-family: Arial, sans-serif;
+			margin: 20px;
+		}
+		table {
+			width: 100%;
+			border-collapse: collapse;
+			margin-bottom: 20px;
+		}
+		th, td {
+			border: 1px solid #ddd;
+			padding: 8px;
+			text-align: center;
+		}
+		th {
+			background-color: #f4f4f4;
+		}
+		tr:nth-child(even) {
+			background-color: #f9f9f9;
+		}
+		#lastUpdated {
+			margin-top: 10px;
+			font-size: 14px;
+			color: #555;
+		}
+		.section-title {
+			margin-top: 30px;
+			margin-bottom: 10px;
+			font-size: 18px;
+			font-weight: bold;
+		}
+	</style>
+</head>
+<body>
+	<h1>Binance Dashboard</h1>
+	<div id="lastUpdated">Last Updated: N/A</div>
+	
+	<div class="section-title">Hardware Metrics</div>
+	<table id="hardwareMetricsTable">
+		<thead>
+			<tr>
+				<th>Metric</th>
+				<th>Value</th>
+			</tr>
+		</thead>
+		<tbody>
+			<tr>
+				<td>Network Usage</td>
+				<td id="networkUsage">0 Mbps</td>
+			</tr>
+			<tr>
+				<td>CPU Usage</td>
+				<td id="cpuUsage">0.0%</td>
+			</tr>
+			<tr>
+				<td>Memory Usage</td>
+				<td id="memoryUsage">0.0%</td>
+			</tr>
+			<tr>
+				<td>Storage Usage</td>
+				<td id="storageUsage">0.0%</td>
+			</tr>
+			<tr>
+				<td>GC Time Cost</td>
+				<td id="gcTimeCost">0.0 (us)</td>
+			</tr>
+		</tbody>
+	</table>
+
+	<div class="section-title">Symbol Metrics</div>
+	<table id="symbolMetricsTable">
+		<thead>
+			<tr>
+				<th>Symbol</th>
+				<th>Put Snapshot Interval<br>Avg.: 0 [ms]</th>
+				<th>JSON Flush Interval<br>Avg.: 0 [ms]</th>
+				<th id="queueSizeHeader">Queue Size<br>Total: 0</th>
+				<th>Median Latency<br>Avg.: 0 [ms]</th>
+			</tr>
+		</thead>
+		<tbody>
+			<!-- Rows will be dynamically added here -->
+		</tbody>
+	</table>
+
+	<script>
+		const ws = new WebSocket(`ws://${window.location.host}/ws/dashboard`);
+
+		ws.onopen = () => {
+			console.log("WebSocket connection established.");
+		};
+
+		ws.onmessage = (event) => {
+			const data = JSON.parse(event.data);
+
+			// Update GC Time Cost
+			if (data.gc_time_cost_ms !== undefined) {
+				document.getElementById("gcTimeCost").textContent = `${data.gc_time_cost_ms.toFixed(2)} ms`;
+			}
+
+			const medLatency = data.med_latency;
+			const flushInterval = data.flush_interval;
+			const snapshotInterval = data.snapshot_interval;
+			const queueSize = data.queue_size;
+			const hardware = data.hardware;
+			const lastUpdated = data.last_updated;
+
+			// Update hardware metrics
+			if (hardware) {
+				document.getElementById("networkUsage").textContent = `${hardware.network_mbps.toFixed(2)} Mbps`;
+				document.getElementById("cpuUsage").textContent = `${hardware.cpu_percent.toFixed(2)}%`;
+				document.getElementById("memoryUsage").textContent = `${hardware.memory_percent.toFixed(2)}%`;
+				document.getElementById("storageUsage").textContent = `${hardware.storage_percent.toFixed(2)}%`;
+			}
+
+			// Correct the logic for updating Symbol Metrics table header and rows
+			let snapshotIntervalAvg = 0;
+			let flushIntervalAvg = 0;
+			let medLatencyAvg = 0;
+			let snapshotCount = 0;
+			let flushCount = 0;
+			let latencyCount = 0;
+			let queueSizeTotal = 0; // Define queueSizeTotal before usage
+
+			for (const symbol in snapshotInterval) {
+				snapshotIntervalAvg += snapshotInterval[symbol];
+				snapshotCount++;
+			}
+			snapshotIntervalAvg = snapshotCount > 0 ? (snapshotIntervalAvg / snapshotCount).toFixed(2) : 0;
+
+			for (const symbol in flushInterval) {
+				flushIntervalAvg += flushInterval[symbol];
+				flushCount++;
+			}
+			flushIntervalAvg = flushCount > 0 ? (flushIntervalAvg / flushCount).toFixed(2) : 0;
+
+			for (const symbol in medLatency) {
+				medLatencyAvg += medLatency[symbol];
+				latencyCount++;
+			}
+			medLatencyAvg = latencyCount > 0 ? (medLatencyAvg / latencyCount).toFixed(2) : 0;
+
+			const symbolTableBody = document.querySelector("#symbolMetricsTable tbody");
+			symbolTableBody.innerHTML = ""; // Clear existing rows
+
+			for (const symbol in medLatency) {
+				const row = document.createElement("tr");
+				const symbolCell = document.createElement("td");
+				const snapshotCell = document.createElement("td");
+				const flushCell = document.createElement("td");
+				const queueCell = document.createElement("td");
+				const latencyCell = document.createElement("td");
+
+				symbolCell.textContent = symbol.toUpperCase();
+				snapshotCell.textContent = snapshotInterval[symbol] || 0;
+				flushCell.textContent = flushInterval[symbol] || 0;
+				const queueSizeValue = queueSize[symbol] || 0;
+				queueCell.textContent = queueSizeValue;
+				latencyCell.textContent = medLatency[symbol] || 0;
+
+				queueSizeTotal += queueSizeValue;
+
+				row.appendChild(symbolCell);
+				row.appendChild(snapshotCell);
+				row.appendChild(flushCell);
+				row.appendChild(queueCell);
+				row.appendChild(latencyCell);
+				symbolTableBody.appendChild(row);
+			}
+
+			// Update Symbol Metrics table header with new style
+			const symbolMetricsHeader = document.querySelector("#symbolMetricsTable thead tr");
+			symbolMetricsHeader.innerHTML = `
+				<th>Symbol</th>
+				<th>Put Snapshot Interval<br>Avg.: ${snapshotIntervalAvg} [ms]</th>
+				<th>JSON Flush Interval<br>Avg.: ${flushIntervalAvg} [ms]</th>
+				<th id="queueSizeHeader">Queue Size<br>Total: ${queueSizeTotal}</th>
+				<th>Median Latency<br>Avg.: ${medLatencyAvg} [ms]</th>
+			`;
+
+			const formattedTime = new Date(lastUpdated).toISOString().slice(0, 19) + "Z";
+			document.querySelector("#lastUpdated").textContent = `Last Updated: ${formattedTime}`;
+		};
+
+		ws.onerror = (error) => {
+			console.error("WebSocket error:", error);
+		};
+
+		ws.onclose = () => {
+			console.log("WebSocket connection closed.");
+		};
+	</script>
+</body>
+</html>

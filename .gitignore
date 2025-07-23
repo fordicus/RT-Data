@@ -8,7 +8,7 @@ get_bybit_chart_dom.conf
 # Local
 *.data
 *.csv
-_Anaconda Prompt.lnk
+_Anaconda Prompt_.lnk
 
 # ========================
 # 📂 Project-Specific Data & Output Folders
@@ -17,8 +17,8 @@ data/
 datasets/
 downloads/
 outputs/
-unshared/
-_dev_log_/
+__unshared__/
+__dev_log__/
 
 # ========================
 # 🛠️  Build Artifacts
