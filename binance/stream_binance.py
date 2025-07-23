@@ -436,6 +436,11 @@ if __name__ == "__main__":
 		)
 		raise SystemExit from e
 
-	finally: pass
+	finally: 
+		# QueueListener 정리 - 스레드 오류 방지
+		try:
+			queue_listener.stop()
+		except Exception:
+			pass  # 조용히 무시
 
 #———————————————————————————————————————————————————————————————————————————————
