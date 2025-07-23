@@ -3,7 +3,6 @@
 #———————————————————————————————————————————————————————————————————————————————
 
 import logging, asyncio
-
 from collections import OrderedDict, deque
 from io import TextIOWrapper
 from typing import Optional
@@ -16,29 +15,38 @@ from util import(
 
 #———————————————————————————————————————————————————————————————————————————————
 
-def setup_uvloop(logger: logging.Logger = None) -> bool:
+def setup_uvloop(
+	logger:  logging.Logger = None,
+	verbose: bool = False,
+) -> bool:
 
-    try:
+	try:
 
-        import uvloop
-        asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
-        if logger:
-            logger.info(f"[{my_name()}] uvloop event loop policy enabled.")
-        return True
+		import uvloop
+		asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
-    except ImportError:
+		to_prt = f"[{my_name()}] uvloop event loop policy enabled."
+		if logger:	  logger.info(to_prt)
+		elif verbose: print(to_prt, flush = True)
 
-        if logger:
-            logger.warning(
-				f"[{my_name()}] uvloop not available - using default asyncio."
-			)
-        pass
+		return True
 
-    except Exception as e:
+	except ImportError:
 
-        if logger:
-            logger.error(f"[{my_name()}] Failed to setup uvloop: {e}")
-        return False
+		to_prt = (
+			f"[{my_name()}] "
+			f"uvloop not available - using default asyncio."
+		)
+		if logger:	  logger.warning(to_prt)
+		elif verbose: print(to_prt, flush = True)
+		pass
+
+	except Exception as e:
+
+		to_prt = f"[{my_name()}] Failed to setup uvloop: {e}"
+		if logger:	  logger.error(to_prt)
+		elif verbose: print(to_prt, flush = True)
+		return False
 
 #———————————————————————————————————————————————————————————————————————————————
 

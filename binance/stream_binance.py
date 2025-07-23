@@ -20,6 +20,7 @@ Dependency:
 	python==3.11.13
 	uvloop==0.21.0
 	websockets==15.0.1
+	orjson==3.11.0
 	fastapi==0.116.1
 	uvicorn==0.35.0
 	psutil==7.0.0
@@ -108,7 +109,9 @@ os.environ["SSL_CERT_FILE"] = certifi.where()
 
 logger, queue_listener = set_global_logger()
 
-setup_uvloop(logger)
+setup_uvloop(logger = logger, verbose = True)
+
+#———————————————————————————————————————————————————————————————————————————————
 
 (
 	SYMBOLS,

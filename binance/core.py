@@ -12,7 +12,7 @@ from util import (
 	get_subprocess_logger
 )
 
-import sys, os, io, asyncio, json
+import sys, os, io, asyncio, orjson
 import shutil, zipfile, logging
 import websockets, time, random
 
@@ -539,9 +539,7 @@ async def symbol_dump_snapshot(
 		try:
 
 			json_writer.write(
-				json.dumps(snapshot, 
-					separators=(",", ":")
-				) + "\n"
+				orjson.dumps(snapshot).decode() + "\n"
 			)
 			json_writer.flush()
 
@@ -850,7 +848,7 @@ async def put_snapshot(		# @depth20@100ms
 
 					try:
 
-						msg	= json.loads(raw)
+						msg = orjson.loads(raw)
 						stream = msg.get("stream", "")
 						cur_symbol = (
 							stream.split("@", 1)[0]

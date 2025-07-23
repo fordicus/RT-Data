@@ -3,6 +3,8 @@
 #———————————————————————————————————————————————————————————————————————————————
 
 import sys, os, time, inspect, logging, multiprocessing
+import asyncio, uvloop
+
 from datetime import datetime, timezone
 
 #———————————————————————————————————————————————————————————————————————————————
@@ -46,7 +48,24 @@ def resource_path(	# Resource Resolver for PyInstaller
 			f"[{my_name()}] Failed to "
 			f"resolve path: {relative_path}"
 		) from e
+
+#———————————————————————————————————————————————————————————————————————————————
+
+def get_event_loop_info() -> bool:
+
+	try:
+
+		loop = asyncio.get_running_loop()
+		return (
+			isinstance(loop, uvloop.Loop)
+			and loop.is_running()
+			and not loop.is_closed()
+		)
+
+	except RuntimeError:
 		
+		return False
+
 #———————————————————————————————————————————————————————————————————————————————
 # Time Utilities
 #———————————————————————————————————————————————————————————————————————————————

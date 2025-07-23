@@ -2,7 +2,7 @@
 
 #———————————————————————————————————————————————————————————————————————————————
 
-import os, asyncio, random, time, statistics, psutil, logging
+import os, asyncio, orjson, random, time, statistics, psutil, logging
 from contextlib import asynccontextmanager
 from collections import deque
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
@@ -274,7 +274,7 @@ class DashboardServer:
 		"""
 		Dashboard WebSocket handler.
 		"""
-		
+	
 		reconnect_attempt = 0
 		
 		while True:
@@ -323,7 +323,9 @@ class DashboardServer:
 
 							data = await self._build_monitoring_data()
 							
-							await websocket.send_json(data)
+							await websocket.send_text(
+								orjson.dumps(data).decode()
+							)
 							
 							# Check session time
 
