@@ -292,7 +292,7 @@ def load_config(
 def init_runtime_state(
 	median_latency_dict:	dict[str, int],
 	latest_json_flush:		dict[str, int],
-	json_flush_interval:	dict[str, int],
+	json_flush_interval:	dict[str, deque[int]],
 	put_snapshot_interval:	dict[str, deque[int]],
 	snapshots_queue_dict:	dict[str, asyncio.Queue],
 	snapshots_queue_max:	int,
@@ -301,6 +301,7 @@ def init_runtime_state(
 	records_znr_minutes:	dict[str, OrderedDict[str]],
 	symbols:				list[str],
 	logger:					logging.Logger,
+	monitoring_deque_len:	int = 100,
 ) -> tuple[
 	asyncio.Event,
 	asyncio.Event,
@@ -323,13 +324,13 @@ def init_runtime_state(
 
 		json_flush_interval.clear()
 		json_flush_interval.update({
-			symbol: 0
+			symbol: deque(maxlen=monitoring_deque_len)
 			for symbol in symbols
 		})
 
 		put_snapshot_interval.clear()
 		put_snapshot_interval.update({
-			symbol: deque(maxlen=1)
+			symbol: deque(maxlen=monitoring_deque_len)
 			for symbol in symbols
 		})
 

@@ -17,7 +17,7 @@ import shutil, zipfile, logging
 import websockets, time, random
 
 from io import TextIOWrapper
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from typing import Optional
 from concurrent.futures import ProcessPoolExecutor
 
@@ -313,7 +313,7 @@ async def symbol_dump_snapshot(
 	event_stream_enable:	asyncio.Event,
 	lob_dir:				str,
 	symbol_to_file_handles: dict[str, tuple[str, TextIOWrapper]],
-	json_flush_interval:	dict[str, int],
+	json_flush_interval:	dict[str, deque[int]],
 	latest_json_flush:		dict[str, int],
 	purge_on_date_change:	int,
 	merge_executor:			ProcessPoolExecutor,
@@ -531,8 +531,8 @@ async def symbol_dump_snapshot(
 		snapshot: dict,
 		symbol: str,
 		symbol_to_file_handles: dict[str, tuple[str, TextIOWrapper]],
-		json_flush_interval: dict[str, int],
-		latest_json_flush: dict[str, int],
+		json_flush_interval:	dict[str, deque[int]],
+		latest_json_flush:		dict[str, int],
 		file_path: str,
 	) -> bool:
 
@@ -545,13 +545,13 @@ async def symbol_dump_snapshot(
 			)
 			json_writer.flush()
 
-			current_time = get_current_time_ms()
+			cur_time_ms = get_current_time_ms()
 
-			json_flush_interval[symbol] = (
-				current_time - latest_json_flush[symbol]
+			json_flush_interval[symbol].append(
+				cur_time_ms - latest_json_flush[symbol]
 			)
 			
-			latest_json_flush[symbol] = current_time
+			latest_json_flush[symbol] = cur_time_ms
 
 			return True
 
@@ -777,11 +777,11 @@ async def symbol_dump_snapshot(
 				exc_info=True
 			)
 
+		# await asyncio.sleep(1)	# when simulating some delays
+
 		del snapshot, file_path
 
 #———————————————————————————————————————————————————————————————————————————————
-
-from collections import deque
 
 async def put_snapshot(		# @depth20@100ms
 	put_snapshot_interval:	dict[str, deque[int]],

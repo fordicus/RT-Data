@@ -143,7 +143,7 @@ PUT_SNAPSHOT_INTERVAL:	dict[str, deque[int]] = {}
 MEDIAN_LATENCY_DICT:	dict[str, int] = {}
 
 LATEST_JSON_FLUSH:		dict[str, int] = {}
-JSON_FLUSH_INTERVAL:	dict[str, int] = {}
+JSON_FLUSH_INTERVAL:	dict[str, deque[int]] = {}
 
 #———————————————————————————————————————————————————————————————————————————————-
 
