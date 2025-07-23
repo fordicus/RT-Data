@@ -45,7 +45,7 @@ fi
 
 # Check Python version
 PY_VERSION=$($PYTHON -c 'import platform; print(platform.python_version())')
-if [[ "$PY_VERSION" != "3.9.23" ]]; then
+if [[ "$PY_VERSION" != "3.11.13" ]]; then
 	echo "❌ Python version is $PY_VERSION — expected 3.9.23"
 	exit 1
 fi
