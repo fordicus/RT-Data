@@ -79,10 +79,10 @@
 		<thead>
 			<tr>
 				<th>Symbol</th>
-				<th>Put Snapshot Interval [ms]</th>
-				<th>JSON Flush Interval [ms]</th>
-				<th id="queueSizeHeader">qSize (Total: 0)</th>
-				<th>Median Latency [ms]</th>
+				<th>Put Snapshot Interval<br>Avg.: 0 [ms]</th>
+				<th>JSON Flush Interval<br>Avg.: 0 [ms]</th>
+				<th id="queueSizeHeader">Queue Size<br>Total: 0</th>
+				<th>Median Latency<br>Avg.: 0 [ms]</th>
 			</tr>
 		</thead>
 		<tbody>
@@ -146,13 +146,14 @@
 			}
 			medLatencyAvg = latencyCount > 0 ? (medLatencyAvg / latencyCount).toFixed(2) : 0;
 
+			// Update Symbol Metrics table header with new style
 			const symbolMetricsHeader = document.querySelector("#symbolMetricsTable thead tr");
 			symbolMetricsHeader.innerHTML = `
 				<th>Symbol</th>
-				<th>Put Snapshot Interval [ms] (Avg: ${snapshotIntervalAvg})</th>
-				<th>JSON Flush Interval [ms] (Avg: ${flushIntervalAvg})</th>
-				<th id="queueSizeHeader">qSize (Total: 0)</th>
-				<th>Median Latency [ms] (Avg: ${medLatencyAvg})</th>
+				<th>Put Snapshot Interval<br>Avg.: ${snapshotIntervalAvg} [ms]</th>
+				<th>JSON Flush Interval<br>Avg.: ${flushIntervalAvg} [ms]</th>
+				<th id="queueSizeHeader">Queue Size<br>Total: ${queueSizeTotal}</th>
+				<th>Median Latency<br>Avg.: ${medLatencyAvg} [ms]</th>
 			`;
 
 			let queueSizeTotal = 0;
