@@ -7,6 +7,8 @@ import asyncio, uvloop
 import aiohttp, socket
 from functools import lru_cache
 from datetime import datetime, timezone
+from logging.handlers import QueueHandler, QueueListener
+from typing import Callable
 
 #———————————————————————————————————————————————————————————————————————————————
 # Technical Utilities
@@ -66,7 +68,7 @@ def resource_path(	# Resource Resolver for PyInstaller
 
 #———————————————————————————————————————————————————————————————————————————————
 
-def get_event_loop_info() -> bool:
+async def is_uvloop_alive() -> bool:
 
 	try:
 
@@ -94,6 +96,8 @@ def get_current_time_ms() -> int:
 
 	return time.time_ns() // 1_000_000
 
+#———————————————————————————————————————————————————————————————————————————————
+
 def ms_to_datetime(ms: int) -> datetime:
 
 	"""
@@ -102,13 +106,63 @@ def ms_to_datetime(ms: int) -> datetime:
 
 	return datetime.fromtimestamp(ms / 1000.0, tz=timezone.utc)
 
-class NanoTimer:
+#———————————————————————————————————————————————————————————————————————————————
+
+def compute_bias_ms(
+	ts_now_ms: int,
+	target_dt: datetime
+) -> int:
 
 	"""
-	A class for high-precision timing using nanoseconds.
-	Provides methods to record a start time (tick) and calculate
-	the elapsed time in seconds (tock).
+	Computes the millisecond bias between a given UTC timestamp (ms) and
+	a target datetime.
+
+	Args:
+	
+		ts_now_ms (int):
+			Current timestamp in milliseconds (UTC).
+
+		target_dt (datetime):
+			Target datetime in UTC. If naive, it's assumed to be UTC.
+
+	Example Input:
+
+		ts_now_ms = get_current_time_ms()
+		target_dt = datetime(2025, 7, 25, 21, 59)
+
+	Returns:
+		int: Millisecond difference (bias_ms) = target - now
 	"""
+
+	# Convert timestamp to datetime (UTC)
+
+	now_dt = ms_to_datetime(ts_now_ms)
+
+	# If target is naive (unknown timezone), assume UTC
+
+	if target_dt.tzinfo is None:
+
+		target_dt = target_dt.replace(
+			tzinfo=timezone.utc
+		)
+
+	# Compute difference in milliseconds
+	
+	bias_ms = int(
+		(target_dt - now_dt).total_seconds() * 1000
+	)
+
+	return bias_ms
+
+"""—————————————————————————————————————————————————————————————————————————————
+	with NanoTimer() as timer:
+		print(
+			f"[{my_name()}] took {timer.tock():.5f} sec.",
+			flush=True,
+		)
+—————————————————————————————————————————————————————————————————————————————"""
+
+class NanoTimer:
 
 	def __init__(self, reset_on_instantiation: bool = True):
 
@@ -155,6 +209,7 @@ class NanoTimer:
 
 @lru_cache(maxsize=256)						# cache to hit the API once per IP
 async def geo(ip: str) -> str:
+
 	"""
 	Return 'City, Country' (or '?' if unknown) for a public IP.
 	Uses the free ip-api.com JSON endpoint (≈ 45 ms median, no key required).
@@ -242,9 +297,33 @@ def format_ws_url(
 
 _global_log_queue = None
 
-from logging.handlers import QueueListener
-
 class UTCFormatter(logging.Formatter):
+
+	#———————————————————————————————————————————————————————————————————————————
+	# https://tinyurl.com/ANSI-256-Color-Palette
+	#———————————————————————————————————————————————————————————————————————————
+
+	COLOR_MAP = {
+		'DEBUG':	'\033[38;5;242m',  # cool gray (low contrast, non-intrusive)
+		'INFO':	 	'\033[38;5;34m',   # green (positive, success-like)
+		'WARNING':  '\033[38;5;214m',  # orange (attention-grabbing, softer red)
+		'ERROR':	'\033[38;5;196m',  # bright red (danger, strong error)
+		'CRITICAL': '\033[38;5;199m',  # magenta red (urgent, dramatic)
+	}
+	RESET = '\033[0m'
+	RESET = '\033[0m'
+
+	def format(self, record):
+
+		original_levelname = record.levelname
+		color = self.COLOR_MAP.get(original_levelname, '')
+		if color:
+			record.levelname = f"{color}{original_levelname}{self.RESET}"
+		
+		formatted = super().format(record)
+
+		record.levelname = original_levelname
+		return formatted
 
 	def formatTime(self, record, datefmt=None):
 
@@ -258,6 +337,8 @@ class UTCFormatter(logging.Formatter):
 		# Default to ISO 8601 format
 		return dt.isoformat(timespec='microseconds')
 
+#———————————————————————————————————————————————————————————————————————————————
+
 def get_global_log_queue():
 
 	if _global_log_queue is None:
@@ -269,8 +350,6 @@ def get_global_log_queue():
 	return _global_log_queue	# multiprocessing.Queue
 
 #———————————————————————————————————————————————————————————————————————————————
-
-from logging.handlers import QueueHandler
 
 def set_global_logger(
 	filename:	  str = "stream_binance.log",
@@ -407,5 +486,89 @@ def get_subprocess_logger(
 		sys.exit(1)
 
 	return subprocess_logger
+
+#———————————————————————————————————————————————————————————————————————————————
+
+async def force_flush_logger(
+	logger: logging.Logger,
+):
+
+	#———————————————————————————————————————————————————————————————————————————
+
+	async def force_flush_queue(
+		handler: QueueHandler,
+	):
+		while not handler.queue.empty():
+			try:
+				handler.queue.get_nowait()
+			except Exception:
+				break
+			await asyncio.sleep(0)
+
+	#———————————————————————————————————————————————————————————————————————————
+	
+	try:
+
+		for handler in logger.handlers:
+
+			if hasattr(handler, 'flush'):
+				handler.flush()
+			
+			if isinstance(handler, QueueHandler):
+				await force_flush_queue(handler)
+
+	except Exception as e:
+
+		print(
+			f"[{my_name()}] {e}",
+			file=sys.stderr,
+			flush=True
+		)
+		
+"""—————————————————————————————————————————————————————————————————————————————
+@ensure_logging_on_exception
+def your_function():
+	...
+—————————————————————————————————————————————————————————————————————————————"""
+def ensure_logging_on_exception(
+	coro_func: Callable,
+):
+
+	"""
+	Decorator that guarantees exception logging with minimal overhead.
+	Uses the established global logger system via `get_subprocess_logger()`.
+	Only activates when exceptions occur - zero cost during normal operation.
+	"""
+
+	async def wrapper(
+		*args, **kwargs
+	):
+
+		try:
+
+			return await coro_func(*args, **kwargs)
+
+		except Exception as e:
+
+			try:
+
+				logger = get_subprocess_logger()
+
+			except Exception:
+
+				logger = logging.getLogger()
+			
+			logger.critical(
+				f"{coro_func.__name__} failed: {e}",
+				exc_info=True
+			)
+
+			await force_flush_logger(logger)
+			
+			raise
+
+	wrapper.__name__ = coro_func.__name__
+	wrapper.__doc__ = coro_func.__doc__
+	return wrapper
 
 #———————————————————————————————————————————————————————————————————————————————

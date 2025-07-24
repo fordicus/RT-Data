@@ -6,10 +6,12 @@ from util import (
 	my_name,				# For exceptions with 0 Lebesgue measure
 	NanoTimer,
 	ms_to_datetime,
+	compute_bias_ms,
 	format_ws_url,
 	get_current_time_ms,
 	get_global_log_queue,
-	get_subprocess_logger
+	get_subprocess_logger,
+	ensure_logging_on_exception,
 )
 
 import sys, os, io, asyncio, orjson
@@ -799,6 +801,7 @@ async def symbol_dump_snapshot(
 
 #———————————————————————————————————————————————————————————————————————————————
 
+@ensure_logging_on_exception
 async def put_snapshot(		# @depth20@100ms
 	put_snapshot_interval:	dict[str, deque[int]],
 	snapshots_queue_dict:	dict[str, asyncio.Queue],
@@ -842,6 +845,34 @@ async def put_snapshot(		# @depth20@100ms
 		symbol: None
 		for symbol in symbols
 	})
+
+	#———————————————————————————————————————————————————————————————————————————
+	# Debugging: This block is intentionally being used for debugging purpose.
+	#———————————————————————————————————————————————————————————————————————————
+
+	# from datetime import datetime
+
+	ts_now_ms = get_current_time_ms()
+	target_dt = datetime(2025, 7, 24, 21, 59)
+	bias_to_add = compute_bias_ms(
+		ts_now_ms,
+		target_dt,
+	)
+
+	adjusted = ts_now_ms + bias_to_add
+	adjusted_dt = ms_to_datetime(adjusted)
+
+	print(
+		f"\n"
+		f"target_dt:   {target_dt}\n"
+		f"bias_to_add: {bias_to_add}\n"
+		f"adjusted:	{adjusted}\n"
+		f"adjusted_dt: {adjusted_dt}\n"
+	)
+
+	exit()
+
+	#———————————————————————————————————————————————————————————————————————————
 
 	while True:
 
@@ -988,7 +1019,7 @@ async def put_snapshot(		# @depth20@100ms
 							else "UNKNOWN"
 						)
 						logger.warning(
-							f"[put_snapshot][{sym.upper()}] "
+							f"[{my_name()}][{sym.upper()}] "
 							f"Failed to process message: {e}",
 							exc_info=True
 						)
@@ -1008,7 +1039,7 @@ async def put_snapshot(		# @depth20@100ms
 			)
 
 			logger.warning(
-				f"[put_snapshot][{sym.upper()}] "
+				f"[{my_name()}][{sym.upper()}] "
 				f"WebSocket error "
 				f"(ws_retry_cnt {ws_retry_cnt}): "
 				f"{e}",
@@ -1023,7 +1054,7 @@ async def put_snapshot(		# @depth20@100ms
 				ws_retry_cnt = reset_backoff_level
 
 			logger.warning(
-				f"[put_snapshot][{sym.upper()}] "
+				f"[{my_name()}][{sym.upper()}] "
 				f"Retrying in {backoff:.1f} seconds..."
 			)
 
@@ -1043,7 +1074,7 @@ async def put_snapshot(		# @depth20@100ms
 				else "UNKNOWN"
 			)
 			logger.info(
-				f"[put_snapshot][{sym.upper()}] "
+				f"[{my_name()}][{sym.upper()}] "
 				f"WebSocket connection closed."
 			)
 

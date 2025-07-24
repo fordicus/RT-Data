@@ -77,19 +77,49 @@ class ShutdownManager:
 		self._custom_cleanup_callbacks:	list = []
 	
 	#———————————————————————————————————————————————————————————————————————————
-
+	
 	def register_asyncio_tasks(self, *tasks: asyncio.Task) -> None:
 
 		"""
-		Register asyncio tasks for graceful cancellation.
-		
-		Args:
-			*tasks: AsyncIO tasks to be cancelled during shutdown
+		Register asyncio tasks for graceful cancellation and exception handling.
 		"""
 
 		with self._lock:
 
 			self._asyncio_tasks.extend(tasks)
+			
+			for task in tasks:
+
+				task.add_done_callback(
+					self._handle_task_completion
+				)
+
+	#———————————————————————————————————————————————————————————————————————————
+	
+	def _handle_task_completion(self, task: asyncio.Task) -> None:
+
+		"""
+		Handle task completion and consume any exceptions to prevent
+		'Task exception was never retrieved' warnings.
+		"""
+
+		try:
+			
+			task.result()
+
+		except Exception as e:
+			
+			self.logger.debug(
+				f"[{my_name()}] Task {task.get_name()} completed with "
+				f"exception (already logged by decorator): "
+				f"{type(e).__name__}"
+			)
+
+		except asyncio.CancelledError:
+			
+			self.logger.debug(
+				f"[{my_name()}] Task {task.get_name()} was cancelled"
+			)
 
 	#———————————————————————————————————————————————————————————————————————————
 
@@ -99,6 +129,7 @@ class ShutdownManager:
 
 		"""
 		Cancel all registered asyncio tasks gracefully.
+		Exception handling is already done by done callbacks.
 		"""
 
 		if not self._asyncio_tasks: return
@@ -127,26 +158,20 @@ class ShutdownManager:
 					f"Failed to cancel task: {e}"
 				)
 		
-		# Wait briefly for tasks to complete cancellation
-
 		try:
-
-			# Run in a separate thread to avoid blocking
-
-			with concurrent.futures.ThreadPoolExecutor(
-				max_workers=1
-			) as executor:
-
-				future = executor.submit(
-					self._wait_for_task_cancellation
+			
+			loop = asyncio.get_running_loop()
+			if loop and not loop.is_closed():
+				
+				self.logger.debug(
+					f"[{my_name()}] "
+					f"All task exceptions handled by callbacks"
 				)
-				future.result(timeout=2.0)  # 2 second timeout
 
 		except Exception as e:
 
-			self.logger.warning(
-				f"[{my_name()}] "
-				f"Task cancellation wait failed: {e}"
+			self.logger.debug(
+				f"[{my_name()}] Task cleanup info: {e}"
 			)
 
 	#———————————————————————————————————————————————————————————————————————————
@@ -529,7 +554,9 @@ class ShutdownManager:
 
 #———————————————————————————————————————————————————————————————————————————————
 
-def create_shutdown_manager(logger: logging.Logger) -> ShutdownManager:
+def create_shutdown_manager(
+	logger: logging.Logger
+) -> ShutdownManager:
 	
 	"""
 	Create and return a new ShutdownManager instance.

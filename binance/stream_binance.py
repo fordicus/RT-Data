@@ -80,7 +80,7 @@ from shutdown import (
 )
 
 from util import (
-	my_name,				# For exceptions with 0 Lebesgue measure
+	my_name,
 	resource_path,
 	get_current_time_ms,
 	ms_to_datetime,
@@ -169,7 +169,6 @@ if __name__ == "__main__":
 
 	from uvicorn.config import Config
 	from uvicorn.server import Server
-	import asyncio
 
 	#———————————————————————————————————————————————————————————————————————————
 	# THESE TWO MUST BE WITHIN THE MAIN PROCESS
@@ -271,19 +270,7 @@ if __name__ == "__main__":
 						SYMBOLS,
 						logger,
 					), 
-					name="_estimate_latency_",
-				)
-
-				gate_streaming_by_latency_task = asyncio.create_task(
-					gate_streaming_by_latency(
-						EVENT_LATENCY_VALID,
-						EVENT_STREAM_ENABLE,
-						MEDIAN_LATENCY_DICT,
-						LATENCY_SIGNAL_SLEEP,
-						SYMBOLS,
-						logger,
-					),
-					name="_gate_streaming_by_latency_",
+					name="estimate_latency()",
 				)
 
 				put_snapshot_task = asyncio.create_task(
@@ -303,7 +290,7 @@ if __name__ == "__main__":
 						SYMBOLS,
 						logger,
 					),
-					name="_put_snapshot_",
+					name="put_snapshot()",
 				)
 
 				monitor_hardware_task = asyncio.create_task(
@@ -314,16 +301,7 @@ if __name__ == "__main__":
 						DESIRED_MAX_SYS_MEM_LOAD,
 						logger,
 					),
-					name="_monitor_hardware_",
-				)
-
-				# Register tasks with shutdown manager
-				
-				shutdown_manager.register_asyncio_tasks(
-					estimate_latency_task,
-					gate_streaming_by_latency_task,
-					put_snapshot_task,
-					monitor_hardware_task,
+					name="monitor_hardware()",
 				)
 
 				dump_tasks = []
@@ -347,12 +325,31 @@ if __name__ == "__main__":
 							logger,
 							shutdown_manager,
 						),
-						name=f"{symbol}_dump_snapshot"
+						name=f"symbol_dump_snapshot({symbol})"
 					)
 					dump_tasks.append(task)
-				shutdown_manager.register_asyncio_tasks(
-					*dump_tasks
+
+				gate_streaming_by_latency_task = asyncio.create_task(
+					gate_streaming_by_latency(
+						EVENT_LATENCY_VALID,
+						EVENT_STREAM_ENABLE,
+						MEDIAN_LATENCY_DICT,
+						LATENCY_SIGNAL_SLEEP,
+						SYMBOLS,
+						logger,
+					),
+					name="gate_streaming_by_latency()",
 				)
+
+				all_tasks = [
+					estimate_latency_task,
+					put_snapshot_task,
+					monitor_hardware_task,
+					*dump_tasks,
+					gate_streaming_by_latency_task,
+				]
+
+				shutdown_manager.register_asyncio_tasks(*all_tasks)
 
 			except Exception as e:
 
