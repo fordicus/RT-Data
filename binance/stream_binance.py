@@ -3,34 +3,40 @@
 r"""————————————————————————————————————————————————————————————————————————————
 
 BinanceWsMan:
+
 	https://tinyurl.com/BinanceWsMan
 
 Binance websocket:
+
 	wss://stream.binance.com:9443/stream?
 		streams={symbol}@depth20@100ms
 
 ————————————————————————————————————————————————————————————————————————————————
 
-Dependency (Alphabetical Order):
+How to Run:
+
+	sudo chrt -f 80 nice -n -19 ionice -c1 -n0 $(which python) stream_binance.py
+
+————————————————————————————————————————————————————————————————————————————————
+
+Dependency:
 
 	python==3.11.13
-	
 	aiohttp==3.12.14
 	fastapi==0.116.1
-	nuitka==2.7.12
+	nuitka==2.7.12		# experimental/optional
 	orjson==3.11.0
 	psutil==7.0.0
 	uvicorn==0.35.0
 	websockets==15.0.1
-	
 	uvloop==0.21.0
 	memray==1.17.2
 
 	conda list | egrep '^(uvloop|websockets|aiohttp|orjson|fastapi|uvicorn|psutil|nuitka|memray)[[:space:]]+'
-	
 	conda list | findstr /R "^uvloop ^websockets ^aiohttp ^orjson ^fastapi ^uvicorn ^psutil ^nuitka ^memray"
 
 Note:
+
 	`msgspec` could have replaced `orjson`, but based on our tests, the switch
 	was deemed unnecessary. Similarly, `aiofiles` was not utilized for the same
 	reason. Finally, we prefer compatibility in compression format, sticking to
@@ -39,39 +45,24 @@ Note:
 ————————————————————————————————————————————————————————————————————————————————
 
 For `nuitka`, you'll need:
+
 	sudo apt update
 		sudo apt install -y build-essential
 		sudo apt install -y patchelf
 		sudo apt install -y ccache
 
 The `memray` Python module @VS Code WSL2 Terminal:
+
 	sudo apt update
 	sudo apt install -y build-essential python3-dev cargo
 	pip install --upgrade pip setuptools wheel
 	pip install memray
 
 Run `memray` as follows:
+
 	memray run -o memleak_trace.bin stream_binance.py
 	memray flamegraph memleak_trace.bin -o memleak_report.html
 	memray stats memleak_trace.bin
-
-————————————————————————————————————————————————————————————————————————————————
-
-Infinite Coroutines in the Main Process:
-
-	SNAPSHOT:
-		✅ async def put_snapshot() -> None
-		✅ async def symbol_dump_snapshot(symbol: str) -> None
-		- perfectly understand both functions via flow chart generation
-
-	LATENCY:
-		async def estimate_latency() -> None
-		async def gate_streaming_by_latency() -> None
-		- probably, refactor as logical threads
-
-	DASHBOARD:
-		async def dashboard(websocket: WebSocket)
-		async def monitor_hardware()
 
 —————————————————————————————————————————————————————————————————————————————"""
 
