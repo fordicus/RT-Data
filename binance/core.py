@@ -45,9 +45,12 @@ def proc_zip_n_remove_jsonl(
 	lob_dir:	  str,
 	symbol_upper: str,
 	last_suffix:  str,
+	max_retries: int   = 100,
+	retry_delay: float = 0.1,
+	exp_backoff: float = 1.2,
 ):
 
-	#——————————————————————————————————————————————————————————————
+	#———————————————————————————————————————————————————————————————————————————
 
 	def zip_and_remove(src_path: str):
 
@@ -55,14 +58,65 @@ def proc_zip_n_remove_jsonl(
 
 			zip_path = src_path.replace(".jsonl", ".zip")
 
-			with zipfile.ZipFile(
-				zip_path, "w",
-				zipfile.ZIP_DEFLATED
-			) as zf:
+			# 🔧 Retry logic for zip creation with integrity verification
 
-				zf.write(src_path,
-					arcname=os.path.basename(src_path)
-				)
+			for attempt in range(max_retries):
+
+				try:
+
+					with zipfile.ZipFile(	# Create zip file
+						zip_path, "w",
+						zipfile.ZIP_DEFLATED
+					) as zf:
+
+						zf.write(src_path,
+							arcname=os.path.basename(src_path)
+						)
+
+					# Verify zip integrity immediately after creation
+
+					with zipfile.ZipFile(zip_path, "r") as test_zf:
+
+						test_zf.testzip()
+
+					break  # Success, exit retry loop
+
+				except (zipfile.BadZipFile, OSError, IOError) as e:
+
+					if attempt == max_retries - 1:
+
+						get_subprocess_logger().error(
+							f"[{my_name()}] "
+							f"Zip creation failed after "
+							f"{max_retries} attempts: "
+							f"{zip_path} → {e}",
+							exc_info=True
+						)
+						raise
+
+					get_subprocess_logger().warning(
+						f"[{my_name()}] "
+						f"Zip creation not ready "
+						f"(attempt {attempt + 1}/{max_retries}): "
+						f"{zip_path}, retrying in {retry_delay}s..."
+					)
+
+					# Clean up partial zip file if it exists
+
+					try:
+
+						if os.path.exists(zip_path):
+
+							os.remove(zip_path)
+
+					except Exception:
+
+						pass
+
+					time.sleep(retry_delay)
+					retry_delay *= exp_backoff
+
+			# Remove source .jsonl file only after successful zip creation
 
 			os.remove(src_path)
 
@@ -82,7 +136,7 @@ def proc_zip_n_remove_jsonl(
 			)
 			raise
 
-	#——————————————————————————————————————————————————————————————
+	#———————————————————————————————————————————————————————————————————————————
 
 	try:
 
@@ -113,35 +167,30 @@ def proc_zip_n_remove_jsonl(
 #———————————————————————————————————————————————————————————————————————————————
 
 def proc_symbol_consolidate_a_day(
-	symbol:	  str,
-	day_str:  str,
-	base_dir: str,
-	purge:	  bool = True
+	symbol:		 str,
+	day_str: 	 str,
+	base_dir:	 str,
+	max_retries: int   = 100,
+	retry_delay: float = 0.1,
+	exp_backoff: float = 1.2,
+	purge:		 bool  = True,
 ):
 
-	get_subprocess_logger().warning(
-		f"\tproc_zip_n_remove_jsonl() invoked"
-	)
-
 	with NanoTimer() as timer:
+
+		#———————————————————————————————————————————————————————————————————————
 
 		logger = get_subprocess_logger()
 
 		# Construct working directories and target paths
 
-		tmp_dir = os.path.join(
-			base_dir,
-			"temporary",
+		tmp_dir = os.path.join(base_dir, "temporary",
 			f"{symbol.upper()}_orderbook_{day_str}"
 		)
 
-		merged_path = os.path.join(
-			base_dir,
+		merged_path = os.path.join(base_dir,
 			f"{symbol.upper()}_orderbook_{day_str}.jsonl"
 		)
-
-		# Abort early if directory is missing:
-		# no data captured for this day
 
 		if not os.path.isdir(tmp_dir):
 
@@ -152,7 +201,9 @@ def proc_symbol_consolidate_a_day(
 
 			return
 
+		#———————————————————————————————————————————————————————————————————————
 		# List all zipped minute-level files (may be empty)
+		#———————————————————————————————————————————————————————————————————————
 
 		try:
 
@@ -180,7 +231,9 @@ def proc_symbol_consolidate_a_day(
 
 			return
 
-		# 🔧 File handle management with proper scope handling
+		#———————————————————————————————————————————————————————————————————————
+		# File handle management with proper scope handling
+		#———————————————————————————————————————————————————————————————————————
 
 		fout = None
 
@@ -197,32 +250,41 @@ def proc_symbol_consolidate_a_day(
 				zip_path = os.path.join(tmp_dir, zip_file)
 
 				# 🔧 Wait for zip file to be fully ready
-				max_retries = 10
-				retry_delay = 0.1  # 100ms
 				
 				for attempt in range(max_retries):
+
 					try:
+
 						# Test if file is a valid zip
+
 						with zipfile.ZipFile(zip_path, "r") as test_zf:
+
 							test_zf.testzip()  # Verify zip integrity
+
 						break  # Success, exit retry loop
 						
 					except (zipfile.BadZipFile, FileNotFoundError) as e:
+
 						if attempt == max_retries - 1:
+
 							logger.error(
 								f"[{my_name()}][{symbol.upper()}] "
-								f"Zip file still invalid after {max_retries} attempts: "
+								f"Zip file still invalid after "
+								f"{max_retries} attempts: "
 								f"{zip_path} → {e}"
 							)
 							return
 						
 						logger.warning(
 							f"[{my_name()}][{symbol.upper()}] "
-							f"Zip file not ready (attempt {attempt + 1}/{max_retries}): "
+							f"Zip file not ready "
+							f"(attempt {attempt + 1}/{max_retries}): "
 							f"{zip_path}, retrying in {retry_delay}s..."
 						)
+
 						time.sleep(retry_delay)
-						retry_delay *= 1.5  # Exponential backoff
+						retry_delay *= exp_backoff
+						# Exponential backoff
 
 				try:
 					with zipfile.ZipFile(zip_path, "r") as zf:
@@ -271,8 +333,10 @@ def proc_symbol_consolidate_a_day(
 						exc_info=True
 					)
 
+		#———————————————————————————————————————————————————————————————————————
 		# Recompress the consolidated .jsonl
 		# into a final single-archive zip
+		#———————————————————————————————————————————————————————————————————————
 
 		try:
 
@@ -362,6 +426,7 @@ async def symbol_dump_snapshot(
 	records_znr_minutes:	dict[str, OrderedDict[str, None]],
 	records_max:			int,
 	logger:					logging.Logger,
+	file_sync_delay_sec:	float = 0.0005,
 	shutdown_manager = None,
 ):
 
@@ -668,7 +733,7 @@ async def symbol_dump_snapshot(
 
 	while True:
 
-		#——————————————————————————————————————————————————————————————
+		#———————————————————————————————————————————————————————————————————————————
 
 		snapshot = await fetch_snapshot(queue, symbol)
 		
@@ -748,6 +813,8 @@ async def symbol_dump_snapshot(
 					f"{records_znr_minutes[symbol]}"
 				)
 
+				await asyncio.sleep(file_sync_delay_sec)
+
 				if last_suffix not in records_znr_minutes[symbol]:
 
 					memorize_treated(
@@ -756,9 +823,7 @@ async def symbol_dump_snapshot(
 						symbol, last_suffix
 					)
 
-					logger.warning(
-						f"\tznr_executor.submit()"
-					)
+					# logger.warning(f"\tznr_executor.submit()")
 
 					znr_executor.submit(	# pickle
 						proc_zip_n_remove_jsonl,
@@ -910,31 +975,15 @@ async def put_snapshot(		# @depth20@100ms
 	})
 
 	#———————————————————————————————————————————————————————————————————————————
-	# Debugging: This block is intentionally being used for debugging purpose.
+	# [DEBUG] We can simulate a specific time via `bias_to_add` if necessary.
 	#———————————————————————————————————————————————————————————————————————————
 
-	from datetime import datetime
-
-	ts_now_ms = get_current_time_ms()
-	target_dt = datetime(
-		2025, 7, 24, 
-		23, 59, 50
-	)
-	bias_to_add = compute_bias_ms(
-		ts_now_ms,
-		target_dt,
-	)
-
-	# adjusted = ts_now_ms + bias_to_add
-	# adjusted_dt = ms_to_datetime(adjusted)
-
-	# print(
-	# 	f"\n"
-	# 	f"target_dt:   {target_dt}\n"
-	# 	f"bias_to_add: {bias_to_add}\n"
-	# 	f"adjusted:	{adjusted}\n"
-	# 	f"adjusted_dt: {adjusted_dt}\n"
+	# from datetime import datetime
+	# target_dt = datetime(
+	# 	2025,  7, 24, 
+	# 	  23, 59, 50
 	# )
+	# bias_to_add = compute_bias_ms(get_current_time_ms(), target_dt,)
 
 	#———————————————————————————————————————————————————————————————————————————
 
@@ -1005,7 +1054,7 @@ async def put_snapshot(		# @depth20@100ms
 						# server-side event timestamp.
 						#———————————————————————————————————————————————————————
 
-						cur_time_ms = get_current_time_ms() + bias_to_add
+						cur_time_ms = get_current_time_ms()	# + bias_to_add
 
 						if prev_snapshot_time_ms[cur_symbol] is not None:
 
