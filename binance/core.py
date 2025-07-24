@@ -140,9 +140,9 @@ def proc_zip_n_remove_jsonl(
 
 	try:
 
-		get_subprocess_logger().warning(
-			f"\tproc_zip_n_remove_jsonl() invoked"
-		)
+		# get_subprocess_logger().warning(
+		# 	f"\tproc_zip_n_remove_jsonl() invoked"
+		# )
 
 		last_jsonl_path = os.path.join(
 			os.path.join(
@@ -426,8 +426,8 @@ async def symbol_dump_snapshot(
 	records_znr_minutes:	dict[str, OrderedDict[str, None]],
 	records_max:			int,
 	logger:					logging.Logger,
+	shutdown_manager =		None,
 	file_sync_delay_sec:	float = 0.0005,
-	shutdown_manager = None,
 ):
 
 	#———————————————————————————————————————————————————————————————————————————————
@@ -808,10 +808,10 @@ async def symbol_dump_snapshot(
 				# fire and forget
 				# ────────────────────────────────────────────────────────────
 
-				logger.warning(
-					f"\trecords_znr_minutes[symbol]: "
-					f"{records_znr_minutes[symbol]}"
-				)
+				# logger.warning(
+				# 	f"\trecords_znr_minutes[symbol]: "
+				# 	f"{records_znr_minutes[symbol]}"
+				# )
 
 				await asyncio.sleep(file_sync_delay_sec)
 
