@@ -40,6 +40,7 @@ def get_date_from_suffix(suffix: str) -> str:
 
 #———————————————————————————————————————————————————————————————————————————————
 
+@ensure_logging_on_exception
 def proc_zip_n_remove_jsonl(
 	lob_dir:	  str,
 	symbol_upper: str,
@@ -93,6 +94,7 @@ def proc_zip_n_remove_jsonl(
 
 #———————————————————————————————————————————————————————————————————————————————
 
+@ensure_logging_on_exception
 def symbol_consolidate_a_day(
 	symbol:	  str,
 	day_str:  str,
@@ -299,6 +301,7 @@ def symbol_consolidate_a_day(
 
 #———————————————————————————————————————————————————————————————————————————————
 
+@ensure_logging_on_exception
 async def symbol_dump_snapshot(
 	symbol:					str,
 	save_interval_min:		int,
