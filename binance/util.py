@@ -235,16 +235,16 @@ async def geo(ip: str) -> str:
 						f"{data.get('country') or ''}".strip()
 					)
 
-    except Exception as e:
+	except Exception as e:
 
-        try:
+		try:
 
-            logger = get_subprocess_logger()
-            logger.warning(
+			logger = get_subprocess_logger()
+			logger.warning(
 				f"[{my_name()}] IP geolocation failed for {ip}: {e}"
 			)
 
-        except Exception:
+		except Exception:
 
 			force_print_exception(
 				my_name(), e
@@ -265,15 +265,15 @@ async def geo(ip: str) -> str:
 			region = host.split(".")[-4]	# ap‑northeast‑1
 			return region.replace("-", " ").title()
 
-    except Exception as e:
+	except Exception as e:
 		
-        try:
-            logger = get_subprocess_logger()
-            logger.warning(
+		try:
+			logger = get_subprocess_logger()
+			logger.warning(
 				f"[{my_name()}] DNS lookup failed for {ip}: {e}"
 			)
 
-        except Exception:
+		except Exception:
 
 			force_print_exception(
 				my_name(), e

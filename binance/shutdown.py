@@ -117,8 +117,9 @@ class ShutdownManager:
 
 		except asyncio.CancelledError:
 			
-			self.logger.warning(
-				f"[{my_name()}] Task {task.get_name()} was cancelled"
+			self.logger.info(
+				f"[{my_name()}] Task "
+				f"{task.get_name()} was cancelled"
 			)
 
 	#———————————————————————————————————————————————————————————————————————————
@@ -146,7 +147,7 @@ class ShutdownManager:
 				if not task.done():
 
 					task.cancel()
-					self.logger.warning(
+					self.logger.info(
 						f"[{my_name()}] "
 						f"Cancelled task: {task.get_name()}"
 					)
@@ -163,7 +164,7 @@ class ShutdownManager:
 			loop = asyncio.get_running_loop()
 			if loop and not loop.is_closed():
 				
-				self.logger.warning(
+				self.logger.info(
 					f"[{my_name()}] "
 					f"All task exceptions handled by callbacks"
 				)
@@ -519,7 +520,7 @@ class ShutdownManager:
 
 		if self.is_shutting_down():
 
-			self.logger.warning(
+			self.logger.info(
 				f"[{my_name()}] Signal {signum} ignored "
 				f"- shutdown already in progress"
 			)

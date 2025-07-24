@@ -41,7 +41,6 @@ def get_date_from_suffix(suffix: str) -> str:
 
 #———————————————————————————————————————————————————————————————————————————————
 
-@ensure_logging_on_exception
 def proc_zip_n_remove_jsonl(
 	lob_dir:	  str,
 	symbol_upper: str,
@@ -87,6 +86,10 @@ def proc_zip_n_remove_jsonl(
 
 	try:
 
+		get_subprocess_logger().warning(
+			f"\tproc_zip_n_remove_jsonl() invoked"
+		)
+
 		last_jsonl_path = os.path.join(
 			os.path.join(
 				lob_dir, "temporary",
@@ -109,8 +112,7 @@ def proc_zip_n_remove_jsonl(
 
 #———————————————————————————————————————————————————————————————————————————————
 
-@ensure_logging_on_exception
-def symbol_consolidate_a_day(
+def proc_symbol_consolidate_a_day(
 	symbol:	  str,
 	day_str:  str,
 	base_dir: str,
@@ -617,6 +619,7 @@ async def symbol_dump_snapshot(
 		symbol: str,
 		to_rec: str
 	):
+
 		try:
 
 			# discard the oldest at the front of the container
@@ -689,6 +692,12 @@ async def symbol_dump_snapshot(
 
 		if last_suffix != suffix:
 
+			logger.warning(
+				f"\n"
+				f"\tsuffix:      {suffix}\n"
+				f"\tlast_suffix: {last_suffix}\n"
+			)
+
 			if json_writer:							  # if not the first flush
 
 				# ────────────────────────────────────────────────────────────
@@ -707,12 +716,21 @@ async def symbol_dump_snapshot(
 				# fire and forget
 				# ────────────────────────────────────────────────────────────
 
+				logger.warning(
+					f"\trecords_znr_minutes[symbol]: "
+					f"{records_znr_minutes[symbol]}"
+				)
+
 				if last_suffix not in records_znr_minutes[symbol]:
 
 					memorize_treated(
 						records_znr_minutes,
 						records_max,
 						symbol, last_suffix
+					)
+
+					logger.warning(
+						f"\tznr_executor.submit()"
 					)
 
 					znr_executor.submit(	# pickle
@@ -762,7 +780,7 @@ async def symbol_dump_snapshot(
 					)
 					
 					merge_executor.submit(			# pickle
-						symbol_consolidate_a_day,
+						proc_symbol_consolidate_a_day,
 						symbol, last_date, lob_dir,
 						purge_on_date_change == 1
 					)
@@ -868,14 +886,14 @@ async def put_snapshot(		# @depth20@100ms
 	# Debugging: This block is intentionally being used for debugging purpose.
 	#———————————————————————————————————————————————————————————————————————————
 
-	# from datetime import datetime
+	from datetime import datetime
 
-	# ts_now_ms = get_current_time_ms()
-	# target_dt = datetime(2025, 7, 24, 21, 59)
-	# bias_to_add = compute_bias_ms(
-	# 	ts_now_ms,
-	# 	target_dt,
-	# )
+	ts_now_ms = get_current_time_ms()
+	target_dt = datetime(2025, 7, 24, 21, 55, 55)
+	bias_to_add = compute_bias_ms(
+		ts_now_ms,
+		target_dt,
+	)
 
 	# adjusted = ts_now_ms + bias_to_add
 	# adjusted_dt = ms_to_datetime(adjusted)
@@ -887,8 +905,6 @@ async def put_snapshot(		# @depth20@100ms
 	# 	f"adjusted:	{adjusted}\n"
 	# 	f"adjusted_dt: {adjusted_dt}\n"
 	# )
-
-	# exit()
 
 	#———————————————————————————————————————————————————————————————————————————
 
@@ -959,7 +975,7 @@ async def put_snapshot(		# @depth20@100ms
 						# server-side event timestamp.
 						#———————————————————————————————————————————————————————
 
-						cur_time_ms = get_current_time_ms()
+						cur_time_ms = get_current_time_ms() + bias_to_add
 
 						if prev_snapshot_time_ms[cur_symbol] is not None:
 
