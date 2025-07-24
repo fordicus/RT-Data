@@ -119,6 +119,10 @@ def proc_symbol_consolidate_a_day(
 	purge:	  bool = True
 ):
 
+	get_subprocess_logger().warning(
+		f"\tproc_zip_n_remove_jsonl() invoked"
+	)
+
 	with NanoTimer() as timer:
 
 		logger = get_subprocess_logger()
@@ -192,22 +196,45 @@ def proc_symbol_consolidate_a_day(
 
 				zip_path = os.path.join(tmp_dir, zip_file)
 
+				# 🔧 Wait for zip file to be fully ready
+				max_retries = 10
+				retry_delay = 0.1  # 100ms
+				
+				for attempt in range(max_retries):
+					try:
+						# Test if file is a valid zip
+						with zipfile.ZipFile(zip_path, "r") as test_zf:
+							test_zf.testzip()  # Verify zip integrity
+						break  # Success, exit retry loop
+						
+					except (zipfile.BadZipFile, FileNotFoundError) as e:
+						if attempt == max_retries - 1:
+							logger.error(
+								f"[{my_name()}][{symbol.upper()}] "
+								f"Zip file still invalid after {max_retries} attempts: "
+								f"{zip_path} → {e}"
+							)
+							return
+						
+						logger.warning(
+							f"[{my_name()}][{symbol.upper()}] "
+							f"Zip file not ready (attempt {attempt + 1}/{max_retries}): "
+							f"{zip_path}, retrying in {retry_delay}s..."
+						)
+						time.sleep(retry_delay)
+						retry_delay *= 1.5  # Exponential backoff
+
 				try:
-
 					with zipfile.ZipFile(zip_path, "r") as zf:
-
 						for member in zf.namelist():
-
 							with zf.open(member) as f:
-
 								for raw in f:
-
 									fout.write(raw.decode("utf-8"))
 
 				except Exception as e:
 
 					logger.error(
-						f"[{my_name()}][{symbol.upper()}] "
+						f"[{my_name()}][{symbol.upper()}]\n"
 						f"Failed to extract {zip_path}: {e}",
 						exc_info=True
 					)
@@ -694,8 +721,8 @@ async def symbol_dump_snapshot(
 
 			logger.warning(
 				f"\n"
-				f"\tsuffix:      {suffix}\n"
-				f"\tlast_suffix: {last_suffix}\n"
+				f"\tsuffix:	{suffix}\n"
+				f"\tlast_s: {last_suffix}\n"
 			)
 
 			if json_writer:							  # if not the first flush
@@ -889,7 +916,10 @@ async def put_snapshot(		# @depth20@100ms
 	from datetime import datetime
 
 	ts_now_ms = get_current_time_ms()
-	target_dt = datetime(2025, 7, 24, 21, 55, 55)
+	target_dt = datetime(
+		2025, 7, 24, 
+		23, 59, 50
+	)
 	bias_to_add = compute_bias_ms(
 		ts_now_ms,
 		target_dt,
