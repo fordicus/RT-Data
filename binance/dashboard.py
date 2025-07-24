@@ -369,7 +369,19 @@ class DashboardServer:
 								f"WebSocket error: {e}",
 								exc_info=True
 							)
-							break
+							
+							if isinstance(
+								e, (
+									ConnectionResetError,
+									ConnectionAbortedError
+								)
+							):
+								break
+							
+							else:
+								
+								await asyncio.sleep(1)
+								continue
 					
 					break  # Normal termination
 					

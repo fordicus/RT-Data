@@ -12,6 +12,7 @@ from util import (
 	get_global_log_queue,
 	get_subprocess_logger,
 	ensure_logging_on_exception,
+	force_print_exception,
 )
 
 import sys, os, io, asyncio, orjson
@@ -66,8 +67,21 @@ def proc_zip_n_remove_jsonl(
 
 			os.remove(src_path)
 
-		except FileNotFoundError: pass
-		except Exception: raise
+		except FileNotFoundError:
+
+			get_subprocess_logger().warning(
+				f"[{my_name()}] Source file not found "
+				f"somehow: {src_path}"
+			)
+
+		except Exception as e:
+			
+			get_subprocess_logger().error(
+				f"[{my_name()}] Failed to "
+				f"zip and remove {src_path}: {e}",
+				exc_info=True
+			)
+			raise
 
 	#——————————————————————————————————————————————————————————————
 
@@ -91,6 +105,7 @@ def proc_zip_n_remove_jsonl(
 			f"Failed to process {last_suffix}: {e}",
 			exc_info=True
 		)
+		raise
 
 #———————————————————————————————————————————————————————————————————————————————
 

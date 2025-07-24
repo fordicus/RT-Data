@@ -109,7 +109,7 @@ class ShutdownManager:
 
 		except Exception as e:
 			
-			self.logger.debug(
+			self.logger.warning(
 				f"[{my_name()}] Task {task.get_name()} completed with "
 				f"exception (already logged by decorator): "
 				f"{type(e).__name__}"
@@ -117,7 +117,7 @@ class ShutdownManager:
 
 		except asyncio.CancelledError:
 			
-			self.logger.debug(
+			self.logger.warning(
 				f"[{my_name()}] Task {task.get_name()} was cancelled"
 			)
 
@@ -146,7 +146,7 @@ class ShutdownManager:
 				if not task.done():
 
 					task.cancel()
-					self.logger.debug(
+					self.logger.warning(
 						f"[{my_name()}] "
 						f"Cancelled task: {task.get_name()}"
 					)
@@ -163,14 +163,14 @@ class ShutdownManager:
 			loop = asyncio.get_running_loop()
 			if loop and not loop.is_closed():
 				
-				self.logger.debug(
+				self.logger.warning(
 					f"[{my_name()}] "
 					f"All task exceptions handled by callbacks"
 				)
 
 		except Exception as e:
 
-			self.logger.debug(
+			self.logger.warning(
 				f"[{my_name()}] Task cleanup info: {e}"
 			)
 
@@ -215,7 +215,7 @@ class ShutdownManager:
 
 							except asyncio.TimeoutError:
 
-								self.logger.debug(
+								self.logger.warning(
 									"Task cancellation wait timed out"
 								)
 
@@ -233,13 +233,13 @@ class ShutdownManager:
 
 				except Exception as e:
 
-					self.logger.debug(
+					self.logger.warning(
 						f"Task cancellation wait error: {e}"
 					)
 
 		except Exception as e:
 
-			self.logger.debug(
+			self.logger.warning(
 				f"_wait_for_task_cancellation error: {e}"
 			)
 
@@ -519,7 +519,7 @@ class ShutdownManager:
 
 		if self.is_shutting_down():
 
-			self.logger.debug(
+			self.logger.warning(
 				f"[{my_name()}] Signal {signum} ignored "
 				f"- shutdown already in progress"
 			)

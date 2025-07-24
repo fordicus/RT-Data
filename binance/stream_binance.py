@@ -11,18 +11,24 @@ Binance websocket:
 
 ————————————————————————————————————————————————————————————————————————————————
 
-Dependency:
+Dependency (Alphabetical Order):
 
 	python==3.11.13
-	uvloop==0.21.0
-	websockets==15.0.1
+	
 	aiohttp==3.12.14
-	orjson==3.11.0
 	fastapi==0.116.1
-	uvicorn==0.35.0
-	psutil==7.0.0
 	nuitka==2.7.12
+	orjson==3.11.0
+	psutil==7.0.0
+	uvicorn==0.35.0
+	websockets==15.0.1
+	
+	uvloop==0.21.0
 	memray==1.17.2
+
+	conda list | egrep '^(uvloop|websockets|aiohttp|orjson|fastapi|uvicorn|psutil|nuitka|memray)[[:space:]]+'
+	
+	conda list | findstr /R "^uvloop ^websockets ^aiohttp ^orjson ^fastapi ^uvicorn ^psutil ^nuitka ^memray"
 
 Note:
 	`msgspec` could have replaced `orjson`, but based on our tests, the switch

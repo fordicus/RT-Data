@@ -8,7 +8,7 @@ import aiohttp, socket
 from functools import lru_cache
 from datetime import datetime, timezone
 from logging.handlers import QueueHandler, QueueListener
-from typing import Callable
+from typing import Callable, Optional
 
 #———————————————————————————————————————————————————————————————————————————————
 # Technical Utilities
@@ -235,7 +235,20 @@ async def geo(ip: str) -> str:
 						f"{data.get('country') or ''}".strip()
 					)
 
-	except Exception: pass
+    except Exception as e:
+
+        try:
+
+            logger = get_subprocess_logger()
+            logger.warning(
+				f"[{my_name()}] IP geolocation failed for {ip}: {e}"
+			)
+
+        except Exception:
+
+			force_print_exception(
+				my_name(), e
+			)
 
 	# fallback: try reverse‑DNS for AWS / GCP hosts (region code often embedded)
 
@@ -252,7 +265,20 @@ async def geo(ip: str) -> str:
 			region = host.split(".")[-4]	# ap‑northeast‑1
 			return region.replace("-", " ").title()
 
-	except Exception: pass
+    except Exception as e:
+		
+        try:
+            logger = get_subprocess_logger()
+            logger.warning(
+				f"[{my_name()}] DNS lookup failed for {ip}: {e}"
+			)
+
+        except Exception:
+
+			force_print_exception(
+				my_name(), e
+			)
+
 	return "?"
 
 #———————————————————————————————————————————————————————————————————————————————
@@ -524,12 +550,13 @@ async def force_flush_logger(
 			file=sys.stderr,
 			flush=True
 		)
-		
+
 """—————————————————————————————————————————————————————————————————————————————
 @ensure_logging_on_exception
 def your_function():
 	...
 —————————————————————————————————————————————————————————————————————————————"""
+
 def ensure_logging_on_exception(
 	coro_func: Callable,
 ):
@@ -570,5 +597,24 @@ def ensure_logging_on_exception(
 	wrapper.__name__ = coro_func.__name__
 	wrapper.__doc__ = coro_func.__doc__
 	return wrapper
+
+#———————————————————————————————————————————————————————————————————————————————
+
+def force_print_exception(
+	scope_name: str,
+	e: Optional[Exception] = None, 
+):
+
+	try:
+
+		print(
+			f"[{scope_name}] {e or 'Unknown exception'}",
+			file=sys.stderr,
+			flush=True
+		)
+
+	except Exception:
+
+		pass  # even this shouldn't fail
 
 #———————————————————————————————————————————————————————————————————————————————
