@@ -784,11 +784,11 @@ async def symbol_dump_snapshot(
 
 		if last_suffix != suffix:
 
-			logger.warning(
-				f"\n"
-				f"\tsuffix:	{suffix}\n"
-				f"\tlast_s: {last_suffix}\n"
-			)
+			# logger.warning(
+			# 	f"\n"
+			# 	f"\tsuffix:	{suffix}\n"
+			# 	f"\tlast_s: {last_suffix}\n"
+			# )
 
 			if json_writer:							  # if not the first flush
 
