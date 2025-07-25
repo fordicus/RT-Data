@@ -72,6 +72,7 @@ print('-' * 75)
 # Git global configuration
 run_cmd('git config --global credential.helper store')
 run_cmd(f'git config --global user.email "{GIT_EMAIL}"')
+run_cmd('git config --global core.autocrlf true')
 
 # Pull the latest changes
 run_cmd('git pull')
