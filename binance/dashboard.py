@@ -375,8 +375,7 @@ class DashboardServer:
 									ConnectionResetError,
 									ConnectionAbortedError
 								)
-							):
-								break
+							):	break
 							
 							else:
 								

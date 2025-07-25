@@ -1091,7 +1091,7 @@ async def put_snapshot(		# @depth20@100ms
 							- base_interval_ms
 						)
 						
-						latency_adjusted_time = (
+						delay_adjusted_time = (
 							cur_time_ms - (lat_ms + comp_delay_ms)
 						)
 
@@ -1099,7 +1099,7 @@ async def put_snapshot(		# @depth20@100ms
 
 						snapshot = {
 							"lastUpdateId": last_update,
-							"eventTime":	latency_adjusted_time,
+							"eventTime":	delay_adjusted_time,
 							"bids": [
 								[float(p), float(q)]
 								for p, q in bids

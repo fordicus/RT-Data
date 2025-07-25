@@ -85,12 +85,23 @@
 			<!-- Rows will be dynamically added here -->
 		</tbody>
 	</table>
+	<div id="symbolMetricsDescription" style="margin-bottom: 15px; font-size: 14px; color: #555; line-height: 1.4;"></div>
 
 	<script>
+
+		const SYMBOL_METRICS_DESCRIPTION = `
+			<strong>Put Snapshot Interval:</strong> The measured interval between consecutive asyncio.Queue.put() operations in the put_snapshot() coroutine.<br>
+			<strong>JSON Flush Interval:</strong> The measured interval between consecutive TextIOWrapper.flush() operations to disk storage.<br>
+			<strong>Queue Size:</strong> Average of asyncio.Queue.qsize() values over a monitoring period.<br>
+			<strong>Median Latency:</strong> Median one-way network latency from Binance servers over a sampling period.<br>
+			<strong>Implication:</strong> "Median Latency" is a stabilized metric, while "Put Snapshot Interval" measures the actual processing interval between consecutive WebSocket message completions. Therefore, it is realistically impossible for the delay-adjusted timestamps being flushed into ".jsonl" files to have corrupted time order unless "Put Snapshot Interval" shows sudden spikes significantly exceeding normal processing delays (e.g., >200ms vs typical ~110ms), indicating unstable system performance. "JSON Flush Interval" does not affect the timestamps being flushed into ".jsonl" files because it only measures disk I/O timing after timestamp calculation is complete.
+		`;
+
 		const ws = new WebSocket(`ws://${window.location.host}/ws/dashboard`);
 
 		ws.onopen = () => {
 			console.log("WebSocket connection established.");
+			document.getElementById("symbolMetricsDescription").innerHTML = SYMBOL_METRICS_DESCRIPTION;
 		};
 
 		ws.onmessage = (event) => {
