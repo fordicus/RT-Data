@@ -41,7 +41,7 @@ import pathlib
 from datetime import datetime
 from getmac import get_mac_address as gma
 from dotenv import load_dotenv
-
+	
 # ──────────────────────────────────────────────────────────────────────────────
 
 def run_cmd(cmd: str):

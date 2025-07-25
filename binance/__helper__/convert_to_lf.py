@@ -7,7 +7,7 @@ Usage:
 	
 	# Convert a single file
 	
-		python convert_to_lf.py C:/path/to/file.ext
+		python convert_to_lf.py "C:\workspace\RT-Data\binance\__helper__\convert_to_lf.py"
 
 Notes:
 
