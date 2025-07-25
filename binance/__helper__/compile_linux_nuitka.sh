@@ -113,14 +113,14 @@ stdbuf -oL -eL "$PYTHON" -m nuitka \
 #———————————————————————————————————————————————————————————————————————————————
 
 echo "Verifying embedded resources..."
-if [[ -f _test_resource_path.py ]]; then
-	if $PYTHON _test_resource_path.py; then
+if [[ -f test_resource_path.py ]]; then
+	if $PYTHON test_resource_path.py; then
 		echo "[OK] Embedded resource test passed"
 	else
 		echo "[WARNING] Embedded resource test failed - binary may not work correctly"
 	fi
 else
-	echo "[INFO] _test_resource_path.py not found, skipping resource check."
+	echo "[INFO] test_resource_path.py not found, skipping resource check."
 fi
 
 #———————————————————————————————————————————————————————————————————————————————
