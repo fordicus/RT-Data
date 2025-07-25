@@ -6,7 +6,7 @@
 	*	가장 쉽게 이상 징후를 포착하는 방법은 무엇인가?
 		*	UptimeRobot이 대시보드 포트를 모니터링하도록 설정
 	*	duckdns는 신뢰할 수 없다
-	*	`symbol_consolidate_a_day` 함수에서 무결성 검증 방법을 강구할 것
+	*	`symbol_consolidate_a_day` 함수 내부에서 무결성 검증 보고서를 구현할 것
 
 ---
 <br></br>
