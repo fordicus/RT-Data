@@ -5,7 +5,7 @@ clear
 CURRENT_USER=$(whoami)
 cd /home/$CURRENT_USER
 
-rm -rf /home/$CURRENT_USER/RT-Data
+sudo rm -rf /home/$CURRENT_USER/RT-Data
 
 git clone https://github.com/fordicus/RT-Data.git
 
