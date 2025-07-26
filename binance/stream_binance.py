@@ -24,7 +24,7 @@ Dependency:
 	python==3.11.13
 	aiohttp==3.12.14
 	fastapi==0.116.1
-	nuitka==2.7.12		# experimental/optional
+	pyinstaller==6.12.0
 	orjson==3.11.0
 	psutil==7.0.0
 	uvicorn==0.35.0
@@ -32,8 +32,7 @@ Dependency:
 	uvloop==0.21.0
 	memray==1.17.2
 
-	conda list | egrep '^(uvloop|websockets|aiohttp|orjson|fastapi|uvicorn|psutil|nuitka|memray)[[:space:]]+'
-	conda list | findstr /R "^uvloop ^websockets ^aiohttp ^orjson ^fastapi ^uvicorn ^psutil ^nuitka ^memray"
+	conda list | egrep '^(uvloop|websockets|aiohttp|orjson|fastapi|uvicorn|psutil|pyinstaller|memray)[[:space:]]+'
 
 Note:
 
@@ -43,13 +42,6 @@ Note:
 	the standard `.zip` algorithm.
 	
 ————————————————————————————————————————————————————————————————————————————————
-
-For `nuitka`, you'll need:
-
-	sudo apt update
-		sudo apt install -y build-essential
-		sudo apt install -y patchelf
-		sudo apt install -y ccache
 
 The `memray` Python module @VS Code WSL2 Terminal:
 

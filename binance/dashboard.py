@@ -212,6 +212,9 @@ class DashboardServer:
 		# Build flush interval data with yield point
 		flush_interval = {}
 		for symbol in self.state['SYMBOLS']:
+			if not self.state[
+				'JSON_FLUSH_INTERVAL'
+			]: continue
 			flush_interval[symbol] = int(
 				statistics.fmean(
 					self.state[

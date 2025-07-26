@@ -103,11 +103,11 @@ def load_config(
 					f"missing or not a string."
 				)
 
-			return [
+			return list(OrderedDict.fromkeys(
 				s.lower()
 				for s in symbols_str.split(",")
 				if s.strip()
-			]
+			))
 
 		except Exception as e:
 
