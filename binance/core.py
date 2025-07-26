@@ -1102,15 +1102,17 @@ async def put_snapshot(		# @depth20@100ms
 
 						snapshot = {
 							#———————————————————————————————————————————————————
-							"lastUpdateId": last_update,
+							# recv_ms: align with <symbol>@trade
+							# net_delay_ms: side information
+							# intv_lag_ms:  side information
 							#———————————————————————————————————————————————————
-							"clientReceiptTimeMs": cur_time_ms,
+							"last_update_id": last_update,
 							#———————————————————————————————————————————————————
-							"networkLatencyMs": oneway_network_latency_ms,
+							"recv_ms":		  cur_time_ms,
 							#———————————————————————————————————————————————————
-							"intervalDelayMs": interval_delay_ms,
+							"net_delay_ms":	  oneway_network_latency_ms,
 							#———————————————————————————————————————————————————
-							"estimatedServerEventTime": delay_adjusted_time,
+							"intv_lag_ms":	  interval_delay_ms,
 							#———————————————————————————————————————————————————
 							"bids": [
 								[float(p), float(q)]
