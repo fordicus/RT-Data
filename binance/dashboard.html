@@ -40,7 +40,9 @@
 </head>
 <body>
 	<h1>Binance Dashboard</h1>
-	<div id="lastUpdated">Last Updated: N/A</div>
+	<div id="statusInfo" style="margin-top: 10px; font-size: 14px; color: #555;">
+		WebSocket Peer: N/A / Last Updated: N/A
+	</div>
 	
 	<div class="section-title">Hardware Metrics</div>
 	<table id="hardwareMetricsTable">
@@ -74,6 +76,7 @@
 	<table id="symbolMetricsTable">
 		<thead>
 			<tr>
+				<th>#</th>
 				<th>Symbol</th>
 				<th>Put Snapshot Interval<br>Avg.: 0 [ms]</th>
 				<th>JSON Flush Interval<br>Avg.: 0 [ms]</th>
@@ -107,14 +110,14 @@
 		ws.onmessage = (event) => {
 			const data = JSON.parse(event.data);
 
-			const medLatency = data.med_latency;
-			const flushInterval = data.flush_interval;
-			const snapshotInterval = data.snapshot_interval;
-			const queueSize = data.queue_size;
-			const hardware = data.hardware;
-			const lastUpdated = data.last_updated;
+			const websocketPeer = data.websocket_peer || "UNKNOWN";
+			const lastUpdated = data.last_updated ? new Date(data.last_updated).toISOString() : "N/A";
+
+			// Update WebSocket Peer and Last Updated information
+			document.getElementById("statusInfo").textContent = `WebSocket Peer: ${websocketPeer} / Last Updated: ${lastUpdated}`;
 
 			// Update hardware metrics
+			const hardware = data.hardware;
 			if (hardware) {
 				document.getElementById("networkUsage").textContent = `${hardware.network_mbps.toFixed(2)} Mbps`;
 				document.getElementById("cpuUsage").textContent = `${hardware.cpu_percent.toFixed(2)}%`;
@@ -131,20 +134,20 @@
 			let latencyCount = 0;
 			let queueSizeTotal = 0; // Define queueSizeTotal before usage
 
-			for (const symbol in snapshotInterval) {
-				snapshotIntervalAvg += snapshotInterval[symbol];
+			for (const symbol in data.snapshot_interval) {
+				snapshotIntervalAvg += data.snapshot_interval[symbol];
 				snapshotCount++;
 			}
 			snapshotIntervalAvg = snapshotCount > 0 ? (snapshotIntervalAvg / snapshotCount).toFixed(2) : 0;
 
-			for (const symbol in flushInterval) {
-				flushIntervalAvg += flushInterval[symbol];
+			for (const symbol in data.flush_interval) {
+				flushIntervalAvg += data.flush_interval[symbol];
 				flushCount++;
 			}
 			flushIntervalAvg = flushCount > 0 ? (flushIntervalAvg / flushCount).toFixed(2) : 0;
 
-			for (const symbol in medLatency) {
-				medLatencyAvg += medLatency[symbol];
+			for (const symbol in data.med_latency) {
+				medLatencyAvg += data.med_latency[symbol];
 				latencyCount++;
 			}
 			medLatencyAvg = latencyCount > 0 ? (medLatencyAvg / latencyCount).toFixed(2) : 0;
@@ -152,23 +155,28 @@
 			const symbolTableBody = document.querySelector("#symbolMetricsTable tbody");
 			symbolTableBody.innerHTML = ""; // Clear existing rows
 
-			for (const symbol in medLatency) {
+			let rowIndex = 1;
+
+			for (const symbol in data.med_latency) {
 				const row = document.createElement("tr");
+				const numberCell = document.createElement("td");
 				const symbolCell = document.createElement("td");
 				const snapshotCell = document.createElement("td");
 				const flushCell = document.createElement("td");
 				const queueCell = document.createElement("td");
 				const latencyCell = document.createElement("td");
 
+				numberCell.textContent = rowIndex++;
 				symbolCell.textContent = symbol.toUpperCase();
-				snapshotCell.textContent = snapshotInterval[symbol] || 0;
-				flushCell.textContent = flushInterval[symbol] || 0;
-				const queueSizeValue = queueSize[symbol] || 0;
+				snapshotCell.textContent = data.snapshot_interval[symbol] || 0;
+				flushCell.textContent = data.flush_interval[symbol] || 0;
+				const queueSizeValue = data.queue_size[symbol] || 0;
 				queueCell.textContent = queueSizeValue;
-				latencyCell.textContent = medLatency[symbol] || 0;
+				latencyCell.textContent = data.med_latency[symbol] || 0;
 
 				queueSizeTotal += queueSizeValue;
 
+				row.appendChild(numberCell);
 				row.appendChild(symbolCell);
 				row.appendChild(snapshotCell);
 				row.appendChild(flushCell);
@@ -180,6 +188,7 @@
 			// Update Symbol Metrics table header with new style
 			const symbolMetricsHeader = document.querySelector("#symbolMetricsTable thead tr");
 			symbolMetricsHeader.innerHTML = `
+				<th>#</th>
 				<th>Symbol</th>
 				<th>Put Snapshot Interval<br>Avg.: ${snapshotIntervalAvg} [ms]</th>
 				<th>JSON Flush Interval<br>Avg.: ${flushIntervalAvg} [ms]</th>

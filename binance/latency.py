@@ -114,13 +114,14 @@ async def gate_streaming_by_latency(
 #———————————————————————————————————————————————————————————————————————————————
 
 async def estimate_latency(
+	websocket_peer:			dict[str, str],
 	ws_ping_interval:		Optional[int],
 	ws_ping_timeout:		Optional[int],
 	latency_deque_size:		int,
 	latency_sample_min:		int,
-	median_latency_dict:	dict[str, int],			# shared
+	median_latency_dict:	dict[str, int],
 	latency_threshold_ms:	int,
-	event_latency_valid:  	asyncio.Event,			# shared
+	event_latency_valid:  	asyncio.Event,
 	base_backoff:			int,
 	max_backoff:			int,
 	reset_cycle_after:		int,
@@ -163,8 +164,12 @@ async def estimate_latency(
 				ip, port = ws.remote_address or ("?", "?")
 				loc = await geo(ip) if ip != "?" else "?"
 
+				websocket_peer["value"] = (
+					f"{ip}:{port}  ({loc})"
+				)
+
 				logger.info(
-					f"[{my_name()}] Websocket peer {ip}:{port}  ({loc})"
+					f"[{my_name()}] WebSocket Peer {websocket_peer['value']}"
 				)
 				
 				logger.info(

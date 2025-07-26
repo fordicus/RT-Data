@@ -1049,9 +1049,9 @@ async def put_snapshot(		# @depth20@100ms
 						# ideally equal 100ms (stream interval). Any excess
 						# above 100ms represents computational delay from
 						# coroutine scheduling and JSON processing overhead.
-						# This `comp_delay_ms` must be subtracted alongside
-						# network latency (lat_ms) to recover the original
-						# server-side event timestamp.
+						# This `interval_delay_ms` must be subtracted alongside
+						# network latency (oneway_network_latency_ms) to
+						# recover the original server-side event timestamp.
 						#———————————————————————————————————————————————————————
 
 						cur_time_ms = get_current_time_ms()	# + bias_to_add
@@ -1080,34 +1080,48 @@ async def put_snapshot(		# @depth20@100ms
 
 						#———————————————————————————————————————————————————————
 						
-						lat_ms = max(
+						oneway_network_latency_ms = max(
 							0, median_latency_dict.get(
 								cur_symbol, 0
 							)
 						)
 
-						comp_delay_ms = max(0,
+						interval_delay_ms = max(0,
 							measured_interval_ms[cur_symbol]
 							- base_interval_ms
 						)
 						
 						delay_adjusted_time = (
-							cur_time_ms - (lat_ms + comp_delay_ms)
+							cur_time_ms - (
+								oneway_network_latency_ms
+								+ interval_delay_ms
+							)
 						)
 
 						#———————————————————————————————————————————————————————
 
 						snapshot = {
+							#———————————————————————————————————————————————————
 							"lastUpdateId": last_update,
-							"eventTime":	delay_adjusted_time,
+							#———————————————————————————————————————————————————
+							"clientReceiptTimeMs": cur_time_ms,
+							#———————————————————————————————————————————————————
+							"networkLatencyMs": oneway_network_latency_ms,
+							#———————————————————————————————————————————————————
+							"intervalDelayMs": interval_delay_ms,
+							#———————————————————————————————————————————————————
+							"estimatedServerEventTime": delay_adjusted_time,
+							#———————————————————————————————————————————————————
 							"bids": [
 								[float(p), float(q)]
 								for p, q in bids
 							],
+							#———————————————————————————————————————————————————
 							"asks": [
 								[float(p), float(q)]
 								for p, q in asks
 							],
+							#———————————————————————————————————————————————————
 						}
 
 						#———————————————————————————————————————————————————————

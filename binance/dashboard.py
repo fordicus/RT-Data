@@ -197,6 +197,7 @@ class DashboardServer:
 	#———————————————————————————————————————————————————————————————————————————
 
 	async def _build_monitoring_data(self) -> dict:
+
 		"""
 		Build monitoring data with async yield points for better GIL sharing.
 		"""
@@ -212,16 +213,19 @@ class DashboardServer:
 		# Build flush interval data with yield point
 		flush_interval = {}
 		for symbol in self.state['SYMBOLS']:
-			if not self.state[
+			
+			symbol_data = self.state[
 				'JSON_FLUSH_INTERVAL'
-			]: continue
-			flush_interval[symbol] = int(
-				statistics.fmean(
-					self.state[
-						'JSON_FLUSH_INTERVAL'
-					].get(symbol, 0)
+			].get(symbol, [])
+
+			if not symbol_data:
+				flush_interval[symbol] = -1
+
+			else:
+				flush_interval[symbol] = int(
+					statistics.fmean(symbol_data)
 				)
-			)
+
 			await asyncio.sleep(0)
 		
 		# Build snapshot interval data with yield point
@@ -259,9 +263,10 @@ class DashboardServer:
 				"memory_percent":  self.mem_load_percentage,
 				"storage_percent": self.storage_percentage
 			},
-			"last_updated":	   ms_to_datetime(
+			"websocket_peer": self.state['WEBSOCKET_PEER']['value'],
+			"last_updated":	  ms_to_datetime(
 				get_current_time_ms()
-			).isoformat()
+			).isoformat(),
 		}
 
 	#———————————————————————————————————————————————————————————————————————————

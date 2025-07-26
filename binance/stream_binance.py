@@ -143,14 +143,16 @@ setup_uvloop(logger = logger)
 SNAPSHOTS_QUEUE_DICT:   dict[str, asyncio.Queue] = {}
 SYMBOL_TO_FILE_HANDLES: dict[str, tuple[str, TextIOWrapper]] = {}
 
-RECORDS_MERGED_DATES:	dict[str, OrderedDict[str]] = {}
-RECORDS_ZNR_MINUTES:	dict[str, OrderedDict[str]] = {}
+RECORDS_MERGED_DATES: dict[str, OrderedDict[str]] = {}
+RECORDS_ZNR_MINUTES:  dict[str, OrderedDict[str]] = {}
 
-PUT_SNAPSHOT_INTERVAL:	dict[str, deque[int]] = {}
-MEDIAN_LATENCY_DICT:	dict[str, int] = {}
+PUT_SNAPSHOT_INTERVAL: dict[str, deque[int]] = {}
+MEDIAN_LATENCY_DICT:   dict[str, int] = {}
 
-LATEST_JSON_FLUSH:		dict[str, int] = {}
-JSON_FLUSH_INTERVAL:	dict[str, deque[int]] = {}
+LATEST_JSON_FLUSH:   dict[str, int] = {}
+JSON_FLUSH_INTERVAL: dict[str, deque[int]] = {}
+
+WEBSOCKET_PEER: dict[str, str] = {"value": "UNKNOWN"}
 
 #———————————————————————————————————————————————————————————————————————————————-
 
@@ -223,7 +225,8 @@ if __name__ == "__main__":
 			}
 			
 			dashboard_state = {
-				'SYMBOLS': SYMBOLS,
+				'SYMBOLS':				 SYMBOLS,
+				'WEBSOCKET_PEER':		 WEBSOCKET_PEER,
 				'SNAPSHOTS_QUEUE_DICT':  SNAPSHOTS_QUEUE_DICT,
 				'MEDIAN_LATENCY_DICT':   MEDIAN_LATENCY_DICT,
 				'JSON_FLUSH_INTERVAL':   JSON_FLUSH_INTERVAL,
@@ -245,6 +248,7 @@ if __name__ == "__main__":
 
 				estimate_latency_task = asyncio.create_task(
 					estimate_latency(
+						WEBSOCKET_PEER,
 						WS_PING_INTERVAL,
 						WS_PING_TIMEOUT,
 						LATENCY_DEQUE_SIZE,
