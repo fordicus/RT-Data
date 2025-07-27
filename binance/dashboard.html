@@ -93,11 +93,10 @@
 	<script>
 
 		const SYMBOL_METRICS_DESCRIPTION = `
-			<strong>Put Snapshot Interval:</strong> The measured interval between consecutive asyncio.Queue.put() operations in the put_snapshot() coroutine.<br>
-			<strong>JSON Flush Interval:</strong> The measured interval between consecutive TextIOWrapper.flush() operations to disk storage.<br>
-			<strong>Queue Size:</strong> Average of asyncio.Queue.qsize() values over a monitoring period.<br>
-			<strong>Median Latency:</strong> Median one-way network latency from Binance servers over a sampling period.<br>
-			<strong>Implication:</strong> "Median Latency" is a stabilized metric, while "Put Snapshot Interval" measures the actual processing interval between consecutive WebSocket message completions. Therefore, it is realistically impossible for the delay-adjusted timestamps being flushed into ".jsonl" files to have corrupted time order unless "Put Snapshot Interval" shows sudden spikes significantly exceeding normal processing delays (e.g., >200ms vs typical ~110ms), indicating unstable system performance. "JSON Flush Interval" does not affect the timestamps being flushed into ".jsonl" files because it only measures disk I/O timing after timestamp calculation is complete.
+			<strong>Put Snapshot Interval:</strong> The measured interval between consecutive "asyncio.Queue.put()" operations within the "put_snapshot()" coroutine. Any extra delay beyond the nominal 100ms streaming interval determines "intv_lag_ms", which is used as side information during AI training.<br>
+			<strong>JSON Flush Interval:</strong> The measured interval between consecutive "TextIOWrapper.flush()" operations to disk. This value does not affect the timestamps written to ".jsonl" files, as it only reflects disk I/O latency after "recv_ms" is determined by the "put_snapshot()" coroutine.<br>
+			<strong>Queue Size:</strong> The average of "asyncio.Queue.qsize()" values over a monitoring period. This value is typically close to zero, as the "asyncio.Queue" is consumed almost instantaneously.<br>
+			<strong>Median Latency:</strong> The median one-way network latency from Binance servers, calculated over a sampling period. This robust estimate defines "net_delay_ms", which—like "intv_lag_ms"—serves as side information for AI models.
 		`;
 
 		const ws = new WebSocket(`ws://${window.location.host}/ws/dashboard`);

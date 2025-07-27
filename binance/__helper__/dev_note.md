@@ -3,6 +3,7 @@
 1. **TODO**
 
 	*	`latency.py` 로직을 `<symbol>@trade` 스트림으로 변경 및 데이터화
+	*	`A single connection to stream.binance.com is only valid for 24 hours; expect to be disconnected at the 24 hour mark`: enhance the websocket reconnection performance.
 	* 	하루 단위 롤오버가 완료된 압축파일의 고속병렬 무결성 검사 프로그램 작성
 	*	가장 쉽게 이상 징후를 포착하는 방법은 무엇인가?
 		*	UptimeRobot이 대시보드 포트를 모니터링하도록 설정
