@@ -148,7 +148,7 @@ RECORDS_MERGED_DATES: dict[str, OrderedDict[str]] = {}
 RECORDS_ZNR_MINUTES:  dict[str, OrderedDict[str]] = {}
 
 PUT_SNAPSHOT_INTERVAL: dict[str, deque[int]] = {}
-MEDIAN_LATENCY_DICT:   dict[str, int] = {}
+MEAN_LATENCY_DICT:	   dict[str, int] = {}
 
 LATEST_JSON_FLUSH:   dict[str, int] = {}
 JSON_FLUSH_INTERVAL: dict[str, deque[int]] = {}
@@ -198,7 +198,7 @@ if __name__ == "__main__":
 				EVENT_LATENCY_VALID,
 				EVENT_STREAM_ENABLE,
 			) = init_runtime_state(
-				MEDIAN_LATENCY_DICT,
+				MEAN_LATENCY_DICT,
 				LATEST_JSON_FLUSH,
 				JSON_FLUSH_INTERVAL,
 				PUT_SNAPSHOT_INTERVAL,
@@ -233,7 +233,7 @@ if __name__ == "__main__":
 				'SYMBOLS':				 SYMBOLS,
 				'WEBSOCKET_PEER':		 WEBSOCKET_PEER,
 				'SNAPSHOTS_QUEUE_DICT':  SNAPSHOTS_QUEUE_DICT,
-				'MEDIAN_LATENCY_DICT':   MEDIAN_LATENCY_DICT,
+				'MEAN_LATENCY_DICT':	 MEAN_LATENCY_DICT,
 				'JSON_FLUSH_INTERVAL':   JSON_FLUSH_INTERVAL,
 				'PUT_SNAPSHOT_INTERVAL': PUT_SNAPSHOT_INTERVAL,
 			}
@@ -258,7 +258,7 @@ if __name__ == "__main__":
 						WS_PING_TIMEOUT,
 						LATENCY_DEQUE_SIZE,
 						LATENCY_SAMPLE_MIN,
-						MEDIAN_LATENCY_DICT,
+						MEAN_LATENCY_DICT,
 						LATENCY_THRESHOLD_MS,
 						EVENT_LATENCY_VALID,
 						BASE_BACKOFF,
@@ -278,7 +278,7 @@ if __name__ == "__main__":
 						PUT_SNAPSHOT_INTERVAL,
 						SNAPSHOTS_QUEUE_DICT,
 						EVENT_STREAM_ENABLE,
-						MEDIAN_LATENCY_DICT,
+						MEAN_LATENCY_DICT,
 						EVENT_1ST_SNAPSHOT,
 						MAX_BACKOFF, 
 						BASE_BACKOFF,
@@ -333,7 +333,7 @@ if __name__ == "__main__":
 					gate_streaming_by_latency(
 						EVENT_LATENCY_VALID,
 						EVENT_STREAM_ENABLE,
-						MEDIAN_LATENCY_DICT,
+						MEAN_LATENCY_DICT,
 						LATENCY_SIGNAL_SLEEP,
 						SYMBOLS,
 						logger,

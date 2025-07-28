@@ -943,7 +943,7 @@ async def put_snapshot(			# @depth20@100ms
 	put_snapshot_interval:		dict[str, deque[int]],
 	snapshots_queue_dict:		dict[str, asyncio.Queue],
 	event_stream_enable:		asyncio.Event,
-	mean_latency_dict:			dict[str, int],
+	median_latency_dict:		dict[str, int],
 	event_1st_snapshot:			asyncio.Event,
 	max_backoff:				int, 
 	base_backoff:				int,
@@ -1063,9 +1063,9 @@ async def put_snapshot(			# @depth20@100ms
 							
 							if (
 								# drop if (gate closed) 
-								# or (no mean latency available)
+								# or (no median_latency available)
 								(not event_stream_enable.is_set())
-								or (mean_latency_dict[cur_symbol] == None)
+								or (median_latency_dict[cur_symbol] == None)
 							):
 								continue
 
@@ -1113,7 +1113,7 @@ async def put_snapshot(			# @depth20@100ms
 							#———————————————————————————————————————————————————————
 							
 							oneway_network_latency_ms = max(
-								0, mean_latency_dict.get(
+								0, median_latency_dict.get(
 									cur_symbol, 0
 								)
 							)
@@ -1219,7 +1219,7 @@ async def put_snapshot(			# @depth20@100ms
 						logger.warning(
 							f"[{my_name()}]\n"
 							f"\tNo data received for {ws_timeout_sec:.6f} seconds.\n"
-							f"\tp90 ws.recv() intv.: {websocket_recv_intv_stat['p90']:.6f}.\n"
+							f"\tp90(ws.recv()) intv: {websocket_recv_intv_stat['p90']:.6f}.\n"
 							f"\tReconnecting..."
 						)
 						break

@@ -36,7 +36,7 @@ from util import (
 async def gate_streaming_by_latency(
 	event_latency_valid:  asyncio.Event,
 	event_stream_enable:  asyncio.Event,
-	mean_latency_dict:  dict[str, int],
+	median_latency_dict:  dict[str, int],
 	latency_signal_sleep: float,
 	symbols:			  list[str],
 	logger:				  logging.Logger,
@@ -51,7 +51,7 @@ async def gate_streaming_by_latency(
 			latency_passed = event_latency_valid.is_set()
 			stream_currently_on = event_stream_enable.is_set()
 			has_all_latency = all(
-				mean_latency_dict[s]
+				median_latency_dict[s]
 				is not None
 				for s in symbols
 			)
@@ -119,7 +119,7 @@ async def estimate_latency(
 	ws_ping_timeout:		Optional[int],
 	latency_deque_size:		int,
 	latency_sample_min:		int,
-	mean_latency_dict:	dict[str, int],
+	median_latency_dict:	dict[str, int],
 	latency_threshold_ms:	int,
 	event_latency_valid:  	asyncio.Event,
 	base_backoff:			int,
@@ -190,8 +190,8 @@ async def estimate_latency(
 						# From
 						# 	`message = orjson.loads(raw_msg)`
 						# to
-						#	mean_latency_dict[symbol] = int(
-						#		statistics.fmean(
+						#	median_latency_dict[symbol] = int(
+						#		statistics.median(
 						#			latency_dict[symbol]
 						#		)
 						#	),
@@ -243,8 +243,8 @@ async def estimate_latency(
 							>= latency_sample_min
 						):
 
-							mean_latency_dict[symbol] = int(
-								statistics.fmean(
+							median_latency_dict[symbol] = int(
+								statistics.median(
 									latency_dict[symbol]
 								)
 							)
@@ -258,7 +258,9 @@ async def estimate_latency(
 										>= latency_sample_min
 									)
 									and (
-										mean_latency_dict[s]
+										statistics.median(
+											latency_dict[s]
+										)
 										< latency_threshold_ms
 									)
 								)	for s in symbols
