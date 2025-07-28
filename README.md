@@ -21,8 +21,8 @@ to extract alpha signals from market microstructure dynamics.
 
 ## 📅 Latest Data Acquisition
 
-- **Date:**  2025.07.14  
-- **Range (65 days):** 2025.05.10 ~ 2025.07.13  
+- **Date:**  2025.07.27  
+- **Range (78 days):** 2025.05.10 ~ 2025.07.26  
 - **Symbols (30):**
 
 ETHUSDT,BTCUSDT,SOLUSDT,ETHUSDC,BTCUSDC,XRPUSDT,PEPEUSDT,DOGEUSDT,SUIUSDT,AAVEUSDT,ONDOUSDT,SOLUSDC,ADAUSDT,XRPUSDC,LTCUSDT,DOGEUSDC,HBARUSDT,UNIUSDT,SUIUSDC,DOTUSDT,ADAUSDC,WLDUSDT,NEARUSDT,AVAXUSDT,TONUSDT,BCHUSDT,PEPEUSDC,LINKUSDT,BNBUSDT,SHIBUSDT
@@ -31,8 +31,8 @@ ETHUSDT,BTCUSDT,SOLUSDT,ETHUSDC,BTCUSDC,XRPUSDT,PEPEUSDT,DOGEUSDT,SUIUSDT,AAVEUS
 
 ## 📅 Next Data Acquisition
 Next data acquisition date is +13 days from the latest data acquisition date, e.g.,  
-Latest Acq. Date +00: 2025-07-14  
-Next Acq.... Date   +13: ***2025-07-27***
+Latest Acq. Date +00: 2025-07-27  
+Next Acq.... Date   +13: ***2025-08-09***
 
 ---
 
