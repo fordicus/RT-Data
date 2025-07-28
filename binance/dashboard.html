@@ -192,7 +192,7 @@
 				<th>Put Snapshot Interval<br>Avg.: ${snapshotIntervalAvg} [ms]</th>
 				<th>JSON Flush Interval<br>Avg.: ${flushIntervalAvg} [ms]</th>
 				<th id="queueSizeHeader">Queue Size<br>Total: ${queueSizeTotal}</th>
-				<th>Median Latency<br>Avg.: ${medLatencyAvg} [ms]</th>
+				<th>Mean Latency<br>Avg.: ${medLatencyAvg} [ms]</th>
 			`;
 
 			const formattedTime = new Date(lastUpdated).toISOString().slice(0, 19) + "Z";
