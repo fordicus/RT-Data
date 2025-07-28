@@ -1246,10 +1246,12 @@ async def put_snapshot(			# @depth20@100ms
 			)
 
 			backoff = min(
-				max_backoff, base_backoff * (2 ** ws_retry_cnt)
+				max_backoff,
+				base_backoff ** ws_retry_cnt
 			) + random.uniform(0, 1)
 
 			if ws_retry_cnt > reset_cycle_after:
+				
 				ws_retry_cnt = reset_backoff_level
 
 			logger.warning(

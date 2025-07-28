@@ -135,7 +135,7 @@ async def estimate_latency(
 		+ "/".join(f"{symbol}@depth" for symbol in symbols)
 	)
 
-	reconnect_attempt = 0
+	ws_retry_cnt = 0
 
 	depth_update_id_dict: dict[str, int] = {}
 	depth_update_id_dict.clear()
@@ -178,7 +178,7 @@ async def estimate_latency(
 					f"{format_ws_url(url, '(@depth)')}\n"
 				)
 
-				reconnect_attempt = 0
+				ws_retry_cnt = 0
 
 				async for raw_msg in ws:
 
@@ -292,12 +292,12 @@ async def estimate_latency(
 
 		except Exception as e:
 
-			reconnect_attempt += 1
+			ws_retry_cnt += 1
 
 			logger.warning(
 				f"[{my_name()}] "
 				f"WebSocket connection error "
-				f"(attempt {reconnect_attempt}): {e}",
+				f"(attempt {ws_retry_cnt}): {e}",
 				exc_info=True
 			)
 
@@ -308,22 +308,19 @@ async def estimate_latency(
 				latency_dict[symbol].clear()
 				depth_update_id_dict[symbol] = 0
 
-			backoff_sec = (
-				min(
+			backoff_sec = min(
 					max_backoff,
-					base_backoff * (2 ** reconnect_attempt)
-				)
-				+ random.uniform(0, 1)
-			)
+					base_backoff ** ws_retry_cnt
+				) + random.uniform(0, 1)
 
-			if reconnect_attempt > reset_cycle_after:
+			if ws_retry_cnt > reset_cycle_after:
 
-				reconnect_attempt = reset_backoff_level
+				ws_retry_cnt = reset_backoff_level
 
 			logger.warning(
 				f"[{my_name()}] "
 				f"Retrying in {backoff_sec:.1f} seconds "
-				f"(attempt {reconnect_attempt})..."
+				f"(attempt {ws_retry_cnt})..."
 			)
 
 			await asyncio.sleep(backoff_sec)
