@@ -9,6 +9,8 @@ pyinstaller \
   --add-data "dashboard.html:." \
   --additional-hooks-dir=. \
   --runtime-hook=sitecustomize.py \
+  --hidden-import=numpy \
+  --hidden-import=numpy.lib \
   stream_binance.py
 
 mv dist/stream_binance stream_binance

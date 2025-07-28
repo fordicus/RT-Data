@@ -18,6 +18,7 @@ from util import (
 import sys, os, io, asyncio, orjson
 import shutil, zipfile, logging
 import websockets, time, random
+import numpy as np
 
 from io import TextIOWrapper
 from collections import OrderedDict, deque
@@ -936,37 +937,63 @@ async def symbol_dump_snapshot(
 #———————————————————————————————————————————————————————————————————————————————
 
 @ensure_logging_on_exception
-async def put_snapshot(		# @depth20@100ms
-	put_snapshot_interval:	dict[str, deque[int]],
-	snapshots_queue_dict:	dict[str, asyncio.Queue],
-	event_stream_enable:	asyncio.Event,
-	median_latency_dict:	dict[str, int],
-	event_1st_snapshot:		asyncio.Event,
-	max_backoff:			int, 
-	base_backoff:			int,
-	reset_cycle_after:		int,
-	reset_backoff_level:	int,
-	ws_url:					str,
-	ws_ping_interval:		int,
-	ws_ping_timeout:		int,
-	symbols:				list,
-	logger:					logging.Logger,
-	base_interval_ms:		int	  = 100,
-	data_timeout_sec:		float = 0.500,		# until ws.recv()
+async def put_snapshot(			# @depth20@100ms
+	websocket_recv_interval:	deque[float],
+	websocket_recv_intv_stat:	dict[str, float],
+	put_snapshot_interval:		dict[str, deque[int]],
+	snapshots_queue_dict:		dict[str, asyncio.Queue],
+	event_stream_enable:		asyncio.Event,
+	median_latency_dict:		dict[str, int],
+	event_1st_snapshot:			asyncio.Event,
+	max_backoff:				int, 
+	base_backoff:				int,
+	reset_cycle_after:			int,
+	reset_backoff_level:		int,
+	ws_url:						str,
+	ws_ping_interval:			int,
+	ws_ping_timeout:			int,
+	symbols:					list,
+	logger:						logging.Logger,
+	base_interval_ms:			int	  = 100,
+	ws_timeout_multiplier:		float =	  3.0,
+	ws_timeout_default_sec:		float =	  0.5,
+	ws_timeout_min_sec:			float =	  0.150,
 ):
 
-	"""————————————————————————————————————————————————————————————
+	"""—————————————————————————————————————————————————————————————————————————
 	CORE FUNCTIONALITY:
 		await snapshots_queue_dict[
 			cur_symbol
 		].put(snapshot)
-	———————————————————————————————————————————————————————————————
+	————————————————————————————————————————————————————————————————————————————
 	HINT:
 		asyncio.Queue(maxsize=SNAPSHOTS_QUEUE_MAX)
-	————————————————————————————————————————————————————————————"""
+	—————————————————————————————————————————————————————————————————————————"""
 
-	ws_retry_cnt = 0
+	def update_ws_recv_timeout(
+		data:		deque[float],
+		stat:		dict[str, float],
+		multiplier: float,
+		default:	float,
+		minimum:	float,
+	) -> float:		# ws_timeout_sec
 
+		if len(data) >= 10:
+			
+			stat['p90'] = np.percentile(list(data), 90)
+			return max(stat['p90'] * multiplier, minimum)
+
+		else:
+
+			return max(default, minimum)
+
+	#———————————————————————————————————————————————————————————————————————————
+
+	ws_retry_cnt   = 0
+
+	ws_timeout_sec = ws_timeout_default_sec
+	last_recv_time_ns = None
+	
 	measured_interval_ms: dict[str, int] = {}
 	measured_interval_ms.clear()
 	measured_interval_ms.update({
@@ -1018,7 +1045,8 @@ async def put_snapshot(		# @depth20@100ms
 					try:
 						
 						raw = await asyncio.wait_for(
-							ws.recv(), timeout=data_timeout_sec
+							ws.recv(),
+							timeout = ws_timeout_sec
 						)
 
 						try:
@@ -1053,21 +1081,12 @@ async def put_snapshot(		# @depth20@100ms
 							#———————————————————————————————————————————————————————
 							# SERVER TIMESTAMP RECONSTRUCTION FOR PARTIAL STREAMS
 							#———————————————————————————————————————————————————————
-							# Problem: Binance `@depth20@100ms` streams lack server
-							# timestamp ("E"), unlike diff depth streams. We must
-							# estimate it from local receipt time with delay
-							# corrections.
-							#———————————————————————————————————————————————————————
-							# Method: `measured_interval_ms[cur_symbol]` should
-							# ideally equal 100ms (stream interval). Any excess
-							# above 100ms represents computational delay from
-							# coroutine scheduling and JSON processing overhead.
-							# This `interval_delay_ms` must be subtracted alongside
-							# network latency (oneway_network_latency_ms) to
-							# recover the original server-side event timestamp.
+							# Binance `@depth20@100ms` streams lack server timestamp
+							# ("E"), unlike diff depth streams. We must estimate it
+							# from local receipt time with delay corrections.
 							#———————————————————————————————————————————————————————
 
-							cur_time_ms = get_current_time_ms()	# + bias_to_add
+							cur_time_ms = get_current_time_ms()
 
 							if prev_snapshot_time_ms[cur_symbol] is not None:
 
@@ -1149,12 +1168,40 @@ async def put_snapshot(		# @depth20@100ms
 								cur_symbol
 							].put(snapshot)
 
+							#———————————————————————————————————————————————————————
 							# 1st snapshot gate for FastAPI readiness
-							
+							#———————————————————————————————————————————————————————
+
 							if not event_1st_snapshot.is_set():
+
 								event_1st_snapshot.set()
 
+							#———————————————————————————————————————————————————————
+							# Statistics on Websocket Receipt Interval
+							#———————————————————————————————————————————————————————
+
+							cur_time_ns = time.time_ns()
+
+							if last_recv_time_ns is not None:
+								
+								websocket_recv_interval.append(
+									(
+										cur_time_ns - last_recv_time_ns
+									) / 1_000_000_000.0
+								)
+								
+							last_recv_time_ns = cur_time_ns
+
+							ws_timeout_sec = update_ws_recv_timeout(
+								websocket_recv_interval,
+								websocket_recv_intv_stat,
+								ws_timeout_multiplier,
+								ws_timeout_default_sec,
+								ws_timeout_min_sec,
+							)
+
 						except Exception as e:
+
 							sym = (
 								cur_symbol
 								if cur_symbol in symbols
@@ -1170,8 +1217,10 @@ async def put_snapshot(		# @depth20@100ms
 					except asyncio.TimeoutError:
 						
 						logger.warning(
-							f"[{my_name()}] No data received for "
-							f"{data_timeout_sec} seconds. Reconnecting..."
+							f"[{my_name()}]\n"
+							f"\tNo data received for {ws_timeout_sec:.6f} seconds.\n"
+							f"\tp90(ws.recv()) intv: {websocket_recv_intv_stat['p90']:.6f}.\n"
+							f"\tReconnecting..."
 						)
 						break
 

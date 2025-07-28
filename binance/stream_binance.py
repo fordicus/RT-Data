@@ -29,6 +29,7 @@ Dependency:
 	psutil==7.0.0
 	uvicorn==0.35.0
 	websockets==15.0.1
+	numpy==2.3.2
 	uvloop==0.21.0
 	memray==1.17.2
 
@@ -138,7 +139,7 @@ setup_uvloop(logger = logger)
 	#
 ) = load_config(logger)
 
-#———————————————————————————————————————————————————————————————————————————————-
+#———————————————————————————————————————————————————————————————————————————————
 
 SNAPSHOTS_QUEUE_DICT:   dict[str, asyncio.Queue] = {}
 SYMBOL_TO_FILE_HANDLES: dict[str, tuple[str, TextIOWrapper]] = {}
@@ -152,9 +153,13 @@ MEDIAN_LATENCY_DICT:   dict[str, int] = {}
 LATEST_JSON_FLUSH:   dict[str, int] = {}
 JSON_FLUSH_INTERVAL: dict[str, deque[int]] = {}
 
-WEBSOCKET_PEER: dict[str, str] = {"value": "UNKNOWN"}
+WEBSOCKET_PEER:			  dict[str, str]   = {"value": "UNKNOWN"}
+WEBSOCKET_RECV_INTV_STAT: dict[str, float] = {"p90": float('inf')}
+WEBSOCKET_RECV_INTERVAL:  deque[float] = deque(
+	maxlen = max(len(SYMBOLS), 300)
+)
 
-#———————————————————————————————————————————————————————————————————————————————-
+#———————————————————————————————————————————————————————————————————————————————
 
 if __name__ == "__main__":
 
@@ -268,6 +273,8 @@ if __name__ == "__main__":
 
 				put_snapshot_task = asyncio.create_task(
 					put_snapshot(	# @depth20@100ms
+						WEBSOCKET_RECV_INTERVAL,
+						WEBSOCKET_RECV_INTV_STAT,
 						PUT_SNAPSHOT_INTERVAL,
 						SNAPSHOTS_QUEUE_DICT,
 						EVENT_STREAM_ENABLE,
