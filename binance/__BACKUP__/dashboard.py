@@ -206,7 +206,7 @@ class DashboardServer:
 		med_latency = {}
 		for symbol in self.state['SYMBOLS']:
 			med_latency[symbol] = self.state[
-				'MEDIAN_LATENCY_DICT'
+				'MEAN_LATENCY_DICT'
 			].get(symbol, 0)
 			await asyncio.sleep(0)
 		

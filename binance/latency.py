@@ -20,8 +20,8 @@
 #———————————————————————————————————————————————————————————————————————————————
 
 import asyncio, logging
-import websockets, orjson
-import statistics, random
+import websockets, time, random, statistics, orjson
+import numpy as np
 from collections import deque
 from typing import Optional
 from util import (
@@ -29,6 +29,7 @@ from util import (
 	NanoTimer,
 	get_current_time_ms,
 	geo, format_ws_url,
+	ensure_logging_on_exception,
 )
 
 #———————————————————————————————————————————————————————————————————————————————
@@ -113,13 +114,14 @@ async def gate_streaming_by_latency(
 
 #———————————————————————————————————————————————————————————————————————————————
 
+@ensure_logging_on_exception
 async def estimate_latency(
 	websocket_peer:			dict[str, str],
 	ws_ping_interval:		Optional[int],
 	ws_ping_timeout:		Optional[int],
 	latency_deque_size:		int,
 	latency_sample_min:		int,
-	mean_latency_dict:	dict[str, int],
+	mean_latency_dict:		dict[str, int],
 	latency_threshold_ms:	int,
 	event_latency_valid:  	asyncio.Event,
 	base_backoff:			int,
@@ -128,14 +130,72 @@ async def estimate_latency(
 	reset_backoff_level:	int,
 	symbols:				list[str],
 	logger:					logging.Logger,
+	base_interval_ms:		int   = 100,
+	ws_timeout_multiplier:	float = 5.0,
+	ws_timeout_default_sec:	float = 1.0,
+	ws_timeout_min_sec:		float = 0.5,
 ):
+
+	"""—————————————————————————————————————————————————————————————————————————
+	CORE FUNCTIONALITY:
+		Measure network latency via @depth@100ms stream with timeout-based recv
+	—————————————————————————————————————————————————————————————————————————"""
+
+	def update_ws_recv_timeout(
+		data:		deque[float],
+		stat:		dict[str, float],
+		multiplier: float,
+		default:	float,
+		minimum:	float,
+	) -> float:		# ws_timeout_sec
+
+		if len(data) >= max(data.maxlen, 300):
+			
+			stat['p90'] = np.percentile(list(data), 90)
+			return max(stat['p90'] * multiplier, minimum)
+
+		else:
+
+			return max(default, minimum)
+
+	#———————————————————————————————————————————————————————————————————————————
+
+	async def calculate_backoff_and_sleep(
+		retry_count: int,
+		symbol: str = "UNKNOWN"
+	) -> int:
+		
+		backoff = min(
+			max_backoff,
+			base_backoff ** retry_count
+		) + random.uniform(0, 1)
+		
+		if retry_count > reset_cycle_after:
+			retry_count = reset_backoff_level
+		
+		logger.warning(
+			f"[{my_name()}][{symbol.upper()}] "
+			f"Retrying in {backoff:.1f} seconds..."
+		)
+		
+		await asyncio.sleep(backoff)
+		
+		return retry_count
+
+	#———————————————————————————————————————————————————————————————————————————
 
 	url = (
 		"wss://stream.binance.com:9443/stream?streams="
-		+ "/".join(f"{symbol}@depth" for symbol in symbols)
+		+ "/".join(f"{symbol}@depth@100ms" for symbol in symbols)
 	)
 
 	ws_retry_cnt = 0
+
+	ws_timeout_sec = ws_timeout_default_sec
+	last_recv_time_ns = None
+
+	websocket_recv_interval	 = deque(maxlen=max(len(symbols), 300))
+	websocket_recv_intv_stat = {"p90": float('inf')}
 
 	depth_update_id_dict: dict[str, int] = {}
 	depth_update_id_dict.clear()
@@ -151,7 +211,11 @@ async def estimate_latency(
 		for symbol in symbols
 	})
 
+	#———————————————————————————————————————————————————————————————————————————
+
 	while True:
+
+		cur_symbol = "UNKNOWN"
 
 		try:
 
@@ -180,115 +244,165 @@ async def estimate_latency(
 
 				ws_retry_cnt = 0
 
-				async for raw_msg in ws:
+				while True:
 
 					try:
 
-						#———————————————————————————————————————————————————————
-						# LATENCY MEASUREMENT ACCURACY & SYSTEM REQUIREMENTS
-						#———————————————————————————————————————————————————————
-						# From
-						# 	`message = orjson.loads(raw_msg)`
-						# to
-						#	mean_latency_dict[symbol] = int(
-						#		statistics.fmean(
-						#			latency_dict[symbol]
-						#		)
-						#	),
-						# execution time is sub-millisec. even on basic Python
-						# interpreter without optimization. This ensures
-						# accurate network latency measurement with negligible
-						# computational delay.
-						#———————————————————————————————————————————————————————
-						# Time Synchronization: Client system uses Chrony with
-						# trusted local time servers. Since latency measurement
-						# relies on `get_current_time_ms(): time.time_ns()`,
-						# accurate system clock synchronization is essential.
-						#———————————————————————————————————————————————————————
-
-						message = orjson.loads(raw_msg)
-						data = message.get("data", {})
-						server_time_ms = data.get("E")
-
-						if server_time_ms is None:
-							continue  # drop malformed
-
-						stream_name = message.get("stream", "")
-						symbol = stream_name.split(
-							"@", 1
-						)[0].lower()
-
-						if symbol not in symbols:
-							continue  # ignore unexpected
-
-						update_id = data.get("u")
-
-						if ((update_id is None) or
-							(update_id <= 
-							 depth_update_id_dict.get(symbol, 0))
-						): continue  # duplicate or out-of-order
-
-						#———————————————————————————————————————————————————————
-
-						depth_update_id_dict[symbol] = update_id
-
-						latency_ms = (
-							get_current_time_ms() - server_time_ms
+						raw_msg = await asyncio.wait_for(
+							ws.recv(),
+							timeout = ws_timeout_sec
 						)
 
-						latency_dict[symbol].append(latency_ms)
+						try:
 
-						if (
-							len(latency_dict[symbol])
-							>= latency_sample_min
-						):
+							#———————————————————————————————————————————————————————
+							# LATENCY MEASUREMENT ACCURACY & SYSTEM REQUIREMENTS
+							#———————————————————————————————————————————————————————
+							# From
+							# 	`message = orjson.loads(raw_msg)`
+							# to
+							#	mean_latency_dict[symbol] = int(
+							#		statistics.fmean(
+							#			latency_dict[symbol]
+							#		)
+							#	),
+							# execution time is sub-millisec. even on basic Python
+							# interpreter without optimization. This ensures
+							# accurate network latency measurement with negligible
+							# computational delay.
+							#———————————————————————————————————————————————————————
+							# Time Synchronization: Client system uses Chrony with
+							# trusted local time servers. Since latency measurement
+							# relies on `get_current_time_ms(): time.time_ns()`,
+							# accurate system clock synchronization is essential.
+							#———————————————————————————————————————————————————————
 
-							mean_latency_dict[symbol] = int(
-								statistics.fmean(
-									latency_dict[symbol]
-								)
+							message = orjson.loads(raw_msg)
+							data = message.get("data", {})
+							server_time_ms = data.get("E")
+
+							if server_time_ms is None:
+								continue  # drop malformed
+
+							stream_name = message.get("stream", "")
+							symbol = stream_name.split(
+								"@", 1
+							)[0].lower()
+
+							if symbol not in symbols:
+								continue  # ignore unexpected
+
+							update_id = data.get("u")
+
+							if ((update_id is None) or
+								(update_id <= 
+								depth_update_id_dict.get(symbol, 0))
+							): continue  # duplicate or out-of-order
+
+							#———————————————————————————————————————————————————————
+
+							depth_update_id_dict[symbol] = update_id
+
+							latency_ms = (
+								get_current_time_ms() - server_time_ms
 							)
 
-							#———————————————————————————————————————————————————
+							latency_dict[symbol].append(latency_ms)
 
-							if all(
-								(	
-									(
-										len(latency_dict[s])
-										>= latency_sample_min
-									)
-									and (
-										mean_latency_dict[s]
-										< latency_threshold_ms
-									)
-								)	for s in symbols
+							if (
+								len(latency_dict[symbol])
+								>= latency_sample_min
 							):
 
-								if not event_latency_valid.is_set():
-
-									event_latency_valid.set()
-
-									logger.info(
-										f"[{my_name()}] "
-										f"Latency OK — "
-										f"All symbols within "
-										f"threshold. Event set."
+								mean_latency_dict[symbol] = int(
+									statistics.fmean(
+										latency_dict[symbol]
 									)
-							
-							else:
+								)
 
-								event_latency_valid.clear()
+								#———————————————————————————————————————————————————
 
-							#———————————————————————————————————————————————————
+								if all(
+									(	
+										(
+											len(latency_dict[s])
+											>= latency_sample_min
+										)
+										and (
+											mean_latency_dict[s]
+											< latency_threshold_ms
+										)
+									)	for s in symbols
+								):
 
-					except Exception as e:
+									if not event_latency_valid.is_set():
 
+										event_latency_valid.set()
+
+										logger.info(
+											f"[{my_name()}] "
+											f"Latency OK — "
+											f"All symbols within "
+											f"threshold. Event set."
+										)
+								
+								else:
+
+									event_latency_valid.clear()
+
+							#———————————————————————————————————————————————————————
+							# Statistics on Websocket Receipt Interval (put_snapshot과 동일)
+							#———————————————————————————————————————————————————————
+
+							cur_time_ns = time.time_ns()
+
+							if last_recv_time_ns is not None:
+								
+								websocket_recv_interval.append(
+									(
+										cur_time_ns - last_recv_time_ns
+									) / 1_000_000_000.0
+								)
+								
+							last_recv_time_ns = cur_time_ns
+
+							ws_timeout_sec = update_ws_recv_timeout(
+								websocket_recv_interval,
+								websocket_recv_intv_stat,
+								ws_timeout_multiplier,
+								ws_timeout_default_sec,
+								ws_timeout_min_sec,
+							)
+
+						except Exception as e:
+
+							logger.warning(
+								f"[{my_name()}] "
+								f"Failed to process message: {e}",
+								exc_info=True
+							)
+							continue
+
+					except asyncio.TimeoutError:
+
+						ws_retry_cnt += 1
+						
 						logger.warning(
-							f"[{my_name()}] "
-							f"Failed to process message: {e}",
-							exc_info=True
+							f"[{my_name()}]\n"
+							f"\tNo latency data received for {ws_timeout_sec:.6f} seconds.\n"
+							f"\tp90 ws.recv() intv.: {websocket_recv_intv_stat['p90']:.6f}.\n"
+							f"\tReconnecting..."
 						)
-						continue
+
+						ws_retry_cnt = await calculate_backoff_and_sleep(
+							ws_retry_cnt, cur_symbol
+						)
+
+						break
+
+		except asyncio.CancelledError:
+			# propagate so caller can shut down gracefully
+			raise
 
 		except Exception as e:
 
@@ -308,22 +422,9 @@ async def estimate_latency(
 				latency_dict[symbol].clear()
 				depth_update_id_dict[symbol] = 0
 
-			backoff_sec = min(
-					max_backoff,
-					base_backoff ** ws_retry_cnt
-				) + random.uniform(0, 1)
-
-			if ws_retry_cnt > reset_cycle_after:
-
-				ws_retry_cnt = reset_backoff_level
-
-			logger.warning(
-				f"[{my_name()}] "
-				f"Retrying in {backoff_sec:.1f} seconds "
-				f"(attempt {ws_retry_cnt})..."
+			ws_retry_cnt = await calculate_backoff_and_sleep(
+				ws_retry_cnt, cur_symbol
 			)
-
-			await asyncio.sleep(backoff_sec)
 
 		finally:
 

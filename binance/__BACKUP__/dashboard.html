@@ -81,7 +81,7 @@
 				<th>Put Snapshot Interval<br>Avg.: 0 [ms]</th>
 				<th>JSON Flush Interval<br>Avg.: 0 [ms]</th>
 				<th id="queueSizeHeader">Queue Size<br>Total: 0</th>
-				<th>Median Latency<br>Avg.: 0 [ms]</th>
+				<th>Mean Latency<br>Avg.: 0 [ms]</th>
 			</tr>
 		</thead>
 		<tbody>
@@ -96,7 +96,7 @@
 			<strong>Put Snapshot Interval:</strong> The measured interval between consecutive "asyncio.Queue.put()" operations within the "put_snapshot()" coroutine. Any extra delay beyond the nominal 100ms streaming interval determines "intv_lag_ms", which is used as side information during AI training.<br>
 			<strong>JSON Flush Interval:</strong> The measured interval between consecutive "TextIOWrapper.flush()" operations to disk. This value does not affect the timestamps written to ".jsonl" files, as it only reflects disk I/O latency after "recv_ms" is determined by the "put_snapshot()" coroutine.<br>
 			<strong>Queue Size:</strong> The average of "asyncio.Queue.qsize()" values over a monitoring period. This value is typically close to zero, as the "asyncio.Queue" is consumed almost instantaneously.<br>
-			<strong>Median Latency:</strong> The median one-way network latency from Binance servers, calculated over a sampling period. This robust estimate defines "net_delay_ms", which—like "intv_lag_ms"—serves as side information for AI models.
+			<strong>Mean Latency:</strong> The mean one-way network latency from Binance servers, calculated over a sampling period. This estimate defines "net_delay_ms", which—like "intv_lag_ms"—serves as side information for AI models.
 		`;
 
 		const ws = new WebSocket(`ws://${window.location.host}/ws/dashboard`);
@@ -192,7 +192,7 @@
 				<th>Put Snapshot Interval<br>Avg.: ${snapshotIntervalAvg} [ms]</th>
 				<th>JSON Flush Interval<br>Avg.: ${flushIntervalAvg} [ms]</th>
 				<th id="queueSizeHeader">Queue Size<br>Total: ${queueSizeTotal}</th>
-				<th>Median Latency<br>Avg.: ${medLatencyAvg} [ms]</th>
+				<th>Mean Latency<br>Avg.: ${medLatencyAvg} [ms]</th>
 			`;
 
 			const formattedTime = new Date(lastUpdated).toISOString().slice(0, 19) + "Z";

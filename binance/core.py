@@ -955,9 +955,9 @@ async def put_snapshot(			# @depth20@100ms
 	symbols:					list,
 	logger:						logging.Logger,
 	base_interval_ms:			int	  = 100,
-	ws_timeout_multiplier:		float =	  3.0,
-	ws_timeout_default_sec:		float =	  0.5,
-	ws_timeout_min_sec:			float =	  0.150,
+	ws_timeout_multiplier:		float =	  5.0,
+	ws_timeout_default_sec:		float =	  1.0,
+	ws_timeout_min_sec:			float =	  0.5,
 ):
 
 	"""—————————————————————————————————————————————————————————————————————————
@@ -978,7 +978,7 @@ async def put_snapshot(			# @depth20@100ms
 		minimum:	float,
 	) -> float:		# ws_timeout_sec
 
-		if len(data) >= 10:
+		if len(data) >= max(data.maxlen, 300):
 			
 			stat['p90'] = np.percentile(list(data), 90)
 			return max(stat['p90'] * multiplier, minimum)
@@ -986,6 +986,31 @@ async def put_snapshot(			# @depth20@100ms
 		else:
 
 			return max(default, minimum)
+
+	#———————————————————————————————————————————————————————————————————————————
+
+	async def calculate_backoff_and_sleep(
+		retry_count: int,
+		symbol: str = "UNKNOWN"
+	) -> int:
+		
+		backoff = min(
+			max_backoff,
+			base_backoff ** retry_count
+		) + random.uniform(0, 1)
+		
+		if retry_count > reset_cycle_after:
+
+			retry_count = reset_backoff_level
+		
+		logger.warning(
+			f"[{my_name()}][{symbol.upper()}] "
+			f"Retrying in {backoff:.1f} seconds..."
+		)
+		
+		await asyncio.sleep(backoff)
+		
+		return retry_count
 
 	#———————————————————————————————————————————————————————————————————————————
 
@@ -1215,6 +1240,8 @@ async def put_snapshot(			# @depth20@100ms
 							continue  # stay in websocket loop
 
 					except asyncio.TimeoutError:
+
+						ws_retry_cnt += 1
 						
 						logger.warning(
 							f"[{my_name()}]\n"
@@ -1222,6 +1249,11 @@ async def put_snapshot(			# @depth20@100ms
 							f"\tp90 ws.recv() intv.: {websocket_recv_intv_stat['p90']:.6f}.\n"
 							f"\tReconnecting..."
 						)
+
+						ws_retry_cnt = await calculate_backoff_and_sleep(
+							ws_retry_cnt, cur_symbol
+						)
+
 						break
 
 		except asyncio.CancelledError:
@@ -1229,8 +1261,11 @@ async def put_snapshot(			# @depth20@100ms
 			raise
 
 		except Exception as e:
+
 			# websocket-level error → exponential backoff + retry
+
 			ws_retry_cnt += 1
+
 			sym = (
 				cur_symbol
 				if cur_symbol in symbols
@@ -1245,21 +1280,9 @@ async def put_snapshot(			# @depth20@100ms
 				exc_info=True
 			)
 
-			backoff = min(
-				max_backoff,
-				base_backoff ** ws_retry_cnt
-			) + random.uniform(0, 1)
-
-			if ws_retry_cnt > reset_cycle_after:
-				
-				ws_retry_cnt = reset_backoff_level
-
-			logger.warning(
-				f"[{my_name()}][{sym.upper()}] "
-				f"Retrying in {backoff:.1f} seconds..."
+			ws_retry_cnt = await calculate_backoff_and_sleep(
+				ws_retry_cnt, cur_symbol
 			)
-
-			await asyncio.sleep(backoff)
 
 		finally:
 

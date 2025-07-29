@@ -18,6 +18,7 @@ from util import (
 import sys, os, io, asyncio, orjson
 import shutil, zipfile, logging
 import websockets, time, random
+import numpy as np
 
 from io import TextIOWrapper
 from collections import OrderedDict, deque
@@ -936,36 +937,88 @@ async def symbol_dump_snapshot(
 #———————————————————————————————————————————————————————————————————————————————
 
 @ensure_logging_on_exception
-async def put_snapshot(		# @depth20@100ms
-	put_snapshot_interval:	dict[str, deque[int]],
-	snapshots_queue_dict:	dict[str, asyncio.Queue],
-	event_stream_enable:	asyncio.Event,
-	median_latency_dict:	dict[str, int],
-	event_1st_snapshot:		asyncio.Event,
-	max_backoff:			int, 
-	base_backoff:			int,
-	reset_cycle_after:		int,
-	reset_backoff_level:	int,
-	ws_url:					str,
-	ws_ping_interval:		int,
-	ws_ping_timeout:		int,
-	symbols:				list,
-	logger:					logging.Logger,
-	base_interval_ms:		int = 100,
+async def put_snapshot(			# @depth20@100ms
+	websocket_recv_interval:	deque[float],
+	websocket_recv_intv_stat:	dict[str, float],
+	put_snapshot_interval:		dict[str, deque[int]],
+	snapshots_queue_dict:		dict[str, asyncio.Queue],
+	event_stream_enable:		asyncio.Event,
+	mean_latency_dict:			dict[str, int],
+	event_1st_snapshot:			asyncio.Event,
+	max_backoff:				int, 
+	base_backoff:				int,
+	reset_cycle_after:			int,
+	reset_backoff_level:		int,
+	ws_url:						str,
+	ws_ping_interval:			int,
+	ws_ping_timeout:			int,
+	symbols:					list,
+	logger:						logging.Logger,
+	base_interval_ms:			int	  = 100,
+	ws_timeout_multiplier:		float =	  5.0,
+	ws_timeout_default_sec:		float =	  1.0,
+	ws_timeout_min_sec:			float =	  0.5,
 ):
 
-	"""————————————————————————————————————————————————————————————
+	"""—————————————————————————————————————————————————————————————————————————
 	CORE FUNCTIONALITY:
 		await snapshots_queue_dict[
 			cur_symbol
 		].put(snapshot)
-	———————————————————————————————————————————————————————————————
+	————————————————————————————————————————————————————————————————————————————
 	HINT:
 		asyncio.Queue(maxsize=SNAPSHOTS_QUEUE_MAX)
-	————————————————————————————————————————————————————————————"""
+	—————————————————————————————————————————————————————————————————————————"""
 
-	ws_retry_cnt = 0
+	def update_ws_recv_timeout(
+		data:		deque[float],
+		stat:		dict[str, float],
+		multiplier: float,
+		default:	float,
+		minimum:	float,
+	) -> float:		# ws_timeout_sec
 
+		if len(data) >= max(data.maxlen, 300):
+			
+			stat['p90'] = np.percentile(list(data), 90)
+			return max(stat['p90'] * multiplier, minimum)
+
+		else:
+
+			return max(default, minimum)
+
+	#———————————————————————————————————————————————————————————————————————————
+
+	async def calculate_backoff_and_sleep(
+		retry_count: int,
+		symbol: str = "UNKNOWN"
+	) -> int:
+		
+		backoff = min(
+			max_backoff,
+			base_backoff ** retry_count
+		) + random.uniform(0, 1)
+		
+		if retry_count > reset_cycle_after:
+
+			retry_count = reset_backoff_level
+		
+		logger.warning(
+			f"[{my_name()}][{symbol.upper()}] "
+			f"Retrying in {backoff:.1f} seconds..."
+		)
+		
+		await asyncio.sleep(backoff)
+		
+		return retry_count
+
+	#———————————————————————————————————————————————————————————————————————————
+
+	ws_retry_cnt   = 0
+
+	ws_timeout_sec = ws_timeout_default_sec
+	last_recv_time_ns = None
+	
 	measured_interval_ms: dict[str, int] = {}
 	measured_interval_ms.clear()
 	measured_interval_ms.update({
@@ -1011,162 +1064,208 @@ async def put_snapshot(		# @depth20@100ms
 				)
 
 				ws_retry_cnt = 0
-
-				async for raw in ws:
-
+				
+				while True:
+					
 					try:
-
-						msg = orjson.loads(raw)
-						stream = msg.get("stream", "")
-						cur_symbol = (
-							stream.split("@", 1)[0]
-							or "UNKNOWN"
-						).lower()
-
-						if cur_symbol not in symbols:
-							continue	# out of scope
 						
-						if (
-							# drop if (gate closed) 
-							# or (no median_latency available)
-							(not event_stream_enable.is_set())
-							or (median_latency_dict[cur_symbol] == None)
-						):
-							continue
+						raw = await asyncio.wait_for(
+							ws.recv(),
+							timeout = ws_timeout_sec
+						)
 
-						data = msg.get("data", {})
+						try:
 
-						last_update = data.get("lastUpdateId")
-						if last_update is None:
-							continue
+							msg = orjson.loads(raw)
+							stream = msg.get("stream", "")
+							cur_symbol = (
+								stream.split("@", 1)[0]
+								or "UNKNOWN"
+							).lower()
 
-						bids = data.get("bids", [])
-						asks = data.get("asks", [])
+							if cur_symbol not in symbols:
+								continue	# out of scope
+							
+							if (
+								# drop if (gate closed) 
+								# or (no mean latency available)
+								(not event_stream_enable.is_set())
+								or (mean_latency_dict[cur_symbol] == None)
+							):
+								continue
 
-						#———————————————————————————————————————————————————————
-						# SERVER TIMESTAMP RECONSTRUCTION FOR PARTIAL STREAMS
-						#———————————————————————————————————————————————————————
-						# Problem: Binance `@depth20@100ms` streams lack server
-						# timestamp ("E"), unlike diff depth streams. We must
-						# estimate it from local receipt time with delay
-						# corrections.
-						#———————————————————————————————————————————————————————
-						# Method: `measured_interval_ms[cur_symbol]` should
-						# ideally equal 100ms (stream interval). Any excess
-						# above 100ms represents computational delay from
-						# coroutine scheduling and JSON processing overhead.
-						# This `interval_delay_ms` must be subtracted alongside
-						# network latency (oneway_network_latency_ms) to
-						# recover the original server-side event timestamp.
-						#———————————————————————————————————————————————————————
+							data = msg.get("data", {})
 
-						cur_time_ms = get_current_time_ms()	# + bias_to_add
+							last_update = data.get("lastUpdateId")
+							if last_update is None:
+								continue
 
-						if prev_snapshot_time_ms[cur_symbol] is not None:
+							bids = data.get("bids", [])
+							asks = data.get("asks", [])
 
-							measured_interval_ms[cur_symbol] = (
-								cur_time_ms
-								- prev_snapshot_time_ms[cur_symbol]
+							#———————————————————————————————————————————————————————
+							# SERVER TIMESTAMP RECONSTRUCTION FOR PARTIAL STREAMS
+							#———————————————————————————————————————————————————————
+							# Binance `@depth20@100ms` streams lack server timestamp
+							# ("E"), unlike diff depth streams. We must estimate it
+							# from local receipt time with delay corrections.
+							#———————————————————————————————————————————————————————
+
+							cur_time_ms = get_current_time_ms()
+
+							if prev_snapshot_time_ms[cur_symbol] is not None:
+
+								measured_interval_ms[cur_symbol] = (
+									cur_time_ms
+									- prev_snapshot_time_ms[cur_symbol]
+								)
+								prev_snapshot_time_ms[
+									cur_symbol
+								] = cur_time_ms
+
+							else:
+
+								prev_snapshot_time_ms[
+									cur_symbol
+								] = cur_time_ms
+
+								continue
+
+							put_snapshot_interval[cur_symbol].append(
+								measured_interval_ms[cur_symbol]
 							)
-							prev_snapshot_time_ms[
+
+							#———————————————————————————————————————————————————————
+							
+							oneway_network_latency_ms = max(
+								0, mean_latency_dict.get(
+									cur_symbol, 0
+								)
+							)
+
+							interval_delay_ms = max(0,
+								measured_interval_ms[cur_symbol]
+								- base_interval_ms
+							)
+							
+							delay_adjusted_time = (
+								cur_time_ms - (
+									oneway_network_latency_ms
+									+ interval_delay_ms
+								)
+							)
+
+							#———————————————————————————————————————————————————————
+
+							snapshot = {
+								#———————————————————————————————————————————————————
+								# recv_ms: align with <symbol>@trade
+								# net_delay_ms: side information
+								# intv_lag_ms:  side information
+								#———————————————————————————————————————————————————
+								"last_update_id": last_update,
+								#———————————————————————————————————————————————————
+								"recv_ms":		  cur_time_ms,
+								#———————————————————————————————————————————————————
+								"net_delay_ms":	  oneway_network_latency_ms,
+								#———————————————————————————————————————————————————
+								"intv_lag_ms":	  interval_delay_ms,
+								#———————————————————————————————————————————————————
+								"bids": [
+									[float(p), float(q)]
+									for p, q in bids
+								],
+								#———————————————————————————————————————————————————
+								"asks": [
+									[float(p), float(q)]
+									for p, q in asks
+								],
+								#———————————————————————————————————————————————————
+							}
+
+							#———————————————————————————————————————————————————————
+							# `.qsize()` is less than or equal to one almost surely,
+							# meaning that `snapshots_queue_dict` is being quickly
+							# consumed via `.get()`.
+							#———————————————————————————————————————————————————————
+							
+							await snapshots_queue_dict[
 								cur_symbol
-							] = cur_time_ms
+							].put(snapshot)
 
-						else:
+							#———————————————————————————————————————————————————————
+							# 1st snapshot gate for FastAPI readiness
+							#———————————————————————————————————————————————————————
 
-							prev_snapshot_time_ms[
+							if not event_1st_snapshot.is_set():
+
+								event_1st_snapshot.set()
+
+							#———————————————————————————————————————————————————————
+							# Statistics on Websocket Receipt Interval
+							#———————————————————————————————————————————————————————
+
+							cur_time_ns = time.time_ns()
+
+							if last_recv_time_ns is not None:
+								
+								websocket_recv_interval.append(
+									(
+										cur_time_ns - last_recv_time_ns
+									) / 1_000_000_000.0
+								)
+								
+							last_recv_time_ns = cur_time_ns
+
+							ws_timeout_sec = update_ws_recv_timeout(
+								websocket_recv_interval,
+								websocket_recv_intv_stat,
+								ws_timeout_multiplier,
+								ws_timeout_default_sec,
+								ws_timeout_min_sec,
+							)
+
+						except Exception as e:
+
+							sym = (
 								cur_symbol
-							] = cur_time_ms
-
-							continue
-
-						put_snapshot_interval[cur_symbol].append(
-							measured_interval_ms[cur_symbol]
-						)
-
-						#———————————————————————————————————————————————————————
-						
-						oneway_network_latency_ms = max(
-							0, median_latency_dict.get(
-								cur_symbol, 0
+								if cur_symbol in symbols
+								else "UNKNOWN"
 							)
-						)
-
-						interval_delay_ms = max(0,
-							measured_interval_ms[cur_symbol]
-							- base_interval_ms
-						)
-						
-						delay_adjusted_time = (
-							cur_time_ms - (
-								oneway_network_latency_ms
-								+ interval_delay_ms
+							logger.warning(
+								f"[{my_name()}][{sym.upper()}] "
+								f"Failed to process message: {e}",
+								exc_info=True
 							)
-						)
+							continue  # stay in websocket loop
 
-						#———————————————————————————————————————————————————————
+					except asyncio.TimeoutError:
 
-						snapshot = {
-							#———————————————————————————————————————————————————
-							# recv_ms: align with <symbol>@trade
-							# net_delay_ms: side information
-							# intv_lag_ms:  side information
-							#———————————————————————————————————————————————————
-							"last_update_id": last_update,
-							#———————————————————————————————————————————————————
-							"recv_ms":		  cur_time_ms,
-							#———————————————————————————————————————————————————
-							"net_delay_ms":	  oneway_network_latency_ms,
-							#———————————————————————————————————————————————————
-							"intv_lag_ms":	  interval_delay_ms,
-							#———————————————————————————————————————————————————
-							"bids": [
-								[float(p), float(q)]
-								for p, q in bids
-							],
-							#———————————————————————————————————————————————————
-							"asks": [
-								[float(p), float(q)]
-								for p, q in asks
-							],
-							#———————————————————————————————————————————————————
-						}
-
-						#———————————————————————————————————————————————————————
-						# `.qsize()` is less than or equal to one almost surely,
-						# meaning that `snapshots_queue_dict` is being quickly
-						# consumed via `.get()`.
-						#———————————————————————————————————————————————————————
+						ws_retry_cnt += 1
 						
-						await snapshots_queue_dict[
-							cur_symbol
-						].put(snapshot)
-
-						# 1st snapshot gate for FastAPI readiness
-						
-						if not event_1st_snapshot.is_set():
-							event_1st_snapshot.set()
-
-					except Exception as e:
-						sym = (
-							cur_symbol
-							if cur_symbol in symbols
-							else "UNKNOWN"
-						)
 						logger.warning(
-							f"[{my_name()}][{sym.upper()}] "
-							f"Failed to process message: {e}",
-							exc_info=True
+							f"[{my_name()}]\n"
+							f"\tNo data received for {ws_timeout_sec:.6f} seconds.\n"
+							f"\tp90 ws.recv() intv.: {websocket_recv_intv_stat['p90']:.6f}.\n"
+							f"\tReconnecting..."
 						)
-						continue  # stay in websocket loop
+
+						ws_retry_cnt = await calculate_backoff_and_sleep(
+							ws_retry_cnt, cur_symbol
+						)
+
+						break
 
 		except asyncio.CancelledError:
 			# propagate so caller can shut down gracefully
 			raise
 
 		except Exception as e:
+
 			# websocket-level error → exponential backoff + retry
+
 			ws_retry_cnt += 1
+
 			sym = (
 				cur_symbol
 				if cur_symbol in symbols
@@ -1181,19 +1280,9 @@ async def put_snapshot(		# @depth20@100ms
 				exc_info=True
 			)
 
-			backoff = min(
-				max_backoff, base_backoff * (2 ** ws_retry_cnt)
-			) + random.uniform(0, 1)
-
-			if ws_retry_cnt > reset_cycle_after:
-				ws_retry_cnt = reset_backoff_level
-
-			logger.warning(
-				f"[{my_name()}][{sym.upper()}] "
-				f"Retrying in {backoff:.1f} seconds..."
+			ws_retry_cnt = await calculate_backoff_and_sleep(
+				ws_retry_cnt, cur_symbol
 			)
-
-			await asyncio.sleep(backoff)
 
 		finally:
 

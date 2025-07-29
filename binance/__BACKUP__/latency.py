@@ -36,7 +36,7 @@ from util import (
 async def gate_streaming_by_latency(
 	event_latency_valid:  asyncio.Event,
 	event_stream_enable:  asyncio.Event,
-	median_latency_dict:  dict[str, int],
+	mean_latency_dict:  dict[str, int],
 	latency_signal_sleep: float,
 	symbols:			  list[str],
 	logger:				  logging.Logger,
@@ -51,7 +51,7 @@ async def gate_streaming_by_latency(
 			latency_passed = event_latency_valid.is_set()
 			stream_currently_on = event_stream_enable.is_set()
 			has_all_latency = all(
-				median_latency_dict[s]
+				mean_latency_dict[s]
 				is not None
 				for s in symbols
 			)
@@ -119,7 +119,7 @@ async def estimate_latency(
 	ws_ping_timeout:		Optional[int],
 	latency_deque_size:		int,
 	latency_sample_min:		int,
-	median_latency_dict:	dict[str, int],
+	mean_latency_dict:	dict[str, int],
 	latency_threshold_ms:	int,
 	event_latency_valid:  	asyncio.Event,
 	base_backoff:			int,
@@ -135,7 +135,7 @@ async def estimate_latency(
 		+ "/".join(f"{symbol}@depth" for symbol in symbols)
 	)
 
-	reconnect_attempt = 0
+	ws_retry_cnt = 0
 
 	depth_update_id_dict: dict[str, int] = {}
 	depth_update_id_dict.clear()
@@ -178,7 +178,7 @@ async def estimate_latency(
 					f"{format_ws_url(url, '(@depth)')}\n"
 				)
 
-				reconnect_attempt = 0
+				ws_retry_cnt = 0
 
 				async for raw_msg in ws:
 
@@ -190,8 +190,8 @@ async def estimate_latency(
 						# From
 						# 	`message = orjson.loads(raw_msg)`
 						# to
-						#	median_latency_dict[symbol] = int(
-						#		statistics.median(
+						#	mean_latency_dict[symbol] = int(
+						#		statistics.fmean(
 						#			latency_dict[symbol]
 						#		)
 						#	),
@@ -243,8 +243,8 @@ async def estimate_latency(
 							>= latency_sample_min
 						):
 
-							median_latency_dict[symbol] = int(
-								statistics.median(
+							mean_latency_dict[symbol] = int(
+								statistics.fmean(
 									latency_dict[symbol]
 								)
 							)
@@ -258,9 +258,7 @@ async def estimate_latency(
 										>= latency_sample_min
 									)
 									and (
-										statistics.median(
-											latency_dict[s]
-										)
+										mean_latency_dict[s]
 										< latency_threshold_ms
 									)
 								)	for s in symbols
@@ -294,12 +292,12 @@ async def estimate_latency(
 
 		except Exception as e:
 
-			reconnect_attempt += 1
+			ws_retry_cnt += 1
 
 			logger.warning(
 				f"[{my_name()}] "
 				f"WebSocket connection error "
-				f"(attempt {reconnect_attempt}): {e}",
+				f"(attempt {ws_retry_cnt}): {e}",
 				exc_info=True
 			)
 
@@ -310,22 +308,19 @@ async def estimate_latency(
 				latency_dict[symbol].clear()
 				depth_update_id_dict[symbol] = 0
 
-			backoff_sec = (
-				min(
+			backoff_sec = min(
 					max_backoff,
-					base_backoff * (2 ** reconnect_attempt)
-				)
-				+ random.uniform(0, 1)
-			)
+					base_backoff ** ws_retry_cnt
+				) + random.uniform(0, 1)
 
-			if reconnect_attempt > reset_cycle_after:
+			if ws_retry_cnt > reset_cycle_after:
 
-				reconnect_attempt = reset_backoff_level
+				ws_retry_cnt = reset_backoff_level
 
 			logger.warning(
 				f"[{my_name()}] "
 				f"Retrying in {backoff_sec:.1f} seconds "
-				f"(attempt {reconnect_attempt})..."
+				f"(attempt {ws_retry_cnt})..."
 			)
 
 			await asyncio.sleep(backoff_sec)
