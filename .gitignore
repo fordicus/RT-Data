@@ -8,6 +8,7 @@ get_bybit_chart_dom.conf
 # Local
 *.data
 *.csv
+*.rdp
 _Anaconda Prompt_.lnk
 
 # ========================

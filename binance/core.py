@@ -3,7 +3,7 @@
 #———————————————————————————————————————————————————————————————————————————————
 
 from util import (
-	my_name,				# For exceptions with 0 Lebesgue measure
+	my_name,
 	NanoTimer,
 	ms_to_datetime,
 	compute_bias_ms,
