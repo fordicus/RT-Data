@@ -21,6 +21,7 @@ outputs/
 __unshared__/
 __dev_log__/
 __archive__/
+__remote_desktop__/
 
 # ========================
 # 🛠️  Build Artifacts
