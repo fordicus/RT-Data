@@ -30,7 +30,6 @@ IO Structure:
 	Output:
 		- Git commit and push to origin/main
 		- Cleanup of cached/intermediate files from Git tracking
-		- Local suppression of desktop.ini warnings
 
 ................................................................................"""
 
@@ -83,30 +82,6 @@ if '__pycache__' in os.listdir():
 
 # Stage all files for Git
 run_cmd('git add *')
-
-# Directories to forcibly untrack regardless of presence
-exclude_dirs = ['.vs', 'x64']
-
-# Files to untrack if present locally
-ignore_if_exists = ['desktop.ini']
-
-# Remove listed directories from Git index
-for item in exclude_dirs:
-	if item in os.listdir():
-		remove_git_cached(item)
-
-# Remove listed files if they exist in the working directory
-for item in ignore_if_exists:
-	if item in os.listdir():
-		remove_git_cached(item)
-
-# Add desktop.ini to local .git/info/exclude to silence untracked warning
-exclude_file = pathlib.Path('.git/info/exclude')
-if exclude_file.exists():
-	content = exclude_file.read_text()
-	if 'desktop.ini' not in content:
-		with exclude_file.open('a') as f:
-			f.write('\ndesktop.ini\n')
 
 # Commit and push
 commit_msg = build_commit_msg()
