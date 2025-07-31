@@ -1,55 +1,64 @@
 # Setup Guide: RDP & NAS @`Ubuntu Desktop 24.04.2 LTS`
 
+
+<!-- ———————————————————————————————————————————————————————————————————————————————— -->
+
 ## TODO:
+*	Back up the current `nginx` configuration
 *	Document From `DuckDNS` (easy) to `CloudFlare + Purchased Domain` (advanced): [EXTERNAL DASHBOARD SERVICE](#external-dashboard-service)  
 *	Migration from `Filezilla` to `rsync & gsync`
 *	Introduce `WireGuard` so that ports are not exposed.
+*	From `http` to `https`
 
 ## 💡Tips  
 
-1. To check the Ubuntu system’s internal IP address, type at Terminal:
+1. To check the Ubuntu system’s `internal IP` address, type at Terminal:
 ```bash
 ip a | grep inet
 ```
 
-2. To test the external accessibility of a port from another Windows system, type at PowerShell:
+2. To test the `external accessibility` of a port from another Windows system, type at PowerShell:
 ```powershell
 Test-NetConnection -ComputerName <your-domain> -Port <your-port>
 ```
 
-<!-- ## ⚡Frequently Accessed Contents
-* [Router `Port Forwarding`](#26-📶-router-port-forwarding)
-* [Configure `.rdp` Files for Intranet and External Access](#28-📁-configure-rdp-files-for-intranet-and-external-access) -->
+<!-- ———————————————————————————————————————————————————————————————————————————————— -->
 
 ## 📝Table of Contents  
-[1. System Stability and Maintenance](#1-system-stability-and-maintenance)  
-[1.1 ☕ Completely `Prevent Sleep`](#11-☕-completely-prevent-sleep)  
-[1.2 ⚙️ Set Dynamic `Power Management` for CPU and GPU](#12-⚙️-set-dynamic-power-management-for-cpu-and-gpu)  
-[1.3 🔐 Restrict Automatic Updates to `Security Patches` Only](#13-🔐-restrict-automatic-updates-to-security-patches-only)  
-[1.4 🕓 Enable Accurate Time Sync with `Chrony`](#14-🕓-enable-accurate-time-sync-with-chrony)
 
-[2. RDP Setup](#2-rdp-setup)  
-[2.1 🧩 Install and Enable `xrdp` Service](#21-🧩-install-and-enable-xrdp-service)  
-[2.2 🚫 Disable `Wayland` (if GUI apps open on local screen only)](#22-🚫-disable-wayland-if-gui-apps-open-on-local-screen-only)  
-[2.3 🌐 Assign or Monitor `Internal IP Address`](#23-🌐-assign-or-monitor-internal-ip-address)  
-[2.4 🛡️ Allow Remote Desktop Through `UFW Firewall`](#24-🛡️-allow-remote-desktop-through-ufw-firewall)  
-[2.5 🦆 DuckDNS Setup for `External Access`](#25-🦆-duckdns-setup-for-external-access)  
-[2.6 📶 Router `Port Forwarding`](#26-📶-router-port-forwarding)  
-[2.7 📡 `DNS + Port` Check](#27-📡-dns--port-check)  
-[2.8 📁 Configure `.rdp` Files for `Intranet` and `External Access`](#28-📁-configure-rdp-files-for-intranet-and-external-access)
+***For RDP (Remote Desktop Protocol)***  
 
-[3. 📂 Remote File System Access Using FileZilla (SFTP)](#3-📂-remote-file-system-access-using-filezilla-sftp)
+[***1. System Stability and Maintenance***](#1-system-stability-and-maintenance)  
+&nbsp;&nbsp;&nbsp;&nbsp;[1.1 ☕ Completely `Prevent Sleep`](#11-☕-completely-prevent-sleep)  
+&nbsp;&nbsp;&nbsp;&nbsp;[1.2 ⚙️ Set Dynamic `Power Management` for CPU and GPU](#12-⚙️-set-dynamic-power-management-for-cpu-and-gpu)  
+&nbsp;&nbsp;&nbsp;&nbsp;[1.3 🔐 Restrict Automatic Updates to `Security Patches` Only](#13-🔐-restrict-automatic-updates-to-security-patches-only)  
+&nbsp;&nbsp;&nbsp;&nbsp;[1.4 🕓 Enable Accurate Time Sync with `Chrony`](#14-🕓-enable-accurate-time-sync-with-chrony)  
 
-[4. RnD Environment Preparation](#4-rnd-environment-preparation)  
-[4.1 🧬 Install `Anaconda` and `PyTorch` Environment](#41-🧬-install-anaconda-and-pytorch-environment)
+[***2. RDP Setup***](#2-rdp-setup)  
+&nbsp;&nbsp;&nbsp;&nbsp;[2.1 🧩 Install and Enable `xrdp` Service](#21-🧩-install-and-enable-xrdp-service)  
+&nbsp;&nbsp;&nbsp;&nbsp;[2.2 🚫 Disable `Wayland` (if GUI apps open on local screen only)](#22-🚫-disable-wayland-if-gui-apps-open-on-local-screen-only)  
+&nbsp;&nbsp;&nbsp;&nbsp;[2.3 🌐 Assign or Monitor `Internal IP Address`](#23-🌐-assign-or-monitor-internal-ip-address)  
+&nbsp;&nbsp;&nbsp;&nbsp;[2.4 🛡️ Allow Remote Desktop Through `UFW Firewall`](#24-🛡️-allow-remote-desktop-through-ufw-firewall)  
+&nbsp;&nbsp;&nbsp;&nbsp;[2.5 🦆 DuckDNS Setup for `External Access`](#25-🦆-duckdns-setup-for-external-access)  
+&nbsp;&nbsp;&nbsp;&nbsp;[2.6 📶 Router `Port Forwarding`](#26-📶-router-port-forwarding)  
+&nbsp;&nbsp;&nbsp;&nbsp;[2.7 📡 `DNS + Port` Check](#27-📡-dns--port-check)  
+&nbsp;&nbsp;&nbsp;&nbsp;[2.8 📁 Configure `.rdp` Files for `Intranet` and `External Access`](#28-📁-configure-rdp-files-for-intranet-and-external-access)  
 
-[5. Final Verification and Checklist](#5-final-verification-and-checklist)  
-[5.1 ✅ `Summary` Checkpoints](#51-✅-summary-checkpoints)  
-[5.2 🔁 `Reboot` Checklist](#52-🔁-reboot-checklist)  
+[***3. Remote File System Access Using `FileZilla` (SFTP)***](#3-remote-file-system-access-using-filezilla-sftp)  
 
-[6. Monitor Status of Port Externally](#6-monitor-status-of-port-externally): [`UptimeRobot`](https://uptimerobot.com/)
+[***4. RnD Environment Preparation***](#4-rnd-environment-preparation)  
 
----
+&nbsp;&nbsp;&nbsp;&nbsp;[4.1 🧬 Install `Anaconda` and `PyTorch` Environment](#41-🧬-install-anaconda-and-pytorch-environment)  
+
+[***5. Final Verification and Checklist for RDP***](#5-final-verification-and-checklist)  
+&nbsp;&nbsp;&nbsp;&nbsp;[5.1 ✅ `Summary` Checkpoints](#51-✅-summary-checkpoints)  
+&nbsp;&nbsp;&nbsp;&nbsp;[5.2 🔁 `Reboot` Checklist](#52-🔁-reboot-checklist)  
+
+[***6. Monitor Status of Port Externally***](#6-monitor-status-of-port-externally)  
+&nbsp;&nbsp;&nbsp;&nbsp;[🟢 `UptimeRobot`](https://uptimerobot.com/)  
+
+
+<!-- ———————————————————————————————————————————————————————————————————————————————— -->
 
 ## 1. System Stability and Maintenance
 
@@ -171,7 +180,7 @@ At this point, we have successfully configured the server to prevent it from ent
 
 Remark. `HDMI Dummy Plug Dongle` (Headless Display Emulator) can emulate a live monitor.
 
----
+
 
 ### 1.2 ⚙️ Set Dynamic `Power Management` for CPU and GPU
 
@@ -231,7 +240,7 @@ systemctl status nvidia-persist.service
 
 Expect: `active (exited)` with command executed
 
----
+
 
 ### 1.3 🔐 Restrict Automatic Updates to `Security Patches` Only
 
@@ -259,7 +268,7 @@ Unattended-Upgrade::Allowed-Origins {
 
 ✅ This keeps your system protected with security fixes while avoiding disruptive updates.
 
----
+
 
 ### 1.4 🕓 Enable Accurate Time Sync with `Chrony`
 
@@ -300,7 +309,7 @@ sudo systemctl restart chrony
 
 Chrony will now sync with the specified servers and persist across reboots.
 
----
+
 
 #### 🧪 Check Synchronization Status
 
@@ -325,7 +334,7 @@ Also, the following command is proven to be useful:
 chronyc sourcestats -v
 ```
 
----
+
 
 #### 🔍 Verify Chrony Service
 
@@ -344,8 +353,8 @@ Sample output:
 * **Loaded:** indicates Chrony is enabled at boot
 * **Active:** confirms it is running normally
 
----
 
+<!-- ———————————————————————————————————————————————————————————————————————————————— -->
 
 ## 2. RDP Setup
 
@@ -369,7 +378,7 @@ sudo systemctl restart xrdp
 
 **To verify:** run `systemctl status xrdp` and ensure it shows "active (running)".
 
----
+
 
 ### 2.2 🚫 Disable `Wayland` (if GUI apps open on local screen only)
 
@@ -387,7 +396,7 @@ sudo reboot
 
 **To verify:** after RDP login, applications should open inside the remote session, not on the physical screen.
 
----
+
 
 ### 2.3 🌐 Assign or Monitor `Internal IP Address`
 
@@ -408,7 +417,7 @@ inet 192.168.0.100/24 brd 192.168.0.255 scope global dynamic noprefixroute eth0
 
 This address is used for local LAN `.rdp` connections.
 
----
+
 
 ### 2.4 🛡️ Allow Remote Desktop Through `UFW Firewall`
 
@@ -425,7 +434,7 @@ sudo ufw status
 
 Check that <your-port>/tcp is listed as `ALLOW`.
 
----
+
 
 ### 2.5 🦆 DuckDNS Setup for `External Access`
 
@@ -442,7 +451,7 @@ Check that <your-port>/tcp is listed as `ALLOW`.
 
 Expect: `OK`
 
----
+
 
 ### 2.6 📶 Router `Port Forwarding`
 
@@ -461,7 +470,7 @@ Login to router at `192.168.1.1`
 | Protocol      | TCP                       |
 | Status        | Enabled                   |
 
----
+
 
 ### 2.7 📡 `DNS + Port` Check
 
@@ -478,7 +487,7 @@ Test-NetConnection -ComputerName <your-domain> -Port <your-port>
 
 Expect: `TcpTestSucceeded: True`
 
----
+
 
 ### 2.8 📁 Configure `.rdp` Files for `Intranet` and `External Access`
 
@@ -505,9 +514,10 @@ Open using:
 * Windows: `mstsc.exe`
 * Linux: remmina / freerdp
 
----
 
-## 3. 📂 Remote File System Access Using `FileZilla` (SFTP)
+<!-- ———————————————————————————————————————————————————————————————————————————————— -->
+
+## 3. Remote File System Access Using `FileZilla` (SFTP)
 
 ### 3.1 Install and Start the SSH Server on Ubuntu
 
@@ -553,7 +563,8 @@ Use the following configuration for SFTP access:
 
 Once connected, you can browse and transfer files between your local machine and the Ubuntu server over a secure SSH channel.
 
----
+
+<!-- ———————————————————————————————————————————————————————————————————————————————— -->
 
 ## 4. RnD Environment Preparation
 
@@ -578,9 +589,10 @@ Expected output:
 conda install pytorch torchvision torchaudio pytorch-cuda -c pytorch -c nvidia
 ```
 
----
 
-## 5. Final Verification and Checklist
+<!-- ———————————————————————————————————————————————————————————————————————————————— -->
+
+## 5. Final Verification and Checklist for RDP
 
 ### 5.1 ✅ `Summary` Checkpoints
 
@@ -597,7 +609,7 @@ conda install pytorch torchvision torchaudio pytorch-cuda -c pytorch -c nvidia
 | GPU persistence mode active                | ✅         |
 | Anaconda & PyTorch (CUDA) configured       | ✅         |
 
----
+
 
 ### 5.2 🔁 `Reboot` Checklist
 
@@ -665,7 +677,8 @@ DPMS (Display Power Management Signaling):
 
 ✅ If all succeed, no additional manual action is needed after reboot.
 
----
+
+<!-- ———————————————————————————————————————————————————————————————————————————————— -->
 
 ## 6. Monitor Status of Port Externally
 
@@ -676,176 +689,251 @@ DPMS (Display Power Management Signaling):
 > ⚠️ **Warning:**  
 > DMZ exposes your entire device to the internet, bypassing most router-level protections. This significantly increases the risk of hacking, malware, and unauthorized access. **Always disable DMZ immediately after testing.** Never leave it enabled longer than necessary.
 
----
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+<!-- ———————————————————————————————————————————————————————————————————————————————— -->
 
 # EXTERNAL DASHBOARD SERVICE
 
-## 0. Add an HTMLResponse Endpoint at FastAPI
-`stream_binance.py`에 
-`@APP.get("/dashboard", response_class=HTMLResponse)`
-Endpoint 추가
+## 0. Add an `HTMLResponse` & `WebSocket` Endpoint via `FastAPI @Python`
+First, ensure your FastAPI application has the necessary endpoints for serving the dashboard:
+```python
+	# Create FastAPI app
 
-## 1. Nginx 설정 (우분투 서버)
+	app = FastAPI(lifespan=lifespan)
+	
+	# Register routes
 
-### 1.1. 우분투 서버에서 다음 명령어 실행:
+	app.get(
+		"/dashboard",
+		response_class=HTMLResponse
+	)(
+		self._dashboard_page
+	)
+	app.websocket(
+		"/ws/dashboard"
+	)(
+		self._dashboard_websocket
+	)
+```
+
+**Access Examples:**
+- `http://localhost:8000/dashboard` - Development computer
+- `http://<your-internal-ip>/dashboard` - Internal network access
+- `http://<your-domain>/dashboard` - External access
+
+**Port Configuration:**
+- Port 8000: FastAPI application (localhost)
+- Port 80: Inbound HTTP traffic
+- Port 443: Inbound HTTPS traffic
+
+
+
+## 1. Nginx Configuration (Ubuntu Server)
+
+### 1.1. Install and Configure Nginx
+
+Execute the following commands on your Ubuntu server:
 
 ```bash
-# Nginx 설치
 sudo apt update
 sudo apt install nginx
-
-# 설정 파일 생성
-sudo nano /etc/nginx/sites-available/binance-dashboard
+sudo nano /etc/nginx/sites-available/<name-your-site>
 ```
 
-설정 파일 내용:
+**Configuration file content:**
 
-```nano
+```nginx
+# /etc/nginx/sites-available/<name-your-site>
+
 server {
-	listen 80;
-	server_name c01hyka.duckdns.org 192.168.1.107 localhost;
+    listen <inbound-port>;
+    server_name <your-domain> <your-internal-ip> localhost;
 
-	location / {
-		proxy_pass http://localhost:8000;
-		proxy_set_header Host $host;
-		proxy_set_header X-Real-IP $remote_addr;
-		proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-		proxy_set_header X-Forwarded-Proto $scheme;
-	}
+    location / {
+        proxy_pass http://localhost:<outbound-port>;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
 
-	location /ws/ {
-		proxy_pass http://localhost:8000;
-		proxy_http_version 1.1;
-		proxy_set_header Upgrade $http_upgrade;
-		proxy_set_header Connection "upgrade";
-		proxy_set_header Host $host;
-		proxy_set_header X-Real-IP $remote_addr;
-		proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-		proxy_set_header X-Forwarded-Proto $scheme;
-	}
+    location /ws/ {
+        proxy_pass http://localhost:<outbound-port>;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
 }
 ```
-
+**Activate the configuration:**
 ```bash
-# 설정 활성화
-sudo ln -s /etc/nginx/sites-available/binance-dashboard /etc/nginx/sites-enabled/
+sudo ln -s /etc/nginx/sites-available/<name-your-site> /etc/nginx/sites-enabled/
 sudo rm /etc/nginx/sites-enabled/default
 sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-### 1.2. 방화벽(UFW)에서 80/tcp 허용
+
+
+### 1.2. Allow Traffic Through `UFW Firewall`
 ```bash
-sudo ufw allow 80/tcp
+sudo ufw allow <inbound-port>/tcp
 sudo ufw status
 ```
+**To verify:** Check that `<inbound-port>/tcp` is listed as `ALLOW`.
 
-Hint:  
-- Port 8000: localhost dev.
-- Port 80:  HTTP Traffic
-- Port 443: HTTPS Traffic
 
-### 1.3. 라우터에서 포트포워딩 허용
 
-Rounter에 의해 지정된 Device IP는 우분투 홈서버에서 `ip a | grep inet` 명령어로 확인가능.
-라우터 관리 페이지에서 포트포워딩 허용:
+### 1.3. Router Port Forwarding Configuration
+
+The device IP assigned by your router can be checked on the Ubuntu home server using:
+
 ```bash
-TCP/UDP Entry & Destination Port 80
+ip a | grep inet
 ```
 
-### 1.4 DuckDNS 설정 확인
-우분투 홈서버의 이러한 IPv4와 IPv6는 각각 다음 명령어를 통해 확인 가능합니다:
+Configure port forwarding in your router's management interface:
+
+| Field         | Value             |
+| ------------- | ----------------- |
+| Service Type  | Custom            |
+| Protocol      | TCP               |
+| External Port | `<inbound-port>`  |
+| Internal IP   | `<your-device-ip>`|
+| Internal Port | `<inbound-port>`  |
+| Status        | Enabled           |
+
+
+
+### 1.4. External IP Address Verification
+
+Check your Ubuntu server's external IPv4 and IPv6 addresses:
+
 ```bash
 curl -4 ifconfig.me
 curl -6 ifconfig.me
 ```
-DuckDNS 대시보드에 IPv4와 IPv6 각각의 공인 주소를 입력해야 합니다. 예를 들어:
-- IPv4: `85.x.2x9.2x3`
-- IPv6: `2a?2:1?10:90?2:6?00:c8e:c??e:??af:cd??`
 
-### 1.x. 대시보드 접근
-- http://localhost:8000/dashboard		at the development computer
-- http://192.168.1.107/dashboard		at the script running server (internal)
-- http://c01hyka.duckdns.org/dashboard	at the script running server (external)
+**For DuckDNS users:** Update your DuckDNS dashboard with both IPv4 and IPv6 public addresses:
+- IPv4: e.g., `85.x.2x9.2x3`
+- IPv6: e.g., `2a?2:1?10:90?2:6?00:c8e:c??e:??af:cd??`
 
-## 4. (선택사항) HTTPS 적용
+
+
+## 2. (Optional) HTTPS Implementation
+
+For secure connections, implement SSL/TLS using Let's Encrypt:
+
 ```bash
-# Let's Encrypt SSL 인증서
+# Install certbot for automated SSL certificate management
 sudo apt install certbot python3-certbot-nginx
-sudo certbot --nginx -d c01hyka.duckdns.org
+
+# Obtain and configure SSL certificate
+sudo certbot --nginx -d <your-domain>
 ```
 
-## 🔍 부하 분석 비교
-기존 방식 (로컬 HTML 파일)
-```bash
-브라우저 → WebSocket(ws://localhost:8000/ws/dashboard) → stream_binance.py
-```
-제안한 방식 (Nginx + 대시보드 엔드포인트)
+**Note:** Replace `<your-domain>` with your actual domain name (e.g., `example.duckdns.org` or `yourdomain.com`).
 
-```bash
-브라우저 → Nginx → FastAPI(/dashboard) → 동일한 WebSocket → stream_binance.py
-```
+The certificate will be automatically renewed by certbot's systemd timer service.
 
-✅ 부하가 동일한 이유
 
-1. WebSocket 연결은 그대로
-- 기존: ws://localhost:8000/ws/dashboard
-- 신규: ws://c01hyka.duckdns.org/ws/dashboard (Nginx가 프록시)
-- 동일한 /ws/dashboard 엔드포인트 사용
-
-2. 추가된 것은 HTML 서빙뿐
-- /dashboard 엔드포인트는 한 번만 HTML을 반환
-- 이후 모든 실시간 데이터는 기존 WebSocket 그대로
-
-3. Nginx는 경량 프록시
-- 메모리 사용량: 1-5MB
-- CPU 오버헤드: 거의 없음
-
----
+<!-- ———————————————————————————————————————————————————————————————————————————————— -->
 
 # Binance Dashboard: DuckDNS → CloudFlare + sognex.com 변경
 
----
-
-## 1. 지금까지 진행 완료된 사항
-
-### 1.1 도메인 구매 및 CloudFlare 연결
+지금까지 진행 완료된 사항:  
+도메인 구매 및 CloudFlare 연결  
 - 도메인 `sognex.com`을 Porkbun에서 구매.
 - CloudFlare에 도메인 추가 및 네임서버 변경 완료:
   - `holly.ns.cloudflare.com`
   - `margo.ns.cloudflare.com`
 - DNSSEC는 비활성화 상태로 확인됨.
 - WHOIS Privacy 활성화 상태로 개인 정보 보호 확인됨.
+- AI 크롤러 차단 활성화:
+  - 모든 페이지에서 AI 크롤러 차단.
+  - `robots.txt`를 통해 AI 학습 방지 신호 전송.
+- **SSL/TLS 설정**:
+  - SSL Mode: Full로 설정.
 
-### 1.2 CloudFlare 설정
-- DNS 레코드 추가:
+## 2. 앞으로 해야 할 일
+
+### 2.1 CloudFlare API를 사용한 Dynamic DNS 방식
+
+CloudFlare API를 사용하여 유동 IP 환경에서도 안정적으로 도메인을 관리할 수 있습니다. 아래는 설정 및 구현 방법입니다:
+
+#### 1. CloudFlare API 토큰 생성
+1. CloudFlare 대시보드에서 **API Tokens** 메뉴로 이동합니다.
+2. **Create Token**을 클릭하고, **Zone:DNS:Edit** 권한을 가진 토큰을 생성합니다.
+3. 생성된 토큰을 안전한 위치에 저장합니다.
+
+#### 2. Python 스크립트 작성
+아래는 서버의 현재 IP를 확인하고, CloudFlare API를 통해 DNS 레코드를 업데이트하는 Python 스크립트입니다:
+
+```python
+import requests
+
+CLOUDFLARE_API_TOKEN = "your_api_token"
+ZONE_ID = "your_zone_id"
+RECORD_ID = "your_record_id"
+DOMAIN = "sognex.com"
+
+def get_public_ip():
+    return requests.get("https://api.ipify.org").text
+
+def update_dns_record(ip):
+    url = f"https://api.cloudflare.com/client/v4/zones/{ZONE_ID}/dns_records/{RECORD_ID}"
+    headers = {
+        "Authorization": f"Bearer {CLOUDFLARE_API_TOKEN}",
+        "Content-Type": "application/json",
+    }
+    data = {
+        "type": "A",
+        "name": DOMAIN,
+        "content": ip,
+        "ttl": 1,
+        "proxied": True,
+    }
+    response = requests.put(url, json=data, headers=headers)
+    return response.json()
+
+if __name__ == "__main__":
+    ip = get_public_ip()
+    result = update_dns_record(ip)
+    print(result)
+```
+
+스크립트를 수동으로 실행하여 DNS 레코드가 정상적으로 업데이트되는지 확인합니다:
+```bash
+python3 /path/to/update_dns.py
+```
+
+#### 3. 크론 작업 설정
+위 스크립트를 주기적으로 실행하여 IP를 업데이트합니다:
+1. 스크립트를 `/path/to/update_dns.py`로 저장합니다.
+2. 크론 작업을 설정합니다:
+   ```bash
+   crontab -e
+   ```
+3. 아래와 같이 추가하여 5분마다 실행되도록 설정합니다:
+   ```bash
+   */5 * * * * python3 /path/to/update_dns.py
+   ```
+
+
+---
+
+### 2.2 CloudFlare 설정
+
+CloudFlare API를 사용한 Dynamic DNS 방식이 적용되었으므로, 아래 설정을 진행합니다:
+
+- **DNS 레코드 추가**:
   - **A 레코드**:
     - Name: `@`
-    - Content: 서버의 외부 IP 주소
+    - Content: 서버의 외부 IP 주소 (Dynamic DNS 스크립트가 자동으로 업데이트)
     - Proxy Status: Proxied
     - TTL: Auto
   - **CNAME 레코드**:
@@ -853,20 +941,11 @@ sudo certbot --nginx -d c01hyka.duckdns.org
     - Content: `sognex.com`
     - Proxy Status: Proxied
     - TTL: Auto
-- SSL/TLS 설정:
-  - SSL Mode: Full로 설정.
-- AI 크롤러 차단 활성화:
-  - 모든 페이지에서 AI 크롤러 차단.
-  - `robots.txt`를 통해 AI 학습 방지 신호 전송.
 
----
-
-## 2. 앞으로 해야 할 일
-
-### 2.1 Nginx 설정 변경
+### 2.3 Nginx 설정 변경
 기존 DuckDNS 설정을 `sognex.com`으로 변경:
 1. Nginx 설정 파일 수정:
-   - 파일 경로: `/etc/nginx/sites-available/binance-dashboard`
+   - 파일 경로: `/etc/nginx/sites-available/<name-your-site>`
    - 변경 내용:
      ```nginx
      server {
@@ -899,7 +978,7 @@ sudo certbot --nginx -d c01hyka.duckdns.org
    sudo systemctl reload nginx
    ```
 
-### 2.2 HTTPS 활성화
+### 2.4 HTTPS 활성화
 1. Let's Encrypt를 사용하여 SSL 인증서 설치:
    ```bash
    sudo apt install certbot python3-certbot-nginx
@@ -907,7 +986,7 @@ sudo certbot --nginx -d c01hyka.duckdns.org
    ```
 2. 인증서 설치 후 Nginx 설정 자동 업데이트 확인.
 
-### 2.3 방화벽 및 보안 설정
+### 2.5 방화벽 및 보안 설정
 1. UFW를 사용하여 CloudFlare IP만 허용:
    ```bash
    sudo ufw allow from <Cloudflare IP Range> to any port 80,443
@@ -915,11 +994,11 @@ sudo certbot --nginx -d c01hyka.duckdns.org
    - Cloudflare IP 범위는 [Cloudflare IP 목록](https://www.cloudflare.com/ips/)에서 확인 가능.
 2. CloudFlare에서 **Under Attack Mode** 활성화.
 
-### 2.4 외부 접근 테스트
+### 2.6 외부 접근 테스트
 1. 브라우저에서 `http://sognex.com` 또는 `https://sognex.com`을 입력하여 Binance Dashboard 접근 확인.
 2. CloudFlare 대시보드에서 트래픽 및 보안 상태 점검.
 
----
+
 
 ## 참고
 - 기존 DuckDNS 설정은 더 이상 사용하지 않음.
