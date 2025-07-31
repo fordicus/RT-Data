@@ -29,7 +29,7 @@ IO Structure:
 		- .env file with GIT_EMAIL variable
 	Output:
 		- Git commit and push to origin/main
-		- Cleanup of cached/intermediate files from Git tracking
+		- Cleanup of cached/intermediate files from Git tracking (Optional)
 
 ................................................................................"""
 

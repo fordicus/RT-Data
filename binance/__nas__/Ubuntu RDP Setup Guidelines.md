@@ -4,7 +4,6 @@
 <!-- ———————————————————————————————————————————————————————————————————————————————— -->
 
 ## TODO:
-*	Back up the current `nginx` configuration
 *	Document From `DuckDNS` (easy) to `CloudFlare + Purchased Domain` (advanced): [EXTERNAL DASHBOARD SERVICE](#external-dashboard-service)  
 *	Migration from `Filezilla` to `rsync & gsync`
 *	Introduce `WireGuard` so that ports are not exposed.
@@ -95,19 +94,19 @@ set -e
 echo "Applying Xfce power settings (AC mode)..."
 
 xfconf-query -c xfce4-power-manager -p /xfce4-power-manager/blank-on-ac \
-    --create -t int -s 0
+	--create -t int -s 0
 
 xfconf-query -c xfce4-power-manager -p /xfce4-power-manager/sleep-on-ac \
-    --create -t int -s 0
+	--create -t int -s 0
 
 xfconf-query -c xfce4-power-manager -p /xfce4-power-manager/sleep-display-ac \
-    --create -t int -s 0
+	--create -t int -s 0
 
 xfconf-query -c xfce4-power-manager -p /xfce4-power-manager/monitor-power-off-on-ac \
-    --create -t bool -s false
+	--create -t bool -s false
 
 xfconf-query -c xfce4-power-manager -p /xfce4-power-manager/brightness-inactivity-on-ac \
-    --create -t int -s 0
+	--create -t int -s 0
 
 echo "✅ All AC-mode power saving features have been disabled for Xfce."
 ```
@@ -141,12 +140,12 @@ sudo nano /etc/X11/xorg.conf
 # /etc/X11/xorg.conf
 
 Section "Device"
-    Identifier     "Device0"
-    Driver         "nvidia"
-    VendorName     "NVIDIA Corporation"
-    Option         "AllowEmptyInitialConfiguration" "true"
-    Option         "ConnectedMonitor" "DFP-0"
-    Option         "CustomEDID" "DFP-0:/etc/X11/edid.bin"
+	Identifier	 "Device0"
+	Driver		 "nvidia"
+	VendorName	 "NVIDIA Corporation"
+	Option		 "AllowEmptyInitialConfiguration" "true"
+	Option		 "ConnectedMonitor" "DFP-0"
+	Option		 "CustomEDID" "DFP-0:/etc/X11/edid.bin"
 EndSection
 ```
 Apply the configuration above by restarting `Xorg`:
@@ -256,13 +255,13 @@ Recommended configuration:
 
 ```ini
 Unattended-Upgrade::Allowed-Origins {
-//      "${distro_id}:${distro_codename}";
-        "${distro_id}:${distro_codename}-security";
-        "${distro_id}ESMApps:${distro_codename}-apps-security";
-        "${distro_id}ESM:${distro_codename}-infra-security";
-//      "${distro_id}:${distro_codename}-updates";
-//      "${distro_id}:${distro_codename}-proposed";
-//      "${distro_id}:${distro_codename}-backports";
+//	  "${distro_id}:${distro_codename}";
+		"${distro_id}:${distro_codename}-security";
+		"${distro_id}ESMApps:${distro_codename}-apps-security";
+		"${distro_id}ESM:${distro_codename}-infra-security";
+//	  "${distro_id}:${distro_codename}-updates";
+//	  "${distro_id}:${distro_codename}-proposed";
+//	  "${distro_id}:${distro_codename}-backports";
 };
 ```
 
@@ -317,17 +316,17 @@ Chrony will now sync with the specified servers and persist across reboots.
 watch -n 1 chronyc tracking
 ```
 
-| Field             | Meaning                                               |
+| Field			 | Meaning											   |
 | ----------------- | ----------------------------------------------------- |
-| `Reference ID`    | The IP or hostname of the current NTP source          |
-| `Stratum`         | NTP hierarchy level (1 = most accurate)               |
-| `System time`     | Current offset between local time and NTP server time |
-| `Last offset`     | Most recent observed offset                           |
-| `RMS offset`      | Average recent offset                                 |
-| `Root delay`      | Round-trip delay to the reference server              |
-| `Root dispersion` | Maximum expected error compared to NTP time           |
-| `Update interval` | Time between updates                                  |
-| `Leap status`     | Leap second info (normally `Normal`)                  |
+| `Reference ID`	| The IP or hostname of the current NTP source		  |
+| `Stratum`		 | NTP hierarchy level (1 = most accurate)			   |
+| `System time`	 | Current offset between local time and NTP server time |
+| `Last offset`	 | Most recent observed offset						   |
+| `RMS offset`	  | Average recent offset								 |
+| `Root delay`	  | Round-trip delay to the reference server			  |
+| `Root dispersion` | Maximum expected error compared to NTP time		   |
+| `Update interval` | Time between updates								  |
+| `Leap status`	 | Leap second info (normally `Normal`)				  |
 
 Also, the following command is proven to be useful:
 ```bash
@@ -346,8 +345,8 @@ Sample output:
 
 ```
 ● chrony.service - chrony, an NTP client/server
-     Loaded: loaded (/usr/lib/systemd/system/chrony.service; enabled)
-     Active: active (running) since ...
+	 Loaded: loaded (/usr/lib/systemd/system/chrony.service; enabled)
+	 Active: active (running) since ...
 ```
 
 * **Loaded:** indicates Chrony is enabled at boot
@@ -461,14 +460,14 @@ Login to router at `192.168.1.1`
 
 **Navigate:** Advanced → NAT Forwarding → Virtual Servers → Add
 
-| Field         | Value                     |
+| Field		 | Value					 |
 | ------------- | ------------------------- |
-| Service Type  | \<name as wished>         |
-| External Port | <your-port>                      |
+| Service Type  | \<name as wished>		 |
+| External Port | <your-port>					  |
 | Internal IP   | (your Ubuntu internal IP) |
-| Internal Port | <your-port>                      |
-| Protocol      | TCP                       |
-| Status        | Enabled                   |
+| Internal Port | <your-port>					  |
+| Protocol	  | TCP					   |
+| Status		| Enabled				   |
 
 
 
@@ -554,12 +553,12 @@ Download the FileZilla client:
 
 Use the following configuration for SFTP access:
 
-| Setting      | Value                                 |
+| Setting	  | Value								 |
 | ------------ | ------------------------------------- |
-| **Host**     | `sftp://<your-subdomain>.duckdns.org` |
-| **Username** | `<your-username>`                     |
-| **Password** | `<your-password>`                     |
-| **Port**     | `22`                                  |
+| **Host**	 | `sftp://<your-subdomain>.duckdns.org` |
+| **Username** | `<your-username>`					 |
+| **Password** | `<your-password>`					 |
+| **Port**	 | `22`								  |
 
 Once connected, you can browse and transfer files between your local machine and the Ubuntu server over a secure SSH channel.
 
@@ -596,18 +595,18 @@ conda install pytorch torchvision torchaudio pytorch-cuda -c pytorch -c nvidia
 
 ### 5.1 ✅ `Summary` Checkpoints
 
-| Feature                                    | Confirmed |
+| Feature									| Confirmed |
 | ------------------------------------------ | --------- |
-| Lid close disables suspend                 | ✅         |
-| RDP works on local LAN                     | ✅         |
-| RDP works via DuckDNS                      | ✅         |
-| Port forwarding is live                    | ✅         |
-| Session is Xorg, not Wayland               | ✅         |
-| Apps open inside RDP, not on host's screen | ✅         |
-| `.rdp` files configured                    | ✅         |
-| CPU dynamic power managed via auto-cpufreq | ✅         |
-| GPU persistence mode active                | ✅         |
-| Anaconda & PyTorch (CUDA) configured       | ✅         |
+| Lid close disables suspend				 | ✅		 |
+| RDP works on local LAN					 | ✅		 |
+| RDP works via DuckDNS					  | ✅		 |
+| Port forwarding is live					| ✅		 |
+| Session is Xorg, not Wayland			   | ✅		 |
+| Apps open inside RDP, not on host's screen | ✅		 |
+| `.rdp` files configured					| ✅		 |
+| CPU dynamic power managed via auto-cpufreq | ✅		 |
+| GPU persistence mode active				| ✅		 |
+| Anaconda & PyTorch (CUDA) configured	   | ✅		 |
 
 
 
@@ -635,44 +634,44 @@ chmod +x get_status.sh
 
 The expected output after running `./get_status.sh` reads:
 ```bash
-     Active: active (running) since Tue 2025-07-08 18:38:13 CEST; 6min ago
-     Active: active (running) since Tue 2025-07-08 18:38:11 CEST; 6min ago
-     Active: active (exited) since Tue 2025-07-08 18:38:18 CEST; 6min ago
-     Active: active (running) since Tue 2025-07-08 18:38:12 CEST; 6min ago
-/xfce4-power-manager/blank-on-ac                        0
-/xfce4-power-manager/blank-on-battery                   0
-/xfce4-power-manager/brightness-inactivity-on-ac        0
-/xfce4-power-manager/brightness-level-on-battery        1
-/xfce4-power-manager/brightness-on-battery              9
-/xfce4-power-manager/brightness-switch                  0
+	 Active: active (running) since Tue 2025-07-08 18:38:13 CEST; 6min ago
+	 Active: active (running) since Tue 2025-07-08 18:38:11 CEST; 6min ago
+	 Active: active (exited) since Tue 2025-07-08 18:38:18 CEST; 6min ago
+	 Active: active (running) since Tue 2025-07-08 18:38:12 CEST; 6min ago
+/xfce4-power-manager/blank-on-ac						0
+/xfce4-power-manager/blank-on-battery				   0
+/xfce4-power-manager/brightness-inactivity-on-ac		0
+/xfce4-power-manager/brightness-level-on-battery		1
+/xfce4-power-manager/brightness-on-battery			  9
+/xfce4-power-manager/brightness-switch				  0
 /xfce4-power-manager/brightness-switch-restore-on-exit  1
-/xfce4-power-manager/dpms-on-battery-off                0
-/xfce4-power-manager/dpms-on-battery-sleep              0
-/xfce4-power-manager/monitor-power-off-on-ac            false
-/xfce4-power-manager/power-button-action                3
-/xfce4-power-manager/show-tray-icon                     false
-/xfce4-power-manager/sleep-display-ac                   0
-/xfce4-power-manager/sleep-on-ac                        0
-[     6.786] (**) NVIDIA(0): Option "AllowEmptyInitialConfiguration" "true"
-[     6.786] (**) NVIDIA(0): Option "ConnectedMonitor" "DFP-0"
-[     6.786] (**) NVIDIA(0): ConnectedMonitor string: "DFP-0"
-[     6.863] (**) NVIDIA(0): Using ConnectedMonitor string "DFP-0".
-[     6.870] (--) NVIDIA(GPU-0): DFP-0: connected
-[     6.919] (II) NVIDIA(0): Virtual screen size determined to be 1024 x 768
-[     7.693] (--) NVIDIA(GPU-0): DFP-0: connected
-[     7.714] (--) NVIDIA(GPU-0): DFP-0: connected
-[     7.717] (--) NVIDIA(GPU-0): DFP-0: connected
-[     7.745] (--) NVIDIA(GPU-0): DFP-0: connected
-[     8.553] (--) NVIDIA(GPU-0): DFP-0: connected
-[     8.870] (--) NVIDIA(GPU-0): DFP-0: connected
-  prefer blanking:  no    allow exposures:  yes
-  timeout:  0    cycle:  600
+/xfce4-power-manager/dpms-on-battery-off				0
+/xfce4-power-manager/dpms-on-battery-sleep			  0
+/xfce4-power-manager/monitor-power-off-on-ac			false
+/xfce4-power-manager/power-button-action				3
+/xfce4-power-manager/show-tray-icon					 false
+/xfce4-power-manager/sleep-display-ac				   0
+/xfce4-power-manager/sleep-on-ac						0
+[	 6.786] (**) NVIDIA(0): Option "AllowEmptyInitialConfiguration" "true"
+[	 6.786] (**) NVIDIA(0): Option "ConnectedMonitor" "DFP-0"
+[	 6.786] (**) NVIDIA(0): ConnectedMonitor string: "DFP-0"
+[	 6.863] (**) NVIDIA(0): Using ConnectedMonitor string "DFP-0".
+[	 6.870] (--) NVIDIA(GPU-0): DFP-0: connected
+[	 6.919] (II) NVIDIA(0): Virtual screen size determined to be 1024 x 768
+[	 7.693] (--) NVIDIA(GPU-0): DFP-0: connected
+[	 7.714] (--) NVIDIA(GPU-0): DFP-0: connected
+[	 7.717] (--) NVIDIA(GPU-0): DFP-0: connected
+[	 7.745] (--) NVIDIA(GPU-0): DFP-0: connected
+[	 8.553] (--) NVIDIA(GPU-0): DFP-0: connected
+[	 8.870] (--) NVIDIA(GPU-0): DFP-0: connected
+  prefer blanking:  no	allow exposures:  yes
+  timeout:  0	cycle:  600
 DPMS (Display Power Management Signaling):
   Server does not have the DPMS Extension
-     Active: inactive (dead)
-     Active: inactive (dead)
-     Active: inactive (dead)
-     Active: inactive (dead)
+	 Active: inactive (dead)
+	 Active: inactive (dead)
+	 Active: inactive (dead)
+	 Active: inactive (dead)
 ```
 
 ✅ If all succeed, no additional manual action is needed after reboot.
@@ -728,9 +727,9 @@ First, ensure your FastAPI application has the necessary endpoints for serving t
 
 
 
-## 1. Nginx Configuration (Ubuntu Server)
+## 1. NginX Configuration
 
-### 1.1. Install and Configure Nginx
+### 1.1. Install and Configure NginX
 
 Execute the following commands on your Ubuntu server:
 
@@ -746,27 +745,27 @@ sudo nano /etc/nginx/sites-available/<name-your-site>
 # /etc/nginx/sites-available/<name-your-site>
 
 server {
-    listen <inbound-port>;
-    server_name <your-domain> <your-internal-ip> localhost;
+	listen <inbound-port>;
+	server_name <your-domain> <your-internal-ip> localhost;
 
-    location / {
-        proxy_pass http://localhost:<outbound-port>;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
+	location / {
+		proxy_pass http://localhost:<outbound-port>;
+		proxy_set_header Host $host;
+		proxy_set_header X-Real-IP $remote_addr;
+		proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+		proxy_set_header X-Forwarded-Proto $scheme;
+	}
 
-    location /ws/ {
-        proxy_pass http://localhost:<outbound-port>;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
+	location /ws/ {
+		proxy_pass http://localhost:<outbound-port>;
+		proxy_http_version 1.1;
+		proxy_set_header Upgrade $http_upgrade;
+		proxy_set_header Connection "upgrade";
+		proxy_set_header Host $host;
+		proxy_set_header X-Real-IP $remote_addr;
+		proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+		proxy_set_header X-Forwarded-Proto $scheme;
+	}
 }
 ```
 **Activate the configuration:**
@@ -798,14 +797,14 @@ ip a | grep inet
 
 Configure port forwarding in your router's management interface:
 
-| Field         | Value             |
+| Field		 | Value			 |
 | ------------- | ----------------- |
-| Service Type  | Custom            |
-| Protocol      | TCP               |
+| Service Type  | Custom			|
+| Protocol	  | TCP			   |
 | External Port | `<inbound-port>`  |
 | Internal IP   | `<your-device-ip>`|
 | Internal Port | `<inbound-port>`  |
-| Status        | Enabled           |
+| Status		| Enabled		   |
 
 
 
@@ -843,163 +842,282 @@ The certificate will be automatically renewed by certbot's systemd timer service
 
 <!-- ———————————————————————————————————————————————————————————————————————————————— -->
 
-# Binance Dashboard: DuckDNS → CloudFlare + sognex.com 변경
+# Dynamic IPv4 Adaptation through CloudFlare for your Domain
 
-지금까지 진행 완료된 사항:  
-도메인 구매 및 CloudFlare 연결  
-- 도메인 `sognex.com`을 Porkbun에서 구매.
-- CloudFlare에 도메인 추가 및 네임서버 변경 완료:
-  - `holly.ns.cloudflare.com`
-  - `margo.ns.cloudflare.com`
-- DNSSEC는 비활성화 상태로 확인됨.
-- WHOIS Privacy 활성화 상태로 개인 정보 보호 확인됨.
-- AI 크롤러 차단 활성화:
-  - 모든 페이지에서 AI 크롤러 차단.
-  - `robots.txt`를 통해 AI 학습 방지 신호 전송.
-- **SSL/TLS 설정**:
-  - SSL Mode: Full로 설정.
+## 1. Purchase and Transfer your Domain:  
+Purchase `<your-domain>` through *Porkbun*, which includes these default properties:
+- Disabled `DNSSEC`
+- *WHOIS* Privacy  
 
-## 2. 앞으로 해야 할 일
+Transfer `<your-domain>` from *Porkbun* to *CloudFlare*. The new name servers are:
+- `holly.ns.cloudflare.com`
+- `margo.ns.cloudflare.com`
 
-### 2.1 CloudFlare API를 사용한 Dynamic DNS 방식
+## 2. IPv4-Dynamic DNS Setup via CloudFlare API
+Create an *API Token* at CloudFlare, where `<your-domain>` is included as a *specific zone*.
+The required permission for this API token is `Zone:DNS:Edit`. 
 
-CloudFlare API를 사용하여 유동 IP 환경에서도 안정적으로 도메인을 관리할 수 있습니다. 아래는 설정 및 구현 방법입니다:
+Next, in the CloudFlare dashboard for `<your-domain>`, create an `A-Record` as follows:
+```CloudFlareDashboard
+DNS Tab ≫ Records ≫ Add a Record:
+- Type: A
+- Name: www
+- IPv4 address: <public-ipv4-of-your-router>
+- Ensure: Proxied & TTL Auto
+```
+The following command gives `<public-ipv4-of-your-router>` 
+from any system behind the same router:
+```bash
+curl -4 https://api.ipify.org
+```
+Then, the *ID* of `A-Record` that you just created is polled via:
+```bash
+curl -X GET "https://api.cloudflare.com/client/v4/zones/<cloudflare-dns-zone-id>/dns_records" \
+	 -H "Authorization: Bearer <cloudflare-zone-dns-edit-api-token>" \
+	 -H "Content-Type: application/json"
+```
 
-#### 1. CloudFlare API 토큰 생성
-1. CloudFlare 대시보드에서 **API Tokens** 메뉴로 이동합니다.
-2. **Create Token**을 클릭하고, **Zone:DNS:Edit** 권한을 가진 토큰을 생성합니다.
-3. 생성된 토큰을 안전한 위치에 저장합니다.
+You now have all required credentials:
+1. `<cloudflare-zone-dns-edit-api-token>` — from API token creation
+2. `<cloudflare-dns-zone-id>` — available immediately after the domain transfer
+3. `<cloudflare-dns-a-record-id>` — from the curl command above
 
-#### 2. Python 스크립트 작성
-아래는 서버의 현재 IP를 확인하고, CloudFlare API를 통해 DNS 레코드를 업데이트하는 Python 스크립트입니다:
-
+Use such credentials to automate dynamic IPv4 updates at CloudFlare:
+	
 ```python
-import requests
+# update_dynamic_ipv4_at_cloudflare.py
 
-CLOUDFLARE_API_TOKEN = "your_api_token"
-ZONE_ID = "your_zone_id"
-RECORD_ID = "your_record_id"
-DOMAIN = "sognex.com"
+import os, requests			 	# requests==2.32.4
+from dotenv import load_dotenv	# python-dotenv==1.1.1
+
+load_dotenv()
+CloudFlareApiToken = os.getenv("CloudFlareApiToken")
+DnsZoneID		   = os.getenv("DnsZoneID")
+DnsRecordAID	   = os.getenv("DnsRecordAID")
+YourDomain		   = os.getenv("YourDomain")
 
 def get_public_ip():
-    return requests.get("https://api.ipify.org").text
+
+	return requests.get(
+		"https://api.ipify.org"
+	).text
 
 def update_dns_record(ip):
-    url = f"https://api.cloudflare.com/client/v4/zones/{ZONE_ID}/dns_records/{RECORD_ID}"
-    headers = {
-        "Authorization": f"Bearer {CLOUDFLARE_API_TOKEN}",
-        "Content-Type": "application/json",
-    }
-    data = {
-        "type": "A",
-        "name": DOMAIN,
-        "content": ip,
-        "ttl": 1,
-        "proxied": True,
-    }
-    response = requests.put(url, json=data, headers=headers)
-    return response.json()
+	
+	url = (
+		f"https://api.cloudflare.com/client/v4/zones/"
+		f"{DnsZoneID}/dns_records/{DnsRecordAID}"
+	)
+	headers = {
+		"Authorization": f"Bearer {CloudFlareApiToken}",
+		"Content-Type": "application/json",
+	}
+	data = {
+		"type":	   "A",
+		"name":	   YourDomain,
+		"content": ip,
+		"ttl":	   1,
+		"proxied": True,
+	}
+	response = requests.put(
+		url,
+		json	= data,
+		headers = headers
+	)
+	return response.json()
 
 if __name__ == "__main__":
-    ip = get_public_ip()
-    result = update_dns_record(ip)
-    print(result)
+	
+	print(
+		update_dns_record(
+			get_public_ip()
+		),
+		flush = True,
+	)
 ```
-
-스크립트를 수동으로 실행하여 DNS 레코드가 정상적으로 업데이트되는지 확인합니다:
+Once you run this script, the expected output reads:
 ```bash
-python3 /path/to/update_dns.py
+{
+  "result": {
+	"id":		   "<cloudflare-dns-a-record-id>",
+	"name":		   "<your-domain>",
+	"type":		   "A",
+	"content":	   "<public-ipv4-of-your-router>",
+	"proxiable":   true,
+	"proxied":	   true,
+	"ttl":		   1,
+	"settings":	   {},
+	"meta":		   {},
+	"comment":	   null,
+	"tags":		   [],
+	"created_on":  "Some UTC+0 Datetime",
+	"modified_on": "Some UTC+0 Datetime"
+  },
+  "success":	   true,
+  "errors":		   [],
+  "messages":	   []
+}
 ```
 
-#### 3. 크론 작업 설정
-위 스크립트를 주기적으로 실행하여 IP를 업데이트합니다:
-1. 스크립트를 `/path/to/update_dns.py`로 저장합니다.
-2. 크론 작업을 설정합니다:
-   ```bash
-   crontab -e
-   ```
-3. 아래와 같이 추가하여 5분마다 실행되도록 설정합니다:
-   ```bash
-   */5 * * * * python3 /path/to/update_dns.py
-   ```
+### NginX 설정 업데이트
 
+기존 설정을 `sognex.com`으로 변경합니다:
+
+```bash
+sudo nano /etc/nginx/sites-available/binance-dashboard
+```
+
+```nginx
+# /etc/nginx/sites-available/binance-dashboard
+
+server {
+	listen 80;
+	server_name www.sognex.com 192.168.1.107 localhost;
+
+	location / {
+		proxy_pass http://localhost:8000;
+		proxy_set_header Host $host;
+		proxy_set_header X-Real-IP $remote_addr;
+		proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+		proxy_set_header X-Forwarded-Proto $scheme;
+	}
+
+	location /ws/ {
+		proxy_pass http://localhost:8000;
+		proxy_http_version 1.1;
+		proxy_set_header Upgrade $http_upgrade;
+		proxy_set_header Connection "upgrade";
+		proxy_set_header Host $host;
+		proxy_set_header X-Real-IP $remote_addr;
+		proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+		proxy_set_header X-Forwarded-Proto $scheme;
+	}
+}
+```
+
+설정 활성화 및 적용:
+```bash
+# only if the symbolic link already exists
+sudo rm /etc/nginx/sites-enabled/binance-dashboard
+
+sudo ln -s /etc/nginx/sites-available/binance-dashboard /etc/nginx/sites-enabled/
+ls -la /etc/nginx/sites-enabled/binance-dashboard
+sudo nginx -t
+sudo systemctl reload nginx
+sudo systemctl status nginx
+```
+
+<!-- ### 2.4 HTTPS 및 SSL 인증서 설정
+
+Let's Encrypt를 사용하여 SSL 인증서를 설치합니다:
+
+```bash
+sudo apt install certbot python3-certbot-nginx
+sudo certbot --nginx -d sognex.com -d www.sognex.com
+```
+
+인증서 자동 갱신 확인:
+```bash
+sudo systemctl status certbot.timer
+``` -->
+
+### 2.5 고급 보안 설정
+
+#### UFW 방화벽을 CloudFlare IP 범위로 제한
+```bash
+# CloudFlare IP 범위 허용 (IPv4) - 수정된 버전
+for ip in $(curl -s https://www.cloudflare.com/ips-v4); do
+    sudo ufw allow from $ip to any port 80 proto tcp
+    sudo ufw allow from $ip to any port 443 proto tcp
+done
+
+# CloudFlare IP 범위 허용 (IPv6) - 필요한 경우
+# for ip in $(curl -s https://www.cloudflare.com/ips-v6); do
+# 	sudo ufw allow from $ip to any port 80 proto tcp
+# 	sudo ufw allow from $ip to any port 443 proto tcp
+# done
+
+sudo ufw reload
+```
+> ⚠️ 장단점 (?)  
++ 웹 서버를 CloudFlare 뒤에 "숨기는" 효과를 만들어 보안을 크게 향상  
++ CloudFlare 의존성: CloudFlare 서비스에 완전히 의존  
++ IP 변경: CloudFlare가 IP 범위를 변경하면 업데이트 필요  
++ 복잡성: UFW 규칙이 많아짐
+
+#### CloudFlare 보안 기능 활성화
+1. **SSL/TLS 모드**: Full (Strict) 권장
+2. **Always Use HTTPS**: 활성화
+3. **HSTS**: 활성화
+4. **Security Level**: Medium 또는 High
+5. **Bot Fight Mode**: 활성화
+
+### 2.6 연결 테스트 및 검증
+
+```bash
+sudo apt update
+sudo apt install net-tools
+
+# FastAPI 서비스가 8000 포트에서 실행 중인지 확인
+sudo netstat -tlnp | grep :8000
+
+# 로컬에서 직접 접근 테스트
+curl http://localhost:8000/dashboard
+curl http://192.168.1.107:8000/dashboard
+```
+
+#### 외부 접근 테스트
+```bash
+# DNS 확인
+nslookup www.sognex.com
+dig www.sognex.com
+
+# CloudFlare를 통한 웹사이트 접근 테스트
+curl http://www.sognex.com/dashboard
+
+# HTTP 상태 코드 확인
+curl -s -o /dev/null -w "%{http_code}" http://www.sognex.com/dashboard
+
+# 포트 연결 테스트
+telnet www.sognex.com 80
+# 연결 후, 다음을 입력하고 Enter를 두 번 누릅니다:
+GET /dashboard HTTP/1.1
+Host: www.sognex.com
+```
+
+#### 웹 브라우저 테스트
+1. `https://sognex.com/dashboard` - HTTPS 접속 확인
+2. `http://sognex.com/dashboard` - HTTP to HTTPS 리다이렉트 확인
+3. WebSocket 연결 테스트: Developer Tools에서 네트워크 탭 확인
+
+#### 모니터링 설정
+UptimeRobot 또는 CloudFlare Analytics를 사용하여 서비스 상태를 모니터링합니다.
 
 ---
 
-### 2.2 CloudFlare 설정
+## 최종 결과
 
-CloudFlare API를 사용한 Dynamic DNS 방식이 적용되었으므로, 아래 설정을 진행합니다:
+모든 설정이 완료되면:
+- 기존 DuckDNS 설정은 더 이상 필요하지 않습니다
+- 동적 IP 변경 시 자동으로 DNS 레코드가 업데이트됩니다
+- CloudFlare의 CDN, DDoS 보호, SSL/TLS 기능을 활용할 수 있습니다
+- All external access is now routed through sognex.com. -->
 
-- **DNS 레코드 추가**:
-  - **A 레코드**:
-    - Name: `@`
-    - Content: 서버의 외부 IP 주소 (Dynamic DNS 스크립트가 자동으로 업데이트)
-    - Proxy Status: Proxied
-    - TTL: Auto
-  - **CNAME 레코드**:
-    - Name: `www`
-    - Content: `sognex.com`
-    - Proxy Status: Proxied
-    - TTL: Auto
+<!-- #### 크론 작업 설정
+위 스크립트를 주기적으로 실행하여 IP를 업데이트합니다:
 
-### 2.3 Nginx 설정 변경
-기존 DuckDNS 설정을 `sognex.com`으로 변경:
-1. Nginx 설정 파일 수정:
-   - 파일 경로: `/etc/nginx/sites-available/<name-your-site>`
-   - 변경 내용:
-     ```nginx
-     server {
-         listen 80;
-         server_name sognex.com www.sognex.com;
-
-         location / {
-             proxy_pass http://localhost:8000;
-             proxy_set_header Host $host;
-             proxy_set_header X-Real-IP $remote_addr;
-             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-             proxy_set_header X-Forwarded-Proto $scheme;
-         }
-
-         location /ws/ {
-             proxy_pass http://localhost:8000;
-             proxy_http_version 1.1;
-             proxy_set_header Upgrade $http_upgrade;
-             proxy_set_header Connection "upgrade";
-             proxy_set_header Host $host;
-             proxy_set_header X-Real-IP $remote_addr;
-             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-             proxy_set_header X-Forwarded-Proto $scheme;
-         }
-     }
-     ```
-2. 설정 적용:
+1. 스크립트를 실행 가능하게 만들고 테스트:
    ```bash
-   sudo nginx -t
-   sudo systemctl reload nginx
+   chmod +x /path/to/update_cloudflare_dns.py
+   python3 /path/to/update_cloudflare_dns.py
    ```
 
-### 2.4 HTTPS 활성화
-1. Let's Encrypt를 사용하여 SSL 인증서 설치:
+2. 크론 작업 설정:
    ```bash
-   sudo apt install certbot python3-certbot-nginx
-   sudo certbot --nginx -d sognex.com -d www.sognex.com
+   crontab -e
    ```
-2. 인증서 설치 후 Nginx 설정 자동 업데이트 확인.
 
-### 2.5 방화벽 및 보안 설정
-1. UFW를 사용하여 CloudFlare IP만 허용:
+3. 5분마다 실행되도록 설정:
    ```bash
-   sudo ufw allow from <Cloudflare IP Range> to any port 80,443
+   */5 * * * * cd /path/to/your/project && /usr/bin/python3 update_cloudflare_dns.py >> /var/log/dns_update.log 2>&1
    ```
-   - Cloudflare IP 범위는 [Cloudflare IP 목록](https://www.cloudflare.com/ips/)에서 확인 가능.
-2. CloudFlare에서 **Under Attack Mode** 활성화.
-
-### 2.6 외부 접근 테스트
-1. 브라우저에서 `http://sognex.com` 또는 `https://sognex.com`을 입력하여 Binance Dashboard 접근 확인.
-2. CloudFlare 대시보드에서 트래픽 및 보안 상태 점검.
-
-
-
-## 참고
-- 기존 DuckDNS 설정은 더 이상 사용하지 않음.
-- 모든 외부 접근은 `sognex.com`을 통해 이루어짐.
