@@ -4,19 +4,30 @@
 <!-- ———————————————————————————————————————————————————————————————————————————————— -->
 
 ## TODO:
-*	Document From `DuckDNS` (easy) to `CloudFlare + Purchased Domain` (advanced): [EXTERNAL DASHBOARD SERVICE](#external-dashboard-service)  
 *	Migration from `Filezilla` to `rsync & gsync`
 *	Introduce `WireGuard` so that ports are not exposed.
 *	From `http` to `https`
 
 ## 💡Tips  
 
-1. To check the Ubuntu system’s `internal IP` address, type at Terminal:
+A. To check the Ubuntu system’s `internal IP` address, type at Terminal:
 ```bash
 ip a | grep inet
 ```
 
-2. To test the `external accessibility` of a port from another Windows system, type at PowerShell:
+B. To check the router’s `Public IP` addresses, type at Terminal:
+```bash
+curl -4 ifconfig.me
+curl -6 ifconfig.me
+```
+
+C. To list `active ports` of your Ubuntu server:
+```bash
+sudo apt update && sudo apt install net-tools
+sudo netstat -tlnp
+```
+
+D. To test the `external accessibility` of a port from another Windows system, type at PowerShell:
 ```powershell
 Test-NetConnection -ComputerName <your-domain> -Port <your-port>
 ```
@@ -975,8 +986,7 @@ sudo ufw reload
 
 ```bash
 # Check the Ports` Status at your Server
-sudo apt update
-sudo apt install net-tools
+sudo apt update && sudo apt install net-tools
 sudo netstat -tlnp
 
 # Confirm the DNS Status
@@ -995,22 +1005,3 @@ dig <your-domain>
 3. **HSTS**: 활성화
 4. **Security Level**: Medium 또는 High
 5. **Bot Fight Mode**: 활성화 -->
-
-<!-- #### 크론 작업 설정
-위 스크립트를 주기적으로 실행하여 IP를 업데이트합니다:
-
-1. 스크립트를 실행 가능하게 만들고 테스트:
-   ```bash
-   chmod +x /path/to/update_cloudflare_dns.py
-   python3 /path/to/update_cloudflare_dns.py
-   ```
-
-2. 크론 작업 설정:
-   ```bash
-   crontab -e
-   ```
-
-3. 5분마다 실행되도록 설정:
-   ```bash
-   */5 * * * * cd /path/to/your/project && /usr/bin/python3 update_cloudflare_dns.py >> /var/log/dns_update.log 2>&1
-   ```
