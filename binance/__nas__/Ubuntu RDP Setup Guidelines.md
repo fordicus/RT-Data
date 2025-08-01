@@ -48,7 +48,7 @@ Test-NetConnection -ComputerName <your-domain> -Port <your-port>
 &nbsp;&nbsp;&nbsp;&nbsp;[2.1 🧩 Install and Enable `xrdp` Service](#21-🧩-install-and-enable-xrdp-service)  
 &nbsp;&nbsp;&nbsp;&nbsp;[2.2 🚫 Disable `Wayland` (if GUI apps open on local screen only)](#22-🚫-disable-wayland-if-gui-apps-open-on-local-screen-only)  
 &nbsp;&nbsp;&nbsp;&nbsp;[2.3 🌐 Assign or Monitor `Internal IP Address`](#23-🌐-assign-or-monitor-internal-ip-address)  
-&nbsp;&nbsp;&nbsp;&nbsp;[2.4 🛡️ Allow Remote Desktop Through `UFW Firewall`](#24-🛡️-allow-remote-desktop-through-ufw-firewall)  
+&nbsp;&nbsp;&nbsp;&nbsp;[2.4 🛡️ Allow Remote Desktop through UFW `Firewall` within the Local Network](#24-🛡️-allow-remote-desktop-through-ufw-firewall-within-the-local-network)  
 &nbsp;&nbsp;&nbsp;&nbsp;[2.5 🦆 DuckDNS Setup for `External Access`](#25-🦆-duckdns-setup-for-external-access)  
 &nbsp;&nbsp;&nbsp;&nbsp;[2.6 📶 Router `Port Forwarding`](#26-📶-router-port-forwarding)  
 &nbsp;&nbsp;&nbsp;&nbsp;[2.7 📡 `DNS + Port` Check](#27-📡-dns--port-check)  
@@ -70,7 +70,7 @@ Test-NetConnection -ComputerName <your-domain> -Port <your-port>
 [***7. Dashboard Service for your App***](#7-dashboard-service-for-your-app)  
 &nbsp;&nbsp;&nbsp;&nbsp;[7.1. Add `HTMLResponse` & `WebSocket` Endpoints via `FastAPI @Python`](#71-add-htmlresponse--websocket-endpoints-via-fastapi-python)  
 &nbsp;&nbsp;&nbsp;&nbsp;[7.2. `NginX` Configuration at your Ubuntu Server](#72-nginx-configuration-at-your-ubuntu-server)  
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[7.2.1 Install and Configure `NginX`](#721-install-and-configure-nginx)  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[7.2.1. Install and Configure `NginX`](#721-install-and-configure-nginx)  
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[7.2.2. Allow Traffic through UFW `Firewall`](#722-allow-traffic-through-ufw-firewall)  
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[7.2.3. `Port Forwarding` at your Router](#723-port-forwarding-at-your-router)  
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[7.2.4. Check `External IP` Addresses](#724-check-external-ip-addresses)  
@@ -78,6 +78,7 @@ Test-NetConnection -ComputerName <your-domain> -Port <your-port>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[7.3.1. Purchase and Transfer your `Domain`](#731-purchase-and-transfer-your-domain)  
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[7.3.2. IPv4-Dynamic DNS Setup via `CloudFlare API`](#732-ipv4-dynamic-dns-setup-via-cloudflare-api)  
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[7.3.3. `Security` Enhancements for your Domain](#733-security-enhancements-for-your-domain)  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[🟠 TODO: Automate UFW Whitelist Update](#🟠-todo-automate-ufw-whitelist-update)  
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[7.3.4. `Connectivity` Test](#734-connectivity-test)  
 
 <!-- ———————————————————————————————————————————————————————————————————————————————— -->
@@ -441,17 +442,16 @@ This address is used for local LAN `.rdp` connections.
 
 
 
-### 2.4 🛡️ Allow Remote Desktop Through `UFW Firewall`
+### 2.4 🛡️ Allow Remote Desktop through UFW `Firewall` within the Local Network
 
 ```bash
-sudo ufw allow <your-port>/tcp
 sudo ufw enable
-```
-
-Verify:
-
-```bash
+sudo ufw allow from 192.168.1.0/24 to any port <your-rdp-port> proto tcp
+sudo ufw reload
 sudo ufw status
+
+# 192.168.1.0/24 means the subnet range from 192.168.1.0 to 192.168.1.255.
+# It includes all IP addresses within this range in the local network.
 ```
 
 Check that <your-port>/tcp is listed as `ALLOW`.
@@ -562,11 +562,16 @@ hostname -I
 
 You should see an address like `192.168.x.x`.
 
-### 3.3 Allow SSH Through the Firewall (UFW)
+### 3.3 🛡️ Allow SFTP through UFW Firewall within the Local Network
 
 ```bash
-sudo ufw allow 22/tcp
-sudo ufw status | grep 22
+sudo ufw enable
+sudo ufw allow from 192.168.1.0/24 to any port <your-sftp-port> proto tcp
+sudo ufw reload
+sudo ufw status
+
+# 192.168.1.0/24 means the subnet range from 192.168.1.0 to 192.168.1.255.
+# It includes all IP addresses within this range in the local network.
 ```
 
 ### 3.4 Install FileZilla Client on Windows
@@ -750,13 +755,12 @@ First, ensure your FastAPI application has the necessary endpoints for serving t
 
 ### 7.2. `NginX` Configuration at your Ubuntu Server
 
-#### 7.2.1 Install and Configure `NginX`
+#### 7.2.1. Install and Configure `NginX`
 
 Execute the following commands on your Ubuntu server:
 
 ```bash
-sudo apt update
-sudo apt install nginx
+sudo apt update && sudo apt install nginx
 sudo nano /etc/nginx/sites-available/<name-your-site>
 ```
 
@@ -808,14 +812,16 @@ sudo systemctl reload nginx
 
 
 
-#### 7.2.2. Allow Traffic through UFW `Firewall`
+#### 7.2.2.🛡️ Allow Dashboard Traffic through UFW `Firewall` within the Local Network
 ```bash
-sudo ufw allow <inbound-port>/tcp
+sudo ufw enable
+sudo ufw allow from 192.168.1.0/24 to any port <your-dashboard-port> proto tcp
+sudo ufw reload
 sudo ufw status
+
+# 192.168.1.0/24 means the subnet range from 192.168.1.0 to 192.168.1.255.
+# It includes all IP addresses within this range in the local network.
 ```
-To verify, check that `<inbound-port>/tcp` is listed as `ALLOW`.
-
-
 
 #### 7.2.3. `Port Forwarding` at your Router
 
@@ -890,97 +896,32 @@ You now have all required credentials:
 2. `<cloudflare-dns-zone-id>` — available immediately after the domain transfer
 3. `<cloudflare-dns-a-record-id>` — from the curl command above
 
-Use such credentials to automate dynamic IPv4 updates at CloudFlare:
-	
-```python
-# update_dynamic_ipv4_at_cloudflare.py
+Use such credentials to automate dynamic IPv4 updates at CloudFlare,
+for instance, through a Python script.
 
-import os, requests			 	# requests==2.32.4
-from dotenv import load_dotenv	# python-dotenv==1.1.1
-
-load_dotenv()
-CloudFlareApiToken = os.getenv("CloudFlareApiToken")
-DnsZoneID		   = os.getenv("DnsZoneID")
-DnsRecordAID	   = os.getenv("DnsRecordAID")
-YourDomain		   = os.getenv("YourDomain")
-
-def get_public_ip():
-
-	return requests.get(
-		"https://api.ipify.org"
-	).text
-
-def update_dns_record(ip):
-	
-	url = (
-		f"https://api.cloudflare.com/client/v4/zones/"
-		f"{DnsZoneID}/dns_records/{DnsRecordAID}"
-	)
-	headers = {
-		"Authorization": f"Bearer {CloudFlareApiToken}",
-		"Content-Type": "application/json",
-	}
-	data = {
-		"type":	   "A",
-		"name":	   YourDomain,
-		"content": ip,
-		"ttl":	   1,
-		"proxied": True,
-	}
-	response = requests.put(
-		url,
-		json	= data,
-		headers = headers
-	)
-	return response.json()
-
-if __name__ == "__main__":
-	
-	print(
-		update_dns_record(
-			get_public_ip()
-		),
-		flush = True,
-	)
-```
-Once you run this script, the expected output reads:
-```bash
-{
-  "result": {
-	"id":		   "<cloudflare-dns-a-record-id>",
-	"name":		   "<your-domain>",
-	"type":		   "A",
-	"content":	   "<public-ipv4-of-your-router>",
-	"proxiable":   true,
-	"proxied":	   true,
-	"ttl":		   1,
-	"settings":	   {},
-	"meta":		   {},
-	"comment":	   null,
-	"tags":		   [],
-	"created_on":  "Some UTC+0 Datetime",
-	"modified_on": "Some UTC+0 Datetime"
-  },
-  "success":	   true,
-  "errors":		   [],
-  "messages":	   []
-}
-```
 #### 7.3.3. `Security` Enhancements for your Domain
 Restrict UFW Firewall to CloudFlare IP Ranges via
 ```bash
+sudo ufw enable
 for ip in $(curl -s https://www.cloudflare.com/ips-v4); do
-    sudo ufw allow from $ip to any port 80 proto tcp
-    sudo ufw allow from $ip to any port 443 proto tcp
+    sudo ufw allow from $ip to any port <your-rdp-port> proto tcp
+	sudo ufw allow from $ip to any port <your-sftp-port> proto tcp
+	sudo ufw allow from $ip to any port <your-dashboard-port> proto tcp
 done
-
 sudo ufw reload
+sudo ufw status
 ```
-> ⚠️ 장단점 (?)  
-+ 웹 서버를 CloudFlare 뒤에 "숨기는" 효과를 만들어 보안을 크게 향상  
-+ CloudFlare 의존성: CloudFlare 서비스에 완전히 의존  
-+ IP 변경: CloudFlare가 IP 범위를 변경하면 업데이트 필요  
-+ 복잡성: UFW 규칙이 많아짐
+
+⚠️ Pros and Cons  
++ Pros: Enhances security by "hiding" the web server behind Cloudflare.  
++ Cons: Complete dependency on Cloudflare services.  
++ IP Changes: Requires updates if Cloudflare modifies its IP ranges.  
++ Complexity: Increases the number of UFW rules, making management more complicated.  
+
+#### 🟠 TODO: Automate UFW Whitelist Update
+Write a Python script to automate the updates above.  
+Additionally, include functionality to periodically remove outdated UFW rules,  
+while preserving a whitelist for the local network and the latest [CloudFlare IP ranges](https://www.cloudflare.com/ips-v4/).  
 
 #### 7.3.4. `Connectivity` Test
 
