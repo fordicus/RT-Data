@@ -56,18 +56,6 @@ Test-NetConnection -ComputerName <your-domain> -Port <your-port>
 [***6. Monitor Status of Port Externally***](#6-monitor-status-of-port-externally)  
 &nbsp;&nbsp;&nbsp;&nbsp;[🟢 `UptimeRobot`](https://uptimerobot.com/)  
 
-[***7. Dashboard Service for your App***](#7-dashboard-service-for-your-app)  
-&nbsp;&nbsp;&nbsp;&nbsp;[7.1. Add `HTMLResponse` & `WebSocket` Endpoints via `FastAPI @Python`](#71-add-htmlresponse--websocket-endpoints-via-fastapi-python)  
-&nbsp;&nbsp;&nbsp;&nbsp;[7.2. `NginX` Configuration at your Ubuntu Server](#72-nginx-configuration-at-your-ubuntu-server)  
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[7.2.1 Install and Configure `NginX`](#721-install-and-configure-nginx)  
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[7.2.2. Allow Traffic through UFW `Firewall`](#722-allow-traffic-through-ufw-firewall)  
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[7.2.3. `Port Forwarding` at your Router](#723-port-forwarding-at-your-router)  
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[7.2.4. Check `External IP` Addresses](#724-check-external-ip-addresses)  
-&nbsp;&nbsp;&nbsp;&nbsp;[7.3. `Dynamic IPv4` Adaptation through CloudFlare for your Domain](#73-dynamic-ipv4-adaptation-through-cloudflare-for-your-domain)  
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[7.3.1. Purchase and Transfer your `Domain`](#731-purchase-and-transfer-your-domain)  
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[7.3.2. IPv4-Dynamic DNS Setup via `CloudFlare API`](#732-ipv4-dynamic-dns-setup-via-cloudflare-api)  
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[7.3.3. `Security` Enhancements for your Domain](#733-security-enhancements-for-your-domain)  
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[7.3.4. `Connectivity` Test](#734-connectivity-test)  
 
 <!-- ———————————————————————————————————————————————————————————————————————————————— -->
 
@@ -703,7 +691,7 @@ DPMS (Display Power Management Signaling):
 
 <!-- ———————————————————————————————————————————————————————————————————————————————— -->
 
-## 7. Dashboard Service for your App
+# EXTERNAL DASHBOARD SERVICE
 
 **Access Examples:**
 - `http://localhost:8000/dashboard` - development computer
@@ -715,7 +703,7 @@ DPMS (Display Power Management Signaling):
 - Port 80: Inbound HTTP traffic
 - Port 443: Inbound HTTPS traffic
 
-### 7.1. Add `HTMLResponse` & `WebSocket` Endpoints via `FastAPI @Python`
+## 0. Add an `HTMLResponse` & `WebSocket` Endpoint via `FastAPI @Python`
 First, ensure your FastAPI application has the necessary endpoints for serving the dashboard:
 ```python
 	# Create FastAPI app
@@ -737,9 +725,9 @@ First, ensure your FastAPI application has the necessary endpoints for serving t
 	)
 ```
 
-### 7.2. `NginX` Configuration at your Ubuntu Server
+## 1. NginX Configuration @Ubuntu Server
 
-#### 7.2.1 Install and Configure `NginX`
+### 1.1. Install and Configure NginX
 
 Execute the following commands on your Ubuntu server:
 
@@ -749,7 +737,8 @@ sudo apt install nginx
 sudo nano /etc/nginx/sites-available/<name-your-site>
 ```
 
-Configuration file content:
+**Configuration file content:**
+
 ```nginx
 # /etc/nginx/sites-available/<name-your-site>
 
@@ -777,36 +766,26 @@ server {
 	}
 }
 ```
-Activate the configuration:
+**Activate the configuration:**
 ```bash
-# Remove the default configuration (not needed for custom setups)
-sudo rm /etc/nginx/sites-enabled/default
-
-# Remove the symbolic link for the site configuration (if it exists)
-sudo rm -f /etc/nginx/sites-enabled/<name-your-site>
-
-# Create a new symbolic link for the site configuration
 sudo ln -s /etc/nginx/sites-available/<name-your-site> /etc/nginx/sites-enabled/
-
-# Validate the Nginx configuration for syntax and errors
+sudo rm /etc/nginx/sites-enabled/default
 sudo nginx -t
-
-# Reload Nginx to apply the updated configuration
 sudo systemctl reload nginx
 ```
 
 
 
-#### 7.2.2. Allow Traffic through UFW `Firewall`
+### 1.2. Allow Traffic Through `UFW Firewall`
 ```bash
 sudo ufw allow <inbound-port>/tcp
 sudo ufw status
 ```
-To verify, check that `<inbound-port>/tcp` is listed as `ALLOW`.
+**To verify:** Check that `<inbound-port>/tcp` is listed as `ALLOW`.
 
 
 
-#### 7.2.3. `Port Forwarding` at your Router
+### 1.3. Router Port Forwarding Configuration
 
 The device IP assigned by your router can be checked on the Ubuntu home server using:
 
@@ -827,38 +806,56 @@ Configure port forwarding in your router's management interface:
 
 
 
-#### 7.2.4. Check `External IP` Addresses
+### 1.4. External IP Address Verification
 
 Check your Ubuntu server's external IPv4 and IPv6 addresses:
+
 ```bash
 curl -4 ifconfig.me
 curl -6 ifconfig.me
 ```
-From now on, the returned outputs will be called
+
+**For DuckDNS users:** Update your DuckDNS dashboard with both IPv4 and IPv6 public addresses:
+- IPv4: e.g., `85.x.2x9.2x3`
+- IPv6: e.g., `2a?2:1?10:90?2:6?00:c8e:c??e:??af:cd??`
+
+
+
+## 2. (Optional) HTTPS Implementation
+
+For secure connections, implement SSL/TLS using Let's Encrypt:
+
 ```bash
-<public-ipv4-of-your-router>
-<public-ipv6-of-your-router>
+# Install certbot for automated SSL certificate management
+sudo apt install certbot python3-certbot-nginx
+
+# Obtain and configure SSL certificate
+sudo certbot --nginx -d <your-domain>
 ```
+
+**Note:** Replace `<your-domain>` with your actual domain name (e.g., `example.duckdns.org` or `yourdomain.com`).
+
+The certificate will be automatically renewed by certbot's systemd timer service.
 
 
 <!-- ———————————————————————————————————————————————————————————————————————————————— -->
 
-### 7.3. `Dynamic IPv4` Adaptation through CloudFlare for your Domain
+# Dynamic IPv4 Adaptation through CloudFlare for your Domain
 
-#### 7.3.1. Purchase and Transfer your `Domain`
+## 1. Purchase and Transfer your Domain:  
 Purchase `<your-domain>` through *Porkbun*, which includes these default properties:
 - Disabled `DNSSEC`
 - *WHOIS* Privacy  
 
-Transfer `<your-domain>` from *Porkbun* to *CloudFlare*. The new *name servers* are:
+Transfer `<your-domain>` from *Porkbun* to *CloudFlare*. The new name servers are:
 - `holly.ns.cloudflare.com`
 - `margo.ns.cloudflare.com`
 
-#### 7.3.2. IPv4-Dynamic DNS Setup via `CloudFlare API`
-Create an *API Token* at CloudFlare, where `<your-domain>` is included as a *specific zone*.  
+## 2. IPv4-Dynamic DNS Setup via CloudFlare API
+Create an *API Token* at CloudFlare, where `<your-domain>` is included as a *specific zone*.
 The required permission for this API token is `Zone:DNS:Edit`. 
 
-Next, in the CloudFlare dashboard for `<your-domain>`, create an *A Record* as follows:
+Next, in the CloudFlare dashboard for `<your-domain>`, create an `A-Record` as follows:
 ```CloudFlareDashboard
 DNS Tab ≫ Records ≫ Add a Record:
 - Type: A
@@ -866,8 +863,12 @@ DNS Tab ≫ Records ≫ Add a Record:
 - IPv4 address: <public-ipv4-of-your-router>
 - Ensure: Proxied & TTL Auto
 ```
-
-Then, the `ID` of *A Record*—that you just created—can be polled via:
+The following command gives `<public-ipv4-of-your-router>` 
+from any system behind the same router:
+```bash
+curl -4 https://api.ipify.org
+```
+Then, the *ID* of `A-Record` that you just created is polled via:
 ```bash
 curl -X GET "https://api.cloudflare.com/client/v4/zones/<cloudflare-dns-zone-id>/dns_records" \
 	 -H "Authorization: Bearer <cloudflare-zone-dns-edit-api-token>" \
@@ -955,13 +956,84 @@ Once you run this script, the expected output reads:
   "messages":	   []
 }
 ```
-#### 7.3.3. `Security` Enhancements for your Domain
-Restrict UFW Firewall to CloudFlare IP Ranges via
+
+### NginX 설정 업데이트
+
+기존 설정을 `sognex.com`으로 변경합니다:
+
 ```bash
+sudo nano /etc/nginx/sites-available/binance-dashboard
+```
+
+```nginx
+# /etc/nginx/sites-available/binance-dashboard
+
+server {
+	listen 80;
+	server_name www.sognex.com 192.168.1.107 localhost;
+
+	location / {
+		proxy_pass http://localhost:8000;
+		proxy_set_header Host $host;
+		proxy_set_header X-Real-IP $remote_addr;
+		proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+		proxy_set_header X-Forwarded-Proto $scheme;
+	}
+
+	location /ws/ {
+		proxy_pass http://localhost:8000;
+		proxy_http_version 1.1;
+		proxy_set_header Upgrade $http_upgrade;
+		proxy_set_header Connection "upgrade";
+		proxy_set_header Host $host;
+		proxy_set_header X-Real-IP $remote_addr;
+		proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+		proxy_set_header X-Forwarded-Proto $scheme;
+	}
+}
+```
+
+설정 활성화 및 적용:
+```bash
+# only if the symbolic link already exists
+sudo rm /etc/nginx/sites-enabled/binance-dashboard
+
+sudo ln -s /etc/nginx/sites-available/binance-dashboard /etc/nginx/sites-enabled/
+ls -la /etc/nginx/sites-enabled/binance-dashboard
+sudo nginx -t
+sudo systemctl reload nginx
+sudo systemctl status nginx
+```
+
+<!-- ### 2.4 HTTPS 및 SSL 인증서 설정
+
+Let's Encrypt를 사용하여 SSL 인증서를 설치합니다:
+
+```bash
+sudo apt install certbot python3-certbot-nginx
+sudo certbot --nginx -d sognex.com -d www.sognex.com
+```
+
+인증서 자동 갱신 확인:
+```bash
+sudo systemctl status certbot.timer
+``` -->
+
+### 2.5 고급 보안 설정
+
+#### UFW 방화벽을 CloudFlare IP 범위로 제한
+```bash
+# CloudFlare IP 범위 허용 (IPv4) - 수정된 버전
 for ip in $(curl -s https://www.cloudflare.com/ips-v4); do
     sudo ufw allow from $ip to any port 80 proto tcp
     sudo ufw allow from $ip to any port 443 proto tcp
 done
+
+# CloudFlare IP 범위 허용 (IPv6) - 필요한 경우
+# for ip in $(curl -s https://www.cloudflare.com/ips-v6); do
+# 	sudo ufw allow from $ip to any port 80 proto tcp
+# 	sudo ufw allow from $ip to any port 443 proto tcp
+# done
 
 sudo ufw reload
 ```
@@ -971,30 +1043,63 @@ sudo ufw reload
 + IP 변경: CloudFlare가 IP 범위를 변경하면 업데이트 필요  
 + 복잡성: UFW 규칙이 많아짐
 
-#### 7.3.4. `Connectivity` Test
-
-```bash
-# Check the Ports` Status at your Server
-sudo apt update
-sudo apt install net-tools
-sudo netstat -tlnp
-
-# Confirm the DNS Status
-nslookup <your-domain>
-dig <your-domain>
-
-# Test on Web Browsers
-# http://localhost:<your-app-port>/<your-endpoint-name>
-# http://<local-ip-of-server>:<your-app-port>/<your-endpoint-name>
-# http://<your-domain>/<your-endpoint-name>
-```
-
-<!-- #### CloudFlare 보안 기능 활성화
+#### CloudFlare 보안 기능 활성화
 1. **SSL/TLS 모드**: Full (Strict) 권장
 2. **Always Use HTTPS**: 활성화
 3. **HSTS**: 활성화
 4. **Security Level**: Medium 또는 High
-5. **Bot Fight Mode**: 활성화 -->
+5. **Bot Fight Mode**: 활성화
+
+### 2.6 연결 테스트 및 검증
+
+```bash
+sudo apt update
+sudo apt install net-tools
+
+# FastAPI 서비스가 8000 포트에서 실행 중인지 확인
+sudo netstat -tlnp | grep :8000
+
+# 로컬에서 직접 접근 테스트
+curl http://localhost:8000/dashboard
+curl http://192.168.1.107:8000/dashboard
+```
+
+#### 외부 접근 테스트
+```bash
+# DNS 확인
+nslookup www.sognex.com
+dig www.sognex.com
+
+# CloudFlare를 통한 웹사이트 접근 테스트
+curl http://www.sognex.com/dashboard
+
+# HTTP 상태 코드 확인
+curl -s -o /dev/null -w "%{http_code}" http://www.sognex.com/dashboard
+
+# 포트 연결 테스트
+telnet www.sognex.com 80
+# 연결 후, 다음을 입력하고 Enter를 두 번 누릅니다:
+GET /dashboard HTTP/1.1
+Host: www.sognex.com
+```
+
+#### 웹 브라우저 테스트
+1. `https://sognex.com/dashboard` - HTTPS 접속 확인
+2. `http://sognex.com/dashboard` - HTTP to HTTPS 리다이렉트 확인
+3. WebSocket 연결 테스트: Developer Tools에서 네트워크 탭 확인
+
+#### 모니터링 설정
+UptimeRobot 또는 CloudFlare Analytics를 사용하여 서비스 상태를 모니터링합니다.
+
+---
+
+## 최종 결과
+
+모든 설정이 완료되면:
+- 기존 DuckDNS 설정은 더 이상 필요하지 않습니다
+- 동적 IP 변경 시 자동으로 DNS 레코드가 업데이트됩니다
+- CloudFlare의 CDN, DDoS 보호, SSL/TLS 기능을 활용할 수 있습니다
+- All external access is now routed through sognex.com. -->
 
 <!-- #### 크론 작업 설정
 위 스크립트를 주기적으로 실행하여 IP를 업데이트합니다:
