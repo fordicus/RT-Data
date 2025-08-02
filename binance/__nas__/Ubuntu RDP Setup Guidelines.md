@@ -59,33 +59,37 @@ Test-NetConnection -ComputerName <your-domain> -Port <your-port>
 &nbsp;&nbsp;&nbsp;&nbsp;[2.6 📶 Router `Port Forwarding`](#26-📶-router-port-forwarding)  
 &nbsp;&nbsp;&nbsp;&nbsp;[2.7 📡 `DNS + Port` Check](#27-📡-dns--port-check)  
 &nbsp;&nbsp;&nbsp;&nbsp;[2.8 📁 Configure `.rdp` Files for `Intranet` and `External Access`](#28-📁-configure-rdp-files-for-intranet-and-external-access)  
+&nbsp;&nbsp;&nbsp;&nbsp;[2.9 🔁 `Reboot` Checklist](#29-🔁-reboot-checklist)  
 
 [***3. Remote File System Access Using `FileZilla` (SFTP)***](#3-remote-file-system-access-using-filezilla-sftp)  
+&nbsp;&nbsp;&nbsp;&nbsp;[3.1 Install and Start the `SSH` Server on Ubuntu](#31-install-and-start-the-ssh-server-on-ubuntu)  
+&nbsp;&nbsp;&nbsp;&nbsp;[3.2 Allow SFTP through UFW `Firewall` within the Local Network](#32-allow-sftp-through-ufw-firewall-within-the-local-network)  
+&nbsp;&nbsp;&nbsp;&nbsp;[3.3 📶 Router `Port Forwarding`](#33-📶-router-port-forwarding)  
+&nbsp;&nbsp;&nbsp;&nbsp;[3.4 Install `FileZilla` Client on Windows](#34-install-filezilla-client-on-windows)  
 
 [***4. RnD Environment Preparation***](#4-rnd-environment-preparation)  
 
 &nbsp;&nbsp;&nbsp;&nbsp;[4.1 🧬 Install `Anaconda` and `PyTorch` Environment](#41-🧬-install-anaconda-and-pytorch-environment)  
 
-[***5. Final Verification and Checklist for RDP***](#5-final-verification-and-checklist)  
-&nbsp;&nbsp;&nbsp;&nbsp;[5.1 ✅ `Summary` Checkpoints](#51-✅-summary-checkpoints)  
-&nbsp;&nbsp;&nbsp;&nbsp;[5.2 🔁 `Reboot` Checklist](#52-🔁-reboot-checklist)  
 
-[***6. Monitor Status of Port Externally***](#6-monitor-status-of-port-externally)  
+[***5. Monitor Status of Port Externally***](#5-monitor-status-of-port-externally)  
 &nbsp;&nbsp;&nbsp;&nbsp;[🟢 `UptimeRobot`](https://uptimerobot.com/)  
 
-[***7. Dashboard Service for your App***](#7-dashboard-service-for-your-app)  
-&nbsp;&nbsp;&nbsp;&nbsp;[7.1. Add `HTMLResponse` & `WebSocket` Endpoints via `FastAPI @Python`](#71-add-htmlresponse--websocket-endpoints-via-fastapi-python)  
-&nbsp;&nbsp;&nbsp;&nbsp;[7.2. `NginX` Configuration at your Ubuntu Server](#72-nginx-configuration-at-your-ubuntu-server)  
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[7.2.1. Install and Configure `NginX`](#721-install-and-configure-nginx)  
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[7.2.2. Allow Traffic through UFW `Firewall`](#722-allow-traffic-through-ufw-firewall)  
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[7.2.3. `Port Forwarding` at your Router](#723-port-forwarding-at-your-router)  
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[7.2.4. Check `External IP` Addresses](#724-check-external-ip-addresses)  
-&nbsp;&nbsp;&nbsp;&nbsp;[7.3. `Dynamic IPv4` Adaptation through CloudFlare for your Domain](#73-dynamic-ipv4-adaptation-through-cloudflare-for-your-domain)  
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[7.3.1. Purchase and Transfer your `Domain`](#731-purchase-and-transfer-your-domain)  
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[7.3.2. IPv4-Dynamic DNS Setup via `CloudFlare API`](#732-ipv4-dynamic-dns-setup-via-cloudflare-api)  
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[7.3.3. `Security` Enhancements for your Domain](#733-security-enhancements-for-your-domain)  
+[***6. Dashboard Service for your App***](#6-dashboard-service-for-your-app)  
+&nbsp;&nbsp;&nbsp;&nbsp;[6.1. Add `HTMLResponse` & `WebSocket` Endpoints via `FastAPI @Python`](#61-add-htmlresponse--websocket-endpoints-via-fastapi-python)  
+&nbsp;&nbsp;&nbsp;&nbsp;[6.2. `NginX` Configuration at your Ubuntu Server](#62-nginx-configuration-at-your-ubuntu-server)  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[6.2.1. Install and Configure `NginX`](#621-install-and-configure-nginx)  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[6.2.2. Allow Dashboard Traffic through UFW `Firewall` within the Local Network](#622-allow-dashboard-traffic-through-ufw-firewall-within-the-local-network)  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[6.2.3. `Port Forwarding` at your Router](#623-port-forwarding-at-your-router)  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[6.2.4. Check `External IP` Addresses](#624-check-external-ip-addresses)  
+&nbsp;&nbsp;&nbsp;&nbsp;[6.3. `Dynamic IPv4` Adaptation through CloudFlare for your Domain-Rounter](#63-dynamic-ipv4-adaptation-through-cloudflare-for-your-domain-rounter)  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[6.3.1. Purchase and Transfer your `Domain`](#631-purchase-and-transfer-your-domain)  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[6.3.2. IPv4-Dynamic DNS Setup via `CloudFlare API`](#632-ipv4-dynamic-dns-setup-via-cloudflare-api)  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[6.3.3. `Security` Enhancements for your Domain](#633-security-enhancements-for-your-domain)  
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[🟠 TODO: Automate UFW Whitelist Update](#🟠-todo-automate-ufw-whitelist-update)  
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[7.3.4. `Connectivity` Test](#734-connectivity-test)  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[6.3.4. `Connectivity` Test](#634-connectivity-test)  
+
+[***7. RDP & SFTP Migration to WireGuard***](#7-rdp--sftp-migration-to-wireguard)  
 
 <!-- ———————————————————————————————————————————————————————————————————————————————— -->
 
@@ -468,7 +472,7 @@ Check that <your-port>/tcp is listed as `ALLOW`.
 
 1. Register at [https://www.duckdns.org](https://www.duckdns.org)
 2. Choose a subdomain (e.g., `\<your-subdomain\>.duckdns.org`)
-3. DuckDNS supports `GitHub` login for convenience `as I used`.
+3. DuckDNS supports `GitHub` login for convenience.
 4. Follow official installation guide at [https://www.duckdns.org/install.jsp](https://www.duckdns.org/install.jsp) to download and run the appropriate `.sh` script
 
 **To verify update success manually:**
@@ -489,16 +493,14 @@ Login to router at `192.168.1.1`
 
 **Navigate:** Advanced → NAT Forwarding → Virtual Servers → Add
 
-| Field		 | Value					 |
+| Field			| Value						|
 | ------------- | ------------------------- |
-| Service Type  | \<name as wished>		 |
-| External Port | <your-port>					  |
-| Internal IP   | (your Ubuntu internal IP) |
-| Internal Port | <your-port>					  |
-| Protocol	  | TCP					   |
-| Status		| Enabled				   |
-
-
+| Rule Nmae		| `<your-rule-name>`		|
+| External Port | `<inbound-port>`  		|
+| Internal IP   | `<your-device-ip>`		|
+| Internal Port | `<inbound-port>`  		|
+| Protocol		| TCP						|
+| Status		| Enabled					|
 
 ### 2.7 📡 `DNS + Port` Check
 
@@ -543,112 +545,7 @@ Open using:
 * Linux: remmina / freerdp
 
 
-<!-- ———————————————————————————————————————————————————————————————————————————————— -->
-
-## 3. Remote File System Access Using `FileZilla` (SFTP)
-
-### 3.1 Install and Start the SSH Server on Ubuntu
-
-```bash
-sudo apt update
-sudo apt install openssh-server -y
-
-sudo systemctl start ssh
-sudo systemctl enable ssh
-sudo systemctl status ssh
-```
-
-Let `<your-ssh-port>` be listening for the inbound:
-```bash
-# sudo nano /etc/ssh/sshd_config
-
-Port <your-ssh-port>
-ListenAddress 0.0.0.0
-ListenAddress ::
-```
-Restart `ssh` and confirm the status:
-```bash
-sudo systemctl restart ssh
-sudo netstat -tlnp
-```
-
-### 3.2 🛡️ Allow SFTP through UFW Firewall within the Local Network
-
-```bash
-sudo ufw enable
-sudo ufw allow from 192.168.1.0/24 to any port <your-sftp-port> proto tcp
-sudo ufw reload
-sudo ufw status
-
-# 192.168.1.0/24 means the subnet range from 192.168.1.0 to 192.168.1.255.
-# It includes all IP addresses within this range in the local network.
-```
-
-### 3.3 Install FileZilla Client on Windows
-
-Download the FileZilla client:
-👉 [https://filezilla-project.org/download.php?type=client](https://filezilla-project.org/download.php?type=client)
-
-Use the following configuration for SFTP access:
-
-| Setting	  | Value								 |
-| ------------ | ------------------------------------- |
-| **Host**	 | `sftp://<your-subdomain>.duckdns.org` |
-| **Username** | `<your-username>`					 |
-| **Password** | `<your-password>`					 |
-| **Port**	 | `<your-sftp-port>`								  |
-
-Once connected, you can browse and transfer files between your local machine and the Ubuntu server over a secure SSH channel.
-
-
-<!-- ———————————————————————————————————————————————————————————————————————————————— -->
-
-## 4. RnD Environment Preparation
-
-### 4.1 🧬 Install `Anaconda` and `PyTorch` Environment
-
-#### Download and install Anaconda as instructed by [Anaconda Installation Guide](https://www.anaconda.com/docs/getting-started/anaconda/install#macos-command-line-installer)
-
-**To verify GPU availability:**
-
-```bash
-python -c "import torch; print(torch.__version__); print(torch.cuda.is_available())"
-```
-
-Expected output:
-
-* PyTorch version string (e.g., 2.5.1)
-* `True` if CUDA is successfully enabled
-
-#### Install PyTorch with CUDA
-
-```bash
-conda install pytorch torchvision torchaudio pytorch-cuda -c pytorch -c nvidia
-```
-
-
-<!-- ———————————————————————————————————————————————————————————————————————————————— -->
-
-## 5. Final Verification and Checklist for RDP
-
-### 5.1 ✅ `Summary` Checkpoints
-
-| Feature									| Confirmed |
-| ------------------------------------------ | --------- |
-| Lid close disables suspend				 | ✅		 |
-| RDP works on local LAN					 | ✅		 |
-| RDP works via DuckDNS					  | ✅		 |
-| Port forwarding is live					| ✅		 |
-| Session is Xorg, not Wayland			   | ✅		 |
-| Apps open inside RDP, not on host's screen | ✅		 |
-| `.rdp` files configured					| ✅		 |
-| CPU dynamic power managed via auto-cpufreq | ✅		 |
-| GPU persistence mode active				| ✅		 |
-| Anaconda & PyTorch (CUDA) configured	   | ✅		 |
-
-
-
-### 5.2 🔁 `Reboot` Checklist
+### 2.9 🔁 `Reboot` Checklist
 
 After reboot, we want to ensure all services are active and the laptop will not be suspended:
 ```bash
@@ -717,7 +614,99 @@ DPMS (Display Power Management Signaling):
 
 <!-- ———————————————————————————————————————————————————————————————————————————————— -->
 
-## 6. Monitor Status of Port Externally
+## 3. Remote File System Access Using `FileZilla` (SFTP)
+
+### 3.1 Install and Start the `SSH` Server on Ubuntu
+
+```bash
+sudo apt update && sudo apt install openssh-server -y
+
+sudo systemctl start ssh
+sudo systemctl enable ssh
+sudo systemctl status ssh
+```
+
+Let `<your-ssh-port>` be listening for the inbound:
+```bash
+# sudo nano /etc/ssh/sshd_config
+
+Port <your-ssh-port>
+ListenAddress 0.0.0.0
+ListenAddress ::
+```
+Restart `ssh` and confirm the status:
+```bash
+sudo systemctl restart ssh
+sudo netstat -tlnp
+```
+
+### 3.2 Allow SFTP through UFW `Firewall` within the Local Network
+
+```bash
+sudo ufw enable
+sudo ufw allow from 192.168.1.0/24 to any port <your-sftp-port> proto tcp
+sudo ufw reload
+sudo ufw status
+
+# 192.168.1.0/24 means the subnet range from 192.168.1.0 to 192.168.1.255.
+# It includes all IP addresses within this range in the local network.
+```
+
+### 3.3 📶 Router `Port Forwarding`
+| Field			| Value						|
+| ------------- | ------------------------- |
+| Rule Nmae		| `<your-rule-name>`		|
+| External Port | `<inbound-port>`  		|
+| Internal IP   | `<your-device-ip>`		|
+| Internal Port | `<inbound-port>`  		|
+| Protocol		| TCP						|
+| Status		| Enabled					|
+
+### 3.4 Install `FileZilla` Client on Windows
+
+Download the FileZilla client:
+👉 [https://filezilla-project.org/download.php?type=client](https://filezilla-project.org/download.php?type=client)
+
+Use the following configuration for SFTP access:
+
+| Setting	  | Value								 |
+| ------------ | ------------------------------------- |
+| **Host**	 | `sftp://<your-subdomain>.duckdns.org` |
+| **Username** | `<your-username>`					 |
+| **Password** | `<your-password>`					 |
+| **Port**	 | `<your-sftp-port>`								  |
+
+Once connected, you can browse and transfer files between your local machine and the Ubuntu server over a secure SSH channel.
+
+
+<!-- ———————————————————————————————————————————————————————————————————————————————— -->
+
+## 4. RnD Environment Preparation
+
+### 4.1 🧬 Install `Anaconda` and `PyTorch` Environment
+
+#### Download and install Anaconda as instructed by [Anaconda Installation Guide](https://www.anaconda.com/docs/getting-started/anaconda/install#macos-command-line-installer)
+
+**To verify GPU availability:**
+
+```bash
+python -c "import torch; print(torch.__version__); print(torch.cuda.is_available())"
+```
+
+Expected output:
+
+* PyTorch version string (e.g., 2.5.1)
+* `True` if CUDA is successfully enabled
+
+#### Install PyTorch with CUDA
+
+```bash
+conda install pytorch torchvision torchaudio pytorch-cuda -c pytorch -c nvidia
+```
+
+<!-- ———————————————————————————————————————————————————————————————————————————————— -->
+
+## 5. Monitor Status of Port Externally
 
 **A.** In [`UptimeRobot`](https://uptimerobot.com/), you can set up a monitor for your ports being forwarded so that you can check its status and uptime wherever you are.
 
@@ -729,7 +718,7 @@ DPMS (Display Power Management Signaling):
 
 <!-- ———————————————————————————————————————————————————————————————————————————————— -->
 
-## 7. Dashboard Service for your App
+## 6. Dashboard Service for your App
 
 **Access Examples:**
 - `http://localhost:8000/dashboard` - development computer
@@ -741,7 +730,7 @@ DPMS (Display Power Management Signaling):
 - Port 80: Inbound HTTP traffic
 - Port 443: Inbound HTTPS traffic
 
-### 7.1. Add `HTMLResponse` & `WebSocket` Endpoints via `FastAPI @Python`
+### 6.1. Add `HTMLResponse` & `WebSocket` Endpoints via `FastAPI @Python`
 First, ensure your FastAPI application has the necessary endpoints for serving the dashboard:
 ```python
 	# Create FastAPI app
@@ -763,9 +752,9 @@ First, ensure your FastAPI application has the necessary endpoints for serving t
 	)
 ```
 
-### 7.2. `NginX` Configuration at your Ubuntu Server
+### 6.2. `NginX` Configuration at your Ubuntu Server
 
-#### 7.2.1. Install and Configure `NginX`
+#### 6.2.1. Install and Configure `NginX`
 
 Execute the following commands on your Ubuntu server:
 
@@ -822,7 +811,7 @@ sudo systemctl reload nginx
 
 
 
-#### 7.2.2.🛡️ Allow Dashboard Traffic through UFW `Firewall` within the Local Network
+#### 6.2.2. Allow Dashboard Traffic through UFW `Firewall` within the Local Network
 ```bash
 sudo ufw enable
 sudo ufw allow from 192.168.1.0/24 to any port <your-dashboard-port> proto tcp
@@ -833,7 +822,7 @@ sudo ufw status
 # It includes all IP addresses within this range in the local network.
 ```
 
-#### 7.2.3. `Port Forwarding` at your Router
+#### 6.2.3. `Port Forwarding` at your Router
 
 The device IP assigned by your router can be checked on the Ubuntu home server using:
 
@@ -843,18 +832,16 @@ ip a | grep inet
 
 Configure port forwarding in your router's management interface:
 
-| Field		 | Value			 |
-| ------------- | ----------------- |
-| Service Type  | Custom			|
-| Protocol	  | TCP			   |
-| External Port | `<inbound-port>`  |
-| Internal IP   | `<your-device-ip>`|
-| Internal Port | `<inbound-port>`  |
-| Status		| Enabled		   |
+| Field			| Value						|
+| ------------- | ------------------------- |
+| Rule Nmae		| `<your-rule-name>`		|
+| External Port | `<inbound-port>`  		|
+| Internal IP   | `<your-device-ip>`		|
+| Internal Port | `<inbound-port>`  		|
+| Protocol		| TCP						|
+| Status		| Enabled					|
 
-
-
-#### 7.2.4. Check `External IP` Addresses
+#### 6.2.4. Check `External IP` Addresses
 
 Check your Ubuntu server's external IPv4 and IPv6 addresses:
 ```bash
@@ -870,9 +857,9 @@ From now on, the returned outputs will be denoted by
 
 <!-- ———————————————————————————————————————————————————————————————————————————————— -->
 
-### 7.3. `Dynamic IPv4` Adaptation through CloudFlare for your Domain-Rounter
+### 6.3. `Dynamic IPv4` Adaptation through CloudFlare for your Domain-Rounter
 
-#### 7.3.1. Purchase and Transfer your `Domain`
+#### 6.3.1. Purchase and Transfer your `Domain`
 Purchase `<your-domain>` through *Porkbun*, which includes these default properties:
 - Disabled `DNSSEC`
 - *WHOIS* Privacy  
@@ -881,7 +868,7 @@ Transfer `<your-domain>` from *Porkbun* to *CloudFlare*. The new *name servers* 
 - `holly.ns.cloudflare.com`
 - `margo.ns.cloudflare.com`
 
-#### 7.3.2. IPv4-Dynamic DNS Setup via `CloudFlare API`
+#### 6.3.2. IPv4-Dynamic DNS Setup via `CloudFlare API`
 Create an *API Token* at CloudFlare, where `<your-domain>` is included as a *specific zone*.  
 The required permission for this API token is `Zone:DNS:Edit`. 
 
@@ -910,7 +897,7 @@ Use such credentials to automate dynamic IPv4 updates at CloudFlare,
 for instance, through a Python script;  
 see [Cloudflare API – Update DNS Record](https://developers.cloudflare.com/api/resources/dns/subresources/records/methods/edit/).
 
-#### 7.3.3. `Security` Enhancements for your Domain
+#### 6.3.3. `Security` Enhancements for your Domain
 Restrict UFW Firewall to CloudFlare IP Ranges via
 ```bash
 sudo ufw enable
@@ -955,7 +942,7 @@ and the latest [CloudFlare IP ranges](https://www.cloudflare.com/ips-v4/).
 Ask CloudFlare the `polling frequency` for this purpose.  
 Introduce `certificates` and/or `WireGuard`.
 
-#### 7.3.4. `Connectivity` Test
+#### 6.3.4. `Connectivity` Test
 
 ```bash
 sudo systemctl status ssh
@@ -984,3 +971,28 @@ Test-NetConnection -ComputerName <your-domain> -Port <your-port>
 3. **HSTS**: 활성화
 4. **Security Level**: Medium 또는 High
 5. **Bot Fight Mode**: 활성화 -->
+
+## 7. RDP & SFTP Migration to WireGuard
+
+What <span style="color:cyan">*does not*</span> change at *CloudFlare*:  
++	`A Records` and `DNS-only` setting for your sub-domains accessing `RDP` & `SFTP`
++	`DDNS automation` script that periodically updates the public IPv4 of your router
+
+What <span style="color:yellow">*does change*</span> regarding *CloudFlare*:  
++	`<CloudFlare IP Ranges>` allowed at *UFW no longer necessary*
+
+What <span style="color:yellow">*does change*</span> at *your router*:
++	Port forwarding for `<your-rdp-port>` and `<your-sftp-port>` is
+*no longer necessary.*  
+It is safe to remove these two, which also does not affect local access.
++	Instead, add a port-forwarding rule that uses only
+the <span style="color:yellow">*UDP*</span> protocㅐl:  
+
+| Field			| Value										|  
+| ------------- | ----------------------------------------- |  
+| Rule Nmae		| `<your-rule-name>`						|  
+| External Port | `<inbound-port>`  						|  
+| Internal IP   | `<your-device-ip>`						|  
+| Internal Port | `<inbound-port>`  						|  
+| Protocol		| <span style="color:yellow">*UDP*</span>	|  
+| Status		| Enabled									|  

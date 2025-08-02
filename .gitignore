@@ -9,6 +9,8 @@ get_bybit_chart_dom.conf
 *.data
 *.csv
 *.rdp
+*.key
+*.pub
 _Anaconda Prompt_.lnk
 
 # ========================
