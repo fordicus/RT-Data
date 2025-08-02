@@ -586,7 +586,7 @@ Use the following configuration for SFTP access:
 | **Host**	 | `sftp://<your-subdomain>.duckdns.org` |
 | **Username** | `<your-username>`					 |
 | **Password** | `<your-password>`					 |
-| **Port**	 | `22`								  |
+| **Port**	 | `<your-sftp-port>`								  |
 
 Once connected, you can browse and transfer files between your local machine and the Ubuntu server over a secure SSH channel.
 
@@ -919,9 +919,12 @@ sudo ufw status
 + Complexity: Increases the number of UFW rules, making management more complicated.  
 
 #### 🟠 TODO: Automate UFW Whitelist Update
-Write a Python script to automate the updates above.  
-Additionally, include functionality to periodically remove outdated UFW rules,  
-while preserving a whitelist for the local network and the latest [CloudFlare IP ranges](https://www.cloudflare.com/ips-v4/).  
+Write a Python script to `automate` the updates above.  
+Additionally, include functionality to `periodically remove` outdated UFW rules,  
+while preserving a whitelist for the local network and the latest
+[CloudFlare IP ranges](https://www.cloudflare.com/ips-v4/).  
+Ask CloudFlare the `polling frequency` for this purpose.
+Introduce `certificates` and/or `WireGuard`.
 
 #### 7.3.4. `Connectivity` Test
 
