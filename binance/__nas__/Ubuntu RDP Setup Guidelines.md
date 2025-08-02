@@ -4,9 +4,9 @@
 <!-- ———————————————————————————————————————————————————————————————————————————————— -->
 
 ## TODO:
-*	Migration from `Filezilla` to `rsync & gsync`
 *	Introduce `WireGuard` so that ports are not exposed.
 *	From `http` to `https`
+*	Migration from `Filezilla` to `rsync & gsync`
 
 ## 💡Tips  
 
