@@ -5,30 +5,36 @@
 
 ## TODO:
 *	Introduce `WireGuard` so that ports are not exposed.
-*	From `http` to `https`
 *	Migration from `Filezilla` to `rsync & gsync`
+*	Migration From `http` to `https`
 
 ## 💡Tips  
 
 A. To check the Ubuntu system’s `internal IP` address, type at Terminal:
 ```bash
-ip a | grep inet
+hostname -I
 ```
 
-B. To check the router’s `Public IP` addresses, type at Terminal:
+B. To check the router’s `public IP` addresses, type at Terminal:
 ```bash
-curl -4 ifconfig.me
-curl -6 ifconfig.me
+curl 'https://api.ipify.org'
+curl 'https://api6.ipify.org'
 ```
 
-C. To list `active ports` of your Ubuntu server:
+C. Useful `connectivity` tests:
 ```bash
-sudo apt update && sudo apt install net-tools
+sudo systemctl status ssh
+
+# sudo apt update && sudo apt install net-tools
 sudo netstat -tlnp
-```
 
-D. To test the `external accessibility` of a port from another Windows system, type at PowerShell:
-```powershell
+nslookup <your-domain>
+ping <your-domain>
+
+sudo tail -f /var/log/ufw.log
+sudo tail -f /var/log/auth.log
+
+# PowerShell
 Test-NetConnection -ComputerName <your-domain> -Port <your-port>
 ```
 
@@ -852,10 +858,10 @@ Configure port forwarding in your router's management interface:
 
 Check your Ubuntu server's external IPv4 and IPv6 addresses:
 ```bash
-curl -4 ifconfig.me
-curl -6 ifconfig.me
+curl 'https://api.ipify.org'
+curl 'https://api6.ipify.org'
 ```
-From now on, the returned outputs will be called
+From now on, the returned outputs will be denoted by
 ```bash
 <public-ipv4-of-your-router>
 <public-ipv6-of-your-router>
@@ -864,14 +870,14 @@ From now on, the returned outputs will be called
 
 <!-- ———————————————————————————————————————————————————————————————————————————————— -->
 
-### 7.3. `Dynamic IPv4` Adaptation through CloudFlare for your Domain
+### 7.3. `Dynamic IPv4` Adaptation through CloudFlare for your Domain-Rounter
 
 #### 7.3.1. Purchase and Transfer your `Domain`
 Purchase `<your-domain>` through *Porkbun*, which includes these default properties:
 - Disabled `DNSSEC`
 - *WHOIS* Privacy  
 
-Transfer `<your-domain>` from *Porkbun* to *CloudFlare*. The new *name servers* are:
+Transfer `<your-domain>` from *Porkbun* to *CloudFlare*. The new *name servers* are such as:
 - `holly.ns.cloudflare.com`
 - `margo.ns.cloudflare.com`
 
@@ -880,12 +886,12 @@ Create an *API Token* at CloudFlare, where `<your-domain>` is included as a *spe
 The required permission for this API token is `Zone:DNS:Edit`. 
 
 Next, in the CloudFlare dashboard for `<your-domain>`, create an *A Record* as follows:
-```CloudFlareDashboard
+```bash
 DNS Tab ≫ Records ≫ Add a Record:
 - Type: A
-- Name: www
+- Name: www		# the subdomain could be rdp, sftp, or anything.
 - IPv4 address: <public-ipv4-of-your-router>
-- Ensure: Proxied & TTL Auto
+- Ensure: Proxied & TTL Auto	# DNS-only if not http or https
 ```
 
 Then, the `ID` of *A Record*—that you just created—can be polled via:
@@ -901,7 +907,8 @@ You now have all required credentials:
 3. `<cloudflare-dns-a-record-id>` — from the curl command above
 
 Use such credentials to automate dynamic IPv4 updates at CloudFlare,
-for instance, through a Python script.
+for instance, through a Python script;  
+see [Cloudflare API – Update DNS Record](https://developers.cloudflare.com/api/resources/dns/subresources/records/methods/edit/).
 
 #### 7.3.3. `Security` Enhancements for your Domain
 Restrict UFW Firewall to CloudFlare IP Ranges via
@@ -927,7 +934,7 @@ for ip in $(curl -s https://www.cloudflare.com/ips-v6); do
 	sudo ufw allow from $ip to any port <your-dashboard-port> proto tcp
 done
 
-# Public IP of Router
+# Public IP of Your Router: Connecting through DNS but within the Local Network
 sudo ufw allow from <your-public-ip> to any port <your-rdp-port>	   proto tcp
 sudo ufw allow from <your-public-ip> to any port <your-sftp-port>	   proto tcp
 sudo ufw allow from <your-public-ip> to any port <your-dashboard-port> proto tcp
@@ -938,27 +945,32 @@ sudo ufw status
 ⚠️ Pros and Cons  
 + Pros: Enhances security by "hiding" the web server behind Cloudflare.  
 + Cons: Complete dependency on Cloudflare services.  
-+ IP Changes: Requires updates if Cloudflare modifies its IP ranges.  
 + Complexity: Increases the number of UFW rules, making management more complicated.  
++ *IP Changes: Requires updates if Cloudflare modifies its IP ranges.*  
 
 #### 🟠 TODO: Automate UFW Whitelist Update
-Write a Python script to `automate` the updates above.  
-Additionally, include functionality to `periodically remove` outdated UFW rules,  
-while preserving a whitelist for the local network and the latest
-[CloudFlare IP ranges](https://www.cloudflare.com/ips-v4/).  
-Ask CloudFlare the `polling frequency` for this purpose.
+Write a Python script to `automate` the updates above. Additionally, include functionality  
+to `periodically remove` outdated UFW rules while preserving a whitelist for the local network  
+and the latest [CloudFlare IP ranges](https://www.cloudflare.com/ips-v4/). 
+Ask CloudFlare the `polling frequency` for this purpose.  
 Introduce `certificates` and/or `WireGuard`.
 
 #### 7.3.4. `Connectivity` Test
 
 ```bash
-# Check the Ports` Status at your Server
-sudo apt update && sudo apt install net-tools
+sudo systemctl status ssh
+
+# sudo apt update && sudo apt install net-tools
 sudo netstat -tlnp
 
-# Confirm the DNS Status
 nslookup <your-domain>
-dig <your-domain>
+ping <your-domain>
+
+sudo tail -f /var/log/ufw.log
+sudo tail -f /var/log/auth.log
+
+# PowerShell
+Test-NetConnection -ComputerName <your-domain> -Port <your-port>
 
 # Test on Web Browsers
 # http://localhost:<your-app-port>/<your-endpoint-name>
