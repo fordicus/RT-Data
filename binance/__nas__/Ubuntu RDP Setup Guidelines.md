@@ -549,20 +549,24 @@ sudo apt install openssh-server -y
 
 sudo systemctl start ssh
 sudo systemctl enable ssh
-sudo systemctl status ssh | grep Active
+sudo systemctl status ssh
 ```
 
-### 3.2 Check the Local IP Address (Optional)
-
-Use the following command to confirm the internal IP address of your Ubuntu server:
-
+Let `<your-ssh-port>` be listening for the inbound:
 ```bash
-hostname -I
+# sudo nano /etc/ssh/sshd_config
+
+Port <your-ssh-port>
+ListenAddress 0.0.0.0
+ListenAddress ::
+```
+Restart `ssh` and confirm the status:
+```bash
+sudo systemctl restart ssh
+sudo netstat -tlnp
 ```
 
-You should see an address like `192.168.x.x`.
-
-### 3.3 🛡️ Allow SFTP through UFW Firewall within the Local Network
+### 3.2 🛡️ Allow SFTP through UFW Firewall within the Local Network
 
 ```bash
 sudo ufw enable
@@ -574,7 +578,7 @@ sudo ufw status
 # It includes all IP addresses within this range in the local network.
 ```
 
-### 3.4 Install FileZilla Client on Windows
+### 3.3 Install FileZilla Client on Windows
 
 Download the FileZilla client:
 👉 [https://filezilla-project.org/download.php?type=client](https://filezilla-project.org/download.php?type=client)
@@ -903,11 +907,30 @@ for instance, through a Python script.
 Restrict UFW Firewall to CloudFlare IP Ranges via
 ```bash
 sudo ufw enable
+
+# Local Network
+sudo ufw allow from 192.168.1.0/24 to any port <your-rdp-port>		 proto tcp
+sudo ufw allow from 192.168.1.0/24 to any port <your-sftp-port>		 proto tcp
+sudo ufw allow from 192.168.1.0/24 to any port <your-dashboard-port> proto tcp
+
+# CloudFlare IPv4
 for ip in $(curl -s https://www.cloudflare.com/ips-v4); do
-    sudo ufw allow from $ip to any port <your-rdp-port> proto tcp
-	sudo ufw allow from $ip to any port <your-sftp-port> proto tcp
+	sudo ufw allow from $ip to any port <your-rdp-port>		  proto tcp
+	sudo ufw allow from $ip to any port <your-sftp-port>	  proto tcp
 	sudo ufw allow from $ip to any port <your-dashboard-port> proto tcp
 done
+
+# CloudFlare IPv6
+for ip in $(curl -s https://www.cloudflare.com/ips-v6); do
+	sudo ufw allow from $ip to any port <your-rdp-port>		  proto tcp
+	sudo ufw allow from $ip to any port <your-sftp-port>	  proto tcp
+	sudo ufw allow from $ip to any port <your-dashboard-port> proto tcp
+done
+
+# Public IP of Router
+sudo ufw allow from <your-public-ip> to any port <your-rdp-port>	   proto tcp
+sudo ufw allow from <your-public-ip> to any port <your-sftp-port>	   proto tcp
+sudo ufw allow from <your-public-ip> to any port <your-dashboard-port> proto tcp
 sudo ufw reload
 sudo ufw status
 ```
