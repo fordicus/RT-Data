@@ -1,6 +1,7 @@
 # ========================
 # 🚫 Private or Local Files
 # ========================
+
 # Historical downloader (sensitive scraping logic)
 get_bybit_chart_dom.py
 get_bybit_chart_dom.conf
@@ -13,23 +14,30 @@ get_bybit_chart_dom.conf
 *.pub
 _Anaconda Prompt_.lnk
 
+
 # ========================
 # 📂 Project-Specific Data & Output Folders
 # ========================
+
 data/
 datasets/
 downloads/
 outputs/
+
 __unshared__/
 __dev_log__/
-__archive__/
+
+__bom_2025-07-25_nas__/
 __dns__
 __rdp__/
-__bom_2025-07-25_nas__/
+
+byzantine/
+
 
 # ========================
 # 🛠️  Build Artifacts
 # ========================
+
 build/
 dist/
 sdist/
@@ -39,9 +47,11 @@ sdist/
 MANIFEST
 *.manifest
 
+
 # ========================
 # 🧪 Python Packaging Tools
 # ========================
+
 develop-eggs/
 eggs/
 .eggs/
@@ -53,31 +63,39 @@ share/python-wheels/
 .installed.cfg
 .Python
 
+
 # ========================
 # ⚙️  Python Bytecode & Caches
 # ========================
+
 *.py[cod]
 *$py.class
 __pycache__/
 
+
 # ========================
 # 🧪 Test Output & Logs
 # ========================
+
 TEST*.xml
 *.log
 pip-log.txt
 pip-delete-this-directory.txt
 
+
 # ========================
 # 💻 IDE / Editor Settings
 # ========================
+
 .vscode/
 .idea/
 .vs/
 
+
 # ========================
 # ⚙️ Virtual Environments
 # ========================
+
 env/
 venv/
 ENV/
@@ -86,24 +104,30 @@ venv.bak/
 .env
 .venv
 
+
 # ========================
 # 📦 Platform-Specific Files
 # ========================
+
 .DS_Store     # macOS Finder
 Thumbs.db     # Windows Explorer
 desktop.ini   # Windows Explorer
 
+
 # ========================
 # 📦 Binary / Executable Files
 # ========================
+
 *.exe
 *.app
 *.jar
 *.war
 
+
 # ========================
 # 🎥 Media Files (Large Binary)
 # ========================
+
 *.mp4
 *.avi
 *.flv
@@ -111,3 +135,4 @@ desktop.ini   # Windows Explorer
 *.wmv
 *.tiff
 *.mat
+
