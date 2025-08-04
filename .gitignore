@@ -10,8 +10,6 @@ get_bybit_chart_dom.conf
 *.data
 *.csv
 *.rdp
-*.key
-*.pub
 _Anaconda Prompt_.lnk
 
 
@@ -31,6 +29,24 @@ __dns__
 __rdp__/
 
 byzantine/
+
+
+# ========================
+# 🚫 WireGuard
+# ========================
+
+*.key
+*.pub
+
+
+# ========================
+# 🧪 Test Output & Logs
+# ========================
+
+*.log
+TEST*.xml
+pip-log.txt
+pip-delete-this-directory.txt
 
 
 # ========================
@@ -70,16 +86,6 @@ share/python-wheels/
 *.py[cod]
 *$py.class
 __pycache__/
-
-
-# ========================
-# 🧪 Test Output & Logs
-# ========================
-
-TEST*.xml
-*.log
-pip-log.txt
-pip-delete-this-directory.txt
 
 
 # ========================
