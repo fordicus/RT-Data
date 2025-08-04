@@ -37,7 +37,7 @@ from util import (
 async def gate_streaming_by_latency(
 	event_latency_valid:  asyncio.Event,
 	event_stream_enable:  asyncio.Event,
-	mean_latency_dict:  dict[str, int],
+	mean_latency_dict:	  dict[str, int],
 	latency_signal_sleep: float,
 	symbols:			  list[str],
 	logger:				  logging.Logger,
@@ -131,9 +131,9 @@ async def estimate_latency(
 	symbols:				list[str],
 	logger:					logging.Logger,
 	base_interval_ms:		int   = 100,
-	ws_timeout_multiplier:	float = 5.0,
-	ws_timeout_default_sec:	float = 1.0,
-	ws_timeout_min_sec:		float = 0.5,
+	ws_timeout_multiplier:	float =	  8.0,
+	ws_timeout_default_sec:	float =	  2.0,
+	ws_timeout_min_sec:		float =	  1.0,
 ):
 
 	"""—————————————————————————————————————————————————————————————————————————
@@ -162,17 +162,37 @@ async def estimate_latency(
 
 	async def calculate_backoff_and_sleep(
 		retry_count: int,
-		symbol: str = "UNKNOWN"
-	) -> int:
+		symbol: str = "UNKNOWN",
+		last_success_time: Optional[float] = None,
+		reset_retry_count_after_sec: float = 3600,	# an hour
+	) -> tuple[int, float]:
 		
+		current_time = time.time()
+		
+		if retry_count > reset_cycle_after:
+
+			retry_count = reset_backoff_level
+
+		elif (
+			last_success_time and 
+			(
+				current_time - last_success_time
+			) > reset_retry_count_after_sec
+		):
+
+			logger.info(
+				f"[{my_name()}][{symbol.upper()}] "
+				f"Resetting retry_count after {reset_retry_count_after_sec} sec; "
+				f"previous retry_count={retry_count}."
+			)
+
+			retry_count = 0
+
 		backoff = min(
 			max_backoff,
 			base_backoff ** retry_count
 		) + random.uniform(0, 1)
-		
-		if retry_count > reset_cycle_after:
-			retry_count = reset_backoff_level
-		
+
 		logger.warning(
 			f"[{my_name()}][{symbol.upper()}] "
 			f"Retrying in {backoff:.1f} seconds..."
@@ -180,7 +200,7 @@ async def estimate_latency(
 		
 		await asyncio.sleep(backoff)
 		
-		return retry_count
+		return retry_count, last_success_time
 
 	#———————————————————————————————————————————————————————————————————————————
 
@@ -190,6 +210,7 @@ async def estimate_latency(
 	)
 
 	ws_retry_cnt = 0
+	last_success_time = time.time()
 
 	ws_timeout_sec = ws_timeout_default_sec
 	last_recv_time_ns = None
@@ -226,7 +247,31 @@ async def estimate_latency(
 			) as ws:
 
 				ip, port = ws.remote_address or ("?", "?")
-				loc = await geo(ip) if ip != "?" else "?"
+
+				try:
+
+					loc = await geo(ip) if ip != "?" else "?"
+
+				except RuntimeError as e:
+
+					if "cannot reuse already awaited coroutine" in str(e):
+
+						loc = "UNKNOWN"
+						logger.warning(
+							f"[{my_name()}] Coroutine reuse error, "
+							f"using fallback location"
+						)
+
+					else:
+
+						raise
+
+				except Exception as e:
+
+					loc = "UNKNOWN"
+					logger.warning(
+						f"[{my_name()}] Failed to get location for {ip}: {e}"
+					)
 
 				websocket_peer["value"] = (
 					f"{ip}:{port}  ({loc})"
@@ -243,6 +288,7 @@ async def estimate_latency(
 				)
 
 				ws_retry_cnt = 0
+				last_success_time = time.time()
 
 				while True:
 
@@ -394,8 +440,8 @@ async def estimate_latency(
 							f"\tReconnecting..."
 						)
 
-						ws_retry_cnt = await calculate_backoff_and_sleep(
-							ws_retry_cnt, cur_symbol
+						ws_retry_cnt, last_success_time = await calculate_backoff_and_sleep(
+							ws_retry_cnt, cur_symbol, last_success_time,
 						)
 
 						break
@@ -422,8 +468,8 @@ async def estimate_latency(
 				latency_dict[symbol].clear()
 				depth_update_id_dict[symbol] = 0
 
-			ws_retry_cnt = await calculate_backoff_and_sleep(
-				ws_retry_cnt, cur_symbol
+			ws_retry_cnt, last_success_time = await calculate_backoff_and_sleep(
+				ws_retry_cnt, cur_symbol, last_success_time,
 			)
 
 		finally:

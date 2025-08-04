@@ -20,9 +20,7 @@ _Anaconda Prompt_.lnk
 # ========================
 
 data/
-datasets/
-downloads/
-outputs/
+temp/
 
 __unshared__/
 __dev_log__/
