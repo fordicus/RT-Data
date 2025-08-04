@@ -1,4 +1,4 @@
-# update_dynamic_ipv4_at_cloudflare.py
+# cloudflare_ddns.py
 
 r"""————————————————————————————————————————————————————————————————————————————
 Features:
@@ -14,14 +14,16 @@ import os, time, ipaddress, json
 import requests			 					# requests==2.32.4
 from dotenv import load_dotenv				# python-dotenv==1.1.1
 from datetime import datetime, timezone
+from pathlib import Path
 
-load_dotenv()
+BASE_DIR = Path(__file__).resolve().parent
+
+load_dotenv(BASE_DIR / '.env')
 
 CloudFlareApiToken	= os.getenv("CloudFlareApiToken")
 DnsZoneID			= os.getenv("DnsZoneID")
 DnsRecordIdWWW		= os.getenv("DnsRecordIdWWW")
-DnsRecordIdRdp		= os.getenv("DnsRecordIdRdp")
-DnsRecordIdSftp		= os.getenv("DnsRecordIdSftp")
+DnsRecordIdVpn		= os.getenv("DnsRecordIdVpn")
 RouterPublicIp		= os.getenv("RouterPublicIp")
 SleepDuration		= float(os.getenv("SleepDuration"))
 
@@ -33,8 +35,7 @@ def validate_env_variables():
 		"CloudFlareApiToken",
 		"DnsZoneID",
 		"DnsRecordIdWWW",
-		"DnsRecordIdRdp",
-		"DnsRecordIdSftp",
+		"DnsRecordIdVpn",
 		"RouterPublicIp",
 		"SleepDuration",
 	]
@@ -258,7 +259,10 @@ def update_dns_ip_all(
 			new_value = router_cur_public_ip,
 		)
 
-		load_dotenv(override=True)
+		load_dotenv(
+			BASE_DIR / '.env',
+			override=True
+		)
 		RouterPublicIp = os.getenv("RouterPublicIp")
 
 		print(
@@ -278,22 +282,9 @@ def update_dns_ip_all(
 			json.dumps(
 				update_dns_record_ip(
 					api_token = CloudFlareApiToken,
-					name	  = "rdp",
+					name	  = "vpn",
 					zone_id	  = DnsZoneID,
-					record_id = DnsRecordIdRdp,
-					ip		  = router_cur_public_ip,
-					proxied	  = False
-				),
-				indent = 4
-			)
-		)
-		print(
-			json.dumps(
-				update_dns_record_ip(
-					api_token = CloudFlareApiToken,
-					name	  = "sftp",
-					zone_id   = DnsZoneID,
-					record_id = DnsRecordIdSftp,
+					record_id = DnsRecordIdVpn,
 					ip		  = router_cur_public_ip,
 					proxied	  = False
 				),
@@ -305,6 +296,11 @@ def update_dns_ip_all(
 #———————————————————————————————————————————————————————————————————————————————
 
 if __name__ == "__main__":
+
+	print(
+		f"[{datetime.now(timezone.utc).isoformat()}] "
+		f"python cloudflare_ddns.py"
+	)
 
 	try:
 

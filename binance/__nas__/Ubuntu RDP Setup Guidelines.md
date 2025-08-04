@@ -3,25 +3,29 @@
 
 <!-- ———————————————————————————————————————————————————————————————————————————————— -->
 
-## TODO:
-*	Introduce `WireGuard` so that ports are not exposed.
-*	Migration from `Filezilla` to `rsync & gsync`
+## 🟠 TODO:
 *	Migration From `http` to `https`
+*	Launch `cloudflare_ddns.py` at system reboot
 
 ## 💡Tips  
 
-A. To check the Ubuntu system’s `internal IP` address, type at Terminal:
+A. To restart `dnsmasq`, type at Terminal:
+```bash
+sudo systemctl restart dnsmasq
+```
+
+B. To check the Ubuntu system’s `internal IP` address, type at Terminal:
 ```bash
 hostname -I
 ```
 
-B. To check the router’s `public IP` addresses, type at Terminal:
+C. To check the router’s `public IP` addresses, type at Terminal:
 ```bash
 curl 'https://api.ipify.org'
 curl 'https://api6.ipify.org'
 ```
 
-C. Useful `connectivity` tests:
+D. Useful `connectivity` tests:
 ```bash
 sudo systemctl status ssh
 
@@ -33,16 +37,17 @@ ping <your-domain>
 
 sudo tail -f /var/log/ufw.log
 sudo tail -f /var/log/auth.log
+sudo tail -f /var/log/xrdp.log
 
 # PowerShell
 Test-NetConnection -ComputerName <your-domain> -Port <your-port>
 ```
 
+X. Monitor Status of Ports Externally: [`UptimeRobot`](https://uptimerobot.com/)
+
 <!-- ———————————————————————————————————————————————————————————————————————————————— -->
 
 ## 📝Table of Contents  
-
-***For RDP (Remote Desktop Protocol)***  
 
 [***1. System Stability and Maintenance***](#1-system-stability-and-maintenance)  
 &nbsp;&nbsp;&nbsp;&nbsp;[1.1 ☕ Completely `Prevent Sleep`](#11-☕-completely-prevent-sleep)  
@@ -59,7 +64,6 @@ Test-NetConnection -ComputerName <your-domain> -Port <your-port>
 &nbsp;&nbsp;&nbsp;&nbsp;[2.6 📶 Router `Port Forwarding`](#26-📶-router-port-forwarding)  
 &nbsp;&nbsp;&nbsp;&nbsp;[2.7 📡 `DNS + Port` Check](#27-📡-dns--port-check)  
 &nbsp;&nbsp;&nbsp;&nbsp;[2.8 📁 Configure `.rdp` Files for `Intranet` and `External Access`](#28-📁-configure-rdp-files-for-intranet-and-external-access)  
-&nbsp;&nbsp;&nbsp;&nbsp;[2.9 🔁 `Reboot` Checklist](#29-🔁-reboot-checklist)  
 
 [***3. Remote File System Access Using `FileZilla` (SFTP)***](#3-remote-file-system-access-using-filezilla-sftp)  
 &nbsp;&nbsp;&nbsp;&nbsp;[3.1 Install and Start the `SSH` Server on Ubuntu](#31-install-and-start-the-ssh-server-on-ubuntu)  
@@ -71,25 +75,26 @@ Test-NetConnection -ComputerName <your-domain> -Port <your-port>
 
 &nbsp;&nbsp;&nbsp;&nbsp;[4.1 🧬 Install `Anaconda` and `PyTorch` Environment](#41-🧬-install-anaconda-and-pytorch-environment)  
 
+[***5. Dashboard Service for your App***](#5-dashboard-service-for-your-app)  
+&nbsp;&nbsp;&nbsp;&nbsp;[5.1 Add `HTMLResponse` & `WebSocket` Endpoints via `FastAPI @Python`](#51-add-htmlresponse--websocket-endpoints-via-fastapi-python)  
+&nbsp;&nbsp;&nbsp;&nbsp;[5.2 `NginX` Configuration at your Ubuntu Server](#52-nginx-configuration-at-your-ubuntu-server)  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[5.2.1 Install and Configure `NginX`](#521-install-and-configure-nginx)  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[5.2.2 Allow Dashboard Traffic through UFW `Firewall` within the Local Network](#522-allow-dashboard-traffic-through-ufw-firewall-within-the-local-network)  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[5.2.3 `Port Forwarding` at your Router](#523-port-forwarding-at-your-router)  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[5.2.4 Check `External IP` Addresses](#524-check-external-ip-addresses)  
+&nbsp;&nbsp;&nbsp;&nbsp;[5.3 `Dynamic IPv4` Adaptation through CloudFlare for your Domain-Rounter](#53-dynamic-ipv4-adaptation-through-cloudflare-for-your-domain-rounter)  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[5.3.1 Purchase and Transfer your `Domain`](#531-purchase-and-transfer-your-domain)  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[5.3.2 IPv4-Dynamic DNS Setup via `CloudFlare API`](#532-ipv4-dynamic-dns-setup-via-cloudflare-api)  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[5.3.3 `Security` Enhancements for your Domain](#533-security-enhancements-for-your-domain)  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[5.3.4 `Connectivity` Test](#534-connectivity-test)  
 
-[***5. Monitor Status of Port Externally***](#5-monitor-status-of-port-externally)  
-&nbsp;&nbsp;&nbsp;&nbsp;[🟢 `UptimeRobot`](https://uptimerobot.com/)  
+[***6. Tunneling RDP and SFTP through WireGuard***](#6-tunneling-rdp-and-sftp-through-wireguard)  
+&nbsp;&nbsp;&nbsp;&nbsp;[6.1 A few Changes for the `CloudFlare and Router Settings`](#61-a-few-changes-for-the-cloudflare-and-router-settings)  
+&nbsp;&nbsp;&nbsp;&nbsp;[6.2 `WireGuard` Setup](#62-wireguard-setup)  
 
-[***6. Dashboard Service for your App***](#6-dashboard-service-for-your-app)  
-&nbsp;&nbsp;&nbsp;&nbsp;[6.1. Add `HTMLResponse` & `WebSocket` Endpoints via `FastAPI @Python`](#61-add-htmlresponse--websocket-endpoints-via-fastapi-python)  
-&nbsp;&nbsp;&nbsp;&nbsp;[6.2. `NginX` Configuration at your Ubuntu Server](#62-nginx-configuration-at-your-ubuntu-server)  
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[6.2.1. Install and Configure `NginX`](#621-install-and-configure-nginx)  
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[6.2.2. Allow Dashboard Traffic through UFW `Firewall` within the Local Network](#622-allow-dashboard-traffic-through-ufw-firewall-within-the-local-network)  
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[6.2.3. `Port Forwarding` at your Router](#623-port-forwarding-at-your-router)  
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[6.2.4. Check `External IP` Addresses](#624-check-external-ip-addresses)  
-&nbsp;&nbsp;&nbsp;&nbsp;[6.3. `Dynamic IPv4` Adaptation through CloudFlare for your Domain-Rounter](#63-dynamic-ipv4-adaptation-through-cloudflare-for-your-domain-rounter)  
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[6.3.1. Purchase and Transfer your `Domain`](#631-purchase-and-transfer-your-domain)  
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[6.3.2. IPv4-Dynamic DNS Setup via `CloudFlare API`](#632-ipv4-dynamic-dns-setup-via-cloudflare-api)  
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[6.3.3. `Security` Enhancements for your Domain](#633-security-enhancements-for-your-domain)  
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[🟠 TODO: Automate UFW Whitelist Update](#🟠-todo-automate-ufw-whitelist-update)  
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;[6.3.4. `Connectivity` Test](#634-connectivity-test)  
+[***Y. Reboot Checklist***](#y-reboot-checklist)  
 
-[***7. RDP & SFTP Migration to WireGuard***](#7-rdp--sftp-migration-to-wireguard)  
+[***Z. Security Considerations***](#z-security-considerations)  
 
 <!-- ———————————————————————————————————————————————————————————————————————————————— -->
 
@@ -456,7 +461,11 @@ This address is used for local LAN `.rdp` connections.
 
 ```bash
 sudo ufw enable
-sudo ufw allow from 192.168.1.0/24 to any port <your-rdp-port> proto tcp
+sudo ufw allow \
+	from 192.168.1.0/24 \
+	to any port <your-rdp-port> \
+	proto tcp \
+	comment 'Local Network → RDP'
 sudo ufw reload
 sudo ufw status
 
@@ -544,74 +553,6 @@ Open using:
 * Windows: `mstsc.exe`
 * Linux: remmina / freerdp
 
-
-### 2.9 🔁 `Reboot` Checklist
-
-After reboot, we want to ensure all services are active and the laptop will not be suspended:
-```bash
-nano get_status.sh
-```
-```bash
-# get_status.sh
-
-systemctl status xrdp | grep Active
-systemctl status auto-cpufreq | grep Active
-systemctl status nvidia-persist.service | grep Active
-systemctl status chrony | grep Active
-xfconf-query -c xfce4-power-manager -l -v
-grep -E 'AllowEmpty|ConnectedMonitor|Virtual screen size|DFP-0: connected' /var/log/Xorg.0.log | grep -v 'WW'
-xset q | grep -E 'timeout|DPMS|prefer blanking|cycle'
-systemctl status sleep.target suspend.target hibernate.target hybrid-sleep.target | grep Active
-```
-```bash
-chmod +x get_status.sh
-```
-
-The expected output after running `./get_status.sh` reads:
-```bash
-	 Active: active (running) since Tue 2025-07-08 18:38:13 CEST; 6min ago
-	 Active: active (running) since Tue 2025-07-08 18:38:11 CEST; 6min ago
-	 Active: active (exited) since Tue 2025-07-08 18:38:18 CEST; 6min ago
-	 Active: active (running) since Tue 2025-07-08 18:38:12 CEST; 6min ago
-/xfce4-power-manager/blank-on-ac						0
-/xfce4-power-manager/blank-on-battery				   0
-/xfce4-power-manager/brightness-inactivity-on-ac		0
-/xfce4-power-manager/brightness-level-on-battery		1
-/xfce4-power-manager/brightness-on-battery			  9
-/xfce4-power-manager/brightness-switch				  0
-/xfce4-power-manager/brightness-switch-restore-on-exit  1
-/xfce4-power-manager/dpms-on-battery-off				0
-/xfce4-power-manager/dpms-on-battery-sleep			  0
-/xfce4-power-manager/monitor-power-off-on-ac			false
-/xfce4-power-manager/power-button-action				3
-/xfce4-power-manager/show-tray-icon					 false
-/xfce4-power-manager/sleep-display-ac				   0
-/xfce4-power-manager/sleep-on-ac						0
-[	 6.786] (**) NVIDIA(0): Option "AllowEmptyInitialConfiguration" "true"
-[	 6.786] (**) NVIDIA(0): Option "ConnectedMonitor" "DFP-0"
-[	 6.786] (**) NVIDIA(0): ConnectedMonitor string: "DFP-0"
-[	 6.863] (**) NVIDIA(0): Using ConnectedMonitor string "DFP-0".
-[	 6.870] (--) NVIDIA(GPU-0): DFP-0: connected
-[	 6.919] (II) NVIDIA(0): Virtual screen size determined to be 1024 x 768
-[	 7.693] (--) NVIDIA(GPU-0): DFP-0: connected
-[	 7.714] (--) NVIDIA(GPU-0): DFP-0: connected
-[	 7.717] (--) NVIDIA(GPU-0): DFP-0: connected
-[	 7.745] (--) NVIDIA(GPU-0): DFP-0: connected
-[	 8.553] (--) NVIDIA(GPU-0): DFP-0: connected
-[	 8.870] (--) NVIDIA(GPU-0): DFP-0: connected
-  prefer blanking:  no	allow exposures:  yes
-  timeout:  0	cycle:  600
-DPMS (Display Power Management Signaling):
-  Server does not have the DPMS Extension
-	 Active: inactive (dead)
-	 Active: inactive (dead)
-	 Active: inactive (dead)
-	 Active: inactive (dead)
-```
-
-✅ If all succeed, no additional manual action is needed after reboot.
-
-
 <!-- ———————————————————————————————————————————————————————————————————————————————— -->
 
 ## 3. Remote File System Access Using `FileZilla` (SFTP)
@@ -644,7 +585,11 @@ sudo netstat -tlnp
 
 ```bash
 sudo ufw enable
-sudo ufw allow from 192.168.1.0/24 to any port <your-sftp-port> proto tcp
+sudo ufw allow \
+	from 192.168.1.0/24 \
+	to any port <your-ssh-port> \
+	proto tcp \
+	comment 'Local Network → SFTP'
 sudo ufw reload
 sudo ufw status
 
@@ -669,12 +614,12 @@ Download the FileZilla client:
 
 Use the following configuration for SFTP access:
 
-| Setting	  | Value								 |
-| ------------ | ------------------------------------- |
-| **Host**	 | `sftp://<your-subdomain>.duckdns.org` |
-| **Username** | `<your-username>`					 |
-| **Password** | `<your-password>`					 |
-| **Port**	 | `<your-sftp-port>`								  |
+| Setting		| Value									|
+| ------------- | ------------------------------------- |
+| **Host**		| `sftp://<your-subdomain>.duckdns.org`	|
+| **Username**	| `<your-username>`						|
+| **Password**	| `<your-password>`						|
+| **Port**		| `<your-ssh-port>`						|		  |
 
 Once connected, you can browse and transfer files between your local machine and the Ubuntu server over a secure SSH channel.
 
@@ -706,19 +651,7 @@ conda install pytorch torchvision torchaudio pytorch-cuda -c pytorch -c nvidia
 
 <!-- ———————————————————————————————————————————————————————————————————————————————— -->
 
-## 5. Monitor Status of Port Externally
-
-**A.** In [`UptimeRobot`](https://uptimerobot.com/), you can set up a monitor for your ports being forwarded so that you can check its status and uptime wherever you are.
-
-**B.** Temporarily enabling `Exposed Host (DMZ)` in your router can be useful for troubleshooting RDP connectivity issues from outside your network. This is helpful when you want to quickly verify if your RDP server is reachable from the internet, or to rule out port forwarding misconfigurations.
-
-> ⚠️ **Warning:**  
-> DMZ exposes your entire device to the internet, bypassing most router-level protections. This significantly increases the risk of hacking, malware, and unauthorized access. **Always disable DMZ immediately after testing.** Never leave it enabled longer than necessary.
-
-
-<!-- ———————————————————————————————————————————————————————————————————————————————— -->
-
-## 6. Dashboard Service for your App
+## 5. Dashboard Service for your App
 
 **Access Examples:**
 - `http://localhost:8000/dashboard` - development computer
@@ -730,7 +663,7 @@ conda install pytorch torchvision torchaudio pytorch-cuda -c pytorch -c nvidia
 - Port 80: Inbound HTTP traffic
 - Port 443: Inbound HTTPS traffic
 
-### 6.1. Add `HTMLResponse` & `WebSocket` Endpoints via `FastAPI @Python`
+### 5.1 Add `HTMLResponse` & `WebSocket` Endpoints via `FastAPI @Python`
 First, ensure your FastAPI application has the necessary endpoints for serving the dashboard:
 ```python
 	# Create FastAPI app
@@ -752,9 +685,9 @@ First, ensure your FastAPI application has the necessary endpoints for serving t
 	)
 ```
 
-### 6.2. `NginX` Configuration at your Ubuntu Server
+### 5.2 `NginX` Configuration at your Ubuntu Server
 
-#### 6.2.1. Install and Configure `NginX`
+#### 5.2.1 Install and Configure `NginX`
 
 Execute the following commands on your Ubuntu server:
 
@@ -811,10 +744,14 @@ sudo systemctl reload nginx
 
 
 
-#### 6.2.2. Allow Dashboard Traffic through UFW `Firewall` within the Local Network
+#### 5.2.2 Allow Dashboard Traffic through UFW `Firewall` within the Local Network
 ```bash
 sudo ufw enable
-sudo ufw allow from 192.168.1.0/24 to any port <your-dashboard-port> proto tcp
+sudo ufw allow \
+	from 192.168.1.0/24 \
+	to any port <your-dashboard-port> \
+	proto tcp \
+	comment 'Local Network → Dashboard'
 sudo ufw reload
 sudo ufw status
 
@@ -822,7 +759,7 @@ sudo ufw status
 # It includes all IP addresses within this range in the local network.
 ```
 
-#### 6.2.3. `Port Forwarding` at your Router
+#### 5.2.3 `Port Forwarding` at your Router
 
 The device IP assigned by your router can be checked on the Ubuntu home server using:
 
@@ -841,7 +778,7 @@ Configure port forwarding in your router's management interface:
 | Protocol		| TCP						|
 | Status		| Enabled					|
 
-#### 6.2.4. Check `External IP` Addresses
+#### 5.2.4 Check `External IP` Addresses
 
 Check your Ubuntu server's external IPv4 and IPv6 addresses:
 ```bash
@@ -854,12 +791,11 @@ From now on, the returned outputs will be denoted by
 <public-ipv6-of-your-router>
 ```
 
-
 <!-- ———————————————————————————————————————————————————————————————————————————————— -->
 
-### 6.3. `Dynamic IPv4` Adaptation through CloudFlare for your Domain-Rounter
+### 5.3 `Dynamic IPv4` Adaptation through CloudFlare for your Domain-Rounter
 
-#### 6.3.1. Purchase and Transfer your `Domain`
+#### 5.3.1 Purchase and Transfer your `Domain`
 Purchase `<your-domain>` through *Porkbun*, which includes these default properties:
 - Disabled `DNSSEC`
 - *WHOIS* Privacy  
@@ -868,7 +804,7 @@ Transfer `<your-domain>` from *Porkbun* to *CloudFlare*. The new *name servers* 
 - `holly.ns.cloudflare.com`
 - `margo.ns.cloudflare.com`
 
-#### 6.3.2. IPv4-Dynamic DNS Setup via `CloudFlare API`
+#### 5.3.2 IPv4-Dynamic DNS Setup via `CloudFlare API`
 Create an *API Token* at CloudFlare, where `<your-domain>` is included as a *specific zone*.  
 The required permission for this API token is `Zone:DNS:Edit`. 
 
@@ -897,34 +833,65 @@ Use such credentials to automate dynamic IPv4 updates at CloudFlare,
 for instance, through a Python script;  
 see [Cloudflare API – Update DNS Record](https://developers.cloudflare.com/api/resources/dns/subresources/records/methods/edit/).
 
-#### 6.3.3. `Security` Enhancements for your Domain
+#### 5.3.3 `Security` Enhancements for your Domain
 Restrict UFW Firewall to CloudFlare IP Ranges via
 ```bash
 sudo ufw enable
 
 # Local Network
-sudo ufw allow from 192.168.1.0/24 to any port <your-rdp-port>		 proto tcp
-sudo ufw allow from 192.168.1.0/24 to any port <your-sftp-port>		 proto tcp
-sudo ufw allow from 192.168.1.0/24 to any port <your-dashboard-port> proto tcp
+sudo ufw allow \
+	from 192.168.1.0/24 \
+	to any port <your-rdp-port> \
+	proto tcp \
+	comment 'Local Network → RDP'
+sudo ufw allow \
+	from 192.168.1.0/24 \
+	to any port <your-ssh-port> \
+	proto tcp \
+	comment 'Local Network → SFTP'
+sudo ufw allow \
+	from 192.168.1.0/24 \
+	to any port <your-dashboard-port> \
+	proto tcp \
+	comment 'Local Network → Dashboard'
 
 # CloudFlare IPv4
 for ip in $(curl -s https://www.cloudflare.com/ips-v4); do
-	sudo ufw allow from $ip to any port <your-rdp-port>		  proto tcp
-	sudo ufw allow from $ip to any port <your-sftp-port>	  proto tcp
-	sudo ufw allow from $ip to any port <your-dashboard-port> proto tcp
+	sudo ufw allow \
+		from $ip \
+		to any port <your-rdp-port> \
+		proto tcp \
+		comment 'CloudFlare'
+	sudo ufw allow \
+		from $ip \
+		to any port <your-ssh-port> \
+		proto tcp \
+		comment 'CloudFlare'
+	sudo ufw allow \
+		from $ip \
+		to any port <your-dashboard-port> \
+		proto tcp \
+		comment 'CloudFlare'
 done
 
-# CloudFlare IPv6
-for ip in $(curl -s https://www.cloudflare.com/ips-v6); do
-	sudo ufw allow from $ip to any port <your-rdp-port>		  proto tcp
-	sudo ufw allow from $ip to any port <your-sftp-port>	  proto tcp
-	sudo ufw allow from $ip to any port <your-dashboard-port> proto tcp
-done
-
-# Public IP of Your Router: Connecting through DNS but within the Local Network
-sudo ufw allow from <your-public-ip> to any port <your-rdp-port>	   proto tcp
-sudo ufw allow from <your-public-ip> to any port <your-sftp-port>	   proto tcp
-sudo ufw allow from <your-public-ip> to any port <your-dashboard-port> proto tcp
+# Public IP of Your Router:
+# 	Connecting through DNS but
+#	within the Local Network
+sudo ufw allow \
+	from <your-public-ip> \
+	to any port <your-rdp-port> \
+	proto tcp \
+	comment 'CloudFlare'
+sudo ufw allow \
+	from <your-public-ip> \
+	to any port <your-ssh-port> \
+	proto tcp \
+	comment 'CloudFlare'
+sudo ufw allow \
+	from <your-public-ip> \
+	to any port <your-dashboard-port> \
+	proto tcp \
+	comment 'CloudFlare'
 sudo ufw reload
 sudo ufw status
 ```
@@ -935,14 +902,7 @@ sudo ufw status
 + Complexity: Increases the number of UFW rules, making management more complicated.  
 + *IP Changes: Requires updates if Cloudflare modifies its IP ranges.*  
 
-#### 🟠 TODO: Automate UFW Whitelist Update
-Write a Python script to `automate` the updates above. Additionally, include functionality  
-to `periodically remove` outdated UFW rules while preserving a whitelist for the local network  
-and the latest [CloudFlare IP ranges](https://www.cloudflare.com/ips-v4/). 
-Ask CloudFlare the `polling frequency` for this purpose.  
-Introduce `certificates` and/or `WireGuard`.
-
-#### 6.3.4. `Connectivity` Test
+#### 5.3.4 `Connectivity` Test
 
 ```bash
 sudo systemctl status ssh
@@ -972,27 +932,397 @@ Test-NetConnection -ComputerName <your-domain> -Port <your-port>
 4. **Security Level**: Medium 또는 High
 5. **Bot Fight Mode**: 활성화 -->
 
-## 7. RDP & SFTP Migration to WireGuard
+## 6. Tunneling RDP and SFTP through WireGuard
 
-What <span style="color:cyan">*does not*</span> change at *CloudFlare*:  
-+	`A Records` and `DNS-only` setting for your sub-domains accessing `RDP` & `SFTP`
-+	`DDNS automation` script that periodically updates the public IPv4 of your router
+*WireGuard tunneling* allows you to avoid exposing the ports of your network system, unlike in the previous sections, thereby enhancing the security of your network. In this section, we assume that all steps from the previous sections have been completed, and that RDP and SFTP are already accessible through the exposed ports.
 
-What <span style="color:yellow">*does change*</span> regarding *CloudFlare*:  
-+	`<CloudFlare IP Ranges>` allowed at *UFW no longer necessary*
+### 6.1 A few Changes for the `CloudFlare and Router Settings`
 
-What <span style="color:yellow">*does change*</span> at *your router*:
-+	Port forwarding for `<your-rdp-port>` and `<your-sftp-port>` is
-*no longer necessary.*  
-It is safe to remove these two, which also does not affect local access.
-+	Instead, add a port-forwarding rule that uses only
-the <span style="color:yellow">*UDP*</span> protocㅐl:  
+What changes regarding *CloudFlare*:  
++	`<CloudFlare IP Ranges>` allowed at *UFW are no longer necessary*
+for `RDP` and `SFTP`.
++	Separate *A Records* for `RDP` and `SFTP` are unified to `VPN`,
+while remaining as *DNS-only*.
++	*DDNS automation* script periodically updates
+the public IPv4 of your router to *CloudFlare*  
+only for the subdomain designated to `VPN`.
+
+What changes at *your router*:  
++	*Eliminate* port forwarding of `<your-rdp-port>` and `<your-ssh-port>`,  
+which also does not affect their local access. However, `<your-dashboard-port>`  
+will still have the port forwarding, since this port is 
+<span style="color:cyan">*proxied*</span> via *CloudFlare*.
++	Now, you have to add a port-forwarding rule that uses 
+the <span style="color:yellow">*UDP*</span> protocol for *WireGuard:*  
 
 | Field			| Value										|  
 | ------------- | ----------------------------------------- |  
 | Rule Nmae		| `<your-rule-name>`						|  
-| External Port | `<inbound-port>`  						|  
+| External Port | `<your-udp-port>`  						|  
 | Internal IP   | `<your-device-ip>`						|  
-| Internal Port | `<inbound-port>`  						|  
+| Internal Port | `<your-udp-port>`  						|  
 | Protocol		| <span style="color:yellow">*UDP*</span>	|  
 | Status		| Enabled									|  
+
+Then, everything has to be done for your router and *CloudFlare*
+has been completed.
+
+### 6.2. `WireGuard` Setup
+
+***Install*** *Wireguard* and get the `public key`:
+```bash
+sudo apt update && sudo apt install -y wireguard
+
+sudo -i								# privileged session starts
+mkdir -p /etc/wireguard
+chmod 700 /etc/wireguard			# restrict dir access to owner only
+cd /etc/wireguard
+umask 077							# ensure new files are owner-readable only
+exit								# privileged session ends
+sudo cat /etc/wireguard/server.pub	# public key to access the server
+```
+***Configure*** *WireGuard* `interface` at the server:
+```bash
+# sudo nano /etc/wireguard/wg0.conf
+
+[Interface]
+Address	   = 10.10.0.1/24
+ListenPort = <your-udp-port>
+PrivateKey = </etc/wireguard/server.key>
+SaveConfig = false	# only can be manually edited
+```
+
+***Configure*** `w0` service at the server:
+```bash
+# sudo systemctl edit wg-quick@wg0
+
+[Unit]
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Restart=on-failure
+RestartSec=5
+```
+
+***Activate*** *WireGuard* interface `wg0`:
+```bash
+sudo systemctl enable wg-quick@wg0
+sudo systemctl start wg-quick@wg0
+
+ip addr show wg0
+systemctl status wg-quick@wg0 --no-pager
+sudo wg
+```
+
+***Tip.*** The commands below help when WireGuard behaves erratically.
+```bash
+# sudo systemctl stop wg-quick@wg0
+# sudo systemctl disable wg-quick@wg0
+# sudo systemctl reset-failed wg-quick@wg0
+# ip link show | grep wg
+# sudo wg show
+```
+
+***Configure*** UFW `firewall` rules:
+```bash
+sudo ufw allow \
+	<your-udp-port>/udp \
+	comment 'WireGuard'
+sudo ufw allow \
+	in on wg0 \
+	to any port <your-rdp-port> \
+	comment 'RDP via WireGuard'
+sudo ufw allow \
+	in on wg0 \
+	to any port <your-ssh-port> \
+	comment 'SSH via WireGuard'
+
+# in case IPv6 is not used for this purpose
+sudo ufw status numbered \
+	| grep -E '<your-udp-port>/udp \(v6\).*WireGuard|\(v6\) on wg0 .*WireGuard' \
+	| awk -F'[][]' '{gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2}' \
+	| sort -rn \
+	| xargs -r -I{} sudo ufw --force delete {}
+
+sudo ufw status numbered
+```
+
+***Install*** `dnsmasq` for *Split DNS*, and then, append  
+the following at the end of `/etc/dnsmasq.conf`:
+```bash
+# sudo apt update && sudo apt install -y dnsmasq
+# sudo nano /etc/dnsmasq.conf
+
+############################################
+# Split-DNS for WireGuard (inline)
+address=/vpn.<your-domain>/10.10.0.1
+interface=wg0
+bind-interfaces
+port=53
+
+# upstream resolvers
+server=1.1.1.1
+server=8.8.8.8
+############################################
+```
+
+<span style="color:yellow">***Do***</span>
+*generate* `/etc/systemd/system/dnsmasq.service.d/override.conf`:
+```bash
+# sudo mkdir -p /etc/systemd/system/dnsmasq.service.d
+# sudo nano /etc/systemd/system/dnsmasq.service.d/override.conf
+
+[Unit]
+
+# Ensure dnsmasq starts after WireGuard and network are fully online
+After=wg-quick@wg0.service network-online.target
+
+# Express preference for WireGuard service to be running
+Wants=wg-quick@wg0.service
+
+# Create strong dependency - if WireGuard stops, dnsmasq stops too
+BindsTo=wg-quick@wg0.service
+
+
+[Service]
+
+# Automatically restart dnsmasq if it fails
+Restart=on-failure
+
+# Wait 10 seconds before attempting restart
+RestartSec=10
+
+# Wait for wg0 interface to be available before starting dnsmasq
+ExecStartPre=/bin/bash -c 'until ip link show wg0 > /dev/null 2>&1; do sleep 1; done'
+```
+
+<span style="color:yellow">***Do***</span>
+*disable* `systemd-resolved`</span>:
+<!-- permanently disable systemd-resolved -->
+```bash
+sudo systemctl stop systemd-resolved
+sudo systemctl disable systemd-resolved
+sudo rm /etc/resolv.conf
+echo "nameserver 1.1.1.1" | sudo tee /etc/resolv.conf
+```
+
+***<span style="color:yellow">Do</span>*** verify the `Split DNS`:
+```bash
+sudo systemctl daemon-reexec
+sudo systemctl restart wg-quick@wg0
+sudo systemctl restart dnsmasq
+
+sudo systemctl status dnsmasq --no-pager	# useful
+ss -ulpn | grep :53							# 10.10.0.1:53
+
+dig +short vpn.<your-domain>	@10.10.0.1 -p 53
+dig +short google.com			@10.10.0.1 -p 53
+```
+
+***Add*** the UFW `firewall` rule for the *Split DNS*:
+```bash
+sudo ufw allow \
+	in on wg0 \
+	to any port 53 \
+	proto udp \
+	comment 'DNS via WireGuard'
+sudo ufw status numbered \
+	| grep -E '\(v6\) on wg0 .*DNS via WireGuard' \
+	| awk -F'[][]' '{gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2}' \
+	| sort -rn \
+	| xargs -r -I{} sudo ufw --force delete {}
+sudo ufw reload
+sudo ufw status numbered
+```
+
+***Generate and deliver*** the `client credientials` from the server:
+```bash
+sudo -i		# privileged session starts
+
+cd /etc/wireguard
+umask 077	# ensure new files are owner-readable only
+
+# generate the client credientials
+wg genkey \
+	| tee <client-name>.key \
+	| wg pubkey \
+	> <client-name>.pub
+
+# prepare to serve the client credentials
+mv <client-name>.key /home/<your-id>/<client-name>.key
+mv <client-name>.pub /home/<your-id>/<client-name>.pub
+
+exit		# privileged session ends
+
+# transfer the ownership to deliver the credientials
+sudo chown <your-id>:<your-id> \
+	/home/<your-id>/<client-name>.key \
+	/home/<your-id>/<client-name>.pub
+```
+
+***Update*** *WireGuard* `interface` at the server:
+```bash
+# sudo nano /etc/wireguard/wg0.conf
+
+[Interface]
+Address	= 10.10.0.1/24
+ListenPort = <your-udp-port>
+PrivateKey = </etc/wireguard/server.key>
+SaveConfig = false	# only can be manually edited
+
+[Peer]	# new client is added
+PublicKey  = <client-name.pub>
+AllowedIPs = 10.10.0.2/32
+PersistentKeepalive = 25
+```
+
+***Reload*** *WireGuard* `interace` at the server:
+```bash
+sudo systemctl reload wg-quick@wg0
+
+ip addr show wg0
+systemctl status wg-quick@wg0 --no-pager
+sudo wg
+```
+
+***Configure*** *WireGuard* `interface` at the client:
+```bash
+# <client-name>.conf
+
+[Interface]
+PrivateKey = <client-name.key>
+Address	= 10.10.0.2/32
+DNS		= 10.10.0.1
+
+[Peer]
+PublicKey  = <server.pub>
+Endpoint   = vpn.<your-domain>:<your-udp-port>
+AllowedIPs = 10.10.0.0/24
+PersistentKeepalive = 3
+```
+
+<!-- ———————————————————————————————————————————————————————————————————————————————— -->
+
+## Y. Reboot Checklist
+
+After reboot, we want to ensure all services are active and the server will not be suspended:
+```bash
+nano get_status.sh
+```
+```bash
+# get_status.sh
+
+echo "=== Core Services ==="
+systemctl status xrdp | grep Active
+systemctl status auto-cpufreq | grep Active
+systemctl status nvidia-persist.service | grep Active
+systemctl status chrony | grep Active
+
+echo "=== Power Management ==="
+xfconf-query -c xfce4-power-manager -l -v | grep -E "(blank|sleep|monitor-power)-on-ac"
+xset q | grep -E 'timeout.*0|DPMS.*disabled|prefer blanking.*no'
+
+echo "=== Display & Sleep Prevention ==="
+grep -E 'AllowEmpty|ConnectedMonitor|Virtual screen size|DFP-0: connected' /var/log/Xorg.0.log 2>/dev/null | grep -v 'WW' | tail -3
+systemctl status sleep.target suspend.target hibernate.target hybrid-sleep.target | grep Active
+
+echo "=== WireGuard & DNS ==="
+systemctl status wg-quick@wg0 | grep Active
+systemctl status dnsmasq | grep Active
+ip addr show wg0 2>/dev/null | grep "inet 10.10.0.1" || echo "❌ wg0 interface not ready"
+ss -ulpn | grep "10.10.0.1:53" >/dev/null && echo "✅ dnsmasq listening on wg0" || echo "❌ dnsmasq not listening on wg0"
+
+echo "=== Fail2Ban Status ==="
+if systemctl is-active --quiet fail2ban; then
+	echo "✅ Fail2Ban is active"
+	sudo fail2ban-client status
+else
+	echo "❌ Fail2Ban is not running"
+fi
+```
+
+```bash
+chmod +x get_status.sh
+```
+
+The expected output after running `./get_status.sh` reads:
+```bash
+TBE
+```
+
+✅ If all succeed, no additional manual action is needed after reboot.
+
+### 6.3 Enhancing Security via `fail2ban`
+***Install*** and configure:
+```bash
+# sudo apt update && sudo apt install fail2ban
+# sudo nano /etc/fail2ban/jail.local
+
+[DEFAULT]
+# Ban time (seconds) - 10 minutes
+bantime = 600
+
+# Observation window (seconds) - Count failures within 10 minutes
+findtime = 600
+
+# Maximum allowed failure attempts
+maxretry = 5
+
+# IPs that will never be banned (your own IP, trusted IPs)
+ignoreip = 127.0.0.1/8 ::1 192.168.1.0/24
+
+[sshd]
+enabled = true
+port = <your-ssh-port>
+filter = sshd
+logpath = /var/log/auth.log
+
+[xrdp]
+enabled = true
+port = <your-rdp-port>
+filter = xrdp
+logpath = /var/log/xrdp.log
+maxretry = 3
+```
+
+```bash
+# sudo nano /etc/fail2ban/filter.d/xrdp.conf
+
+[Definition]
+# Fail2Ban will look for this pattern in /var/log/xrdp.log
+failregex = .*xrdp_wm_log_msg: login failed for user .* from <HOST>.*$
+ignoreregex =
+```
+
+***Do*** *enable and start*:
+```bash
+sudo systemctl enable fail2ban
+sudo systemctl start fail2ban
+
+sudo systemctl status fail2ban
+sudo fail2ban-client status
+```
+
+<!-- ———————————————————————————————————————————————————————————————————————————————— -->
+
+## Z. Security Considerations
+
+**⚠️ Important Security Reminders:**
+
+1. **Never commit actual credentials** to version control
+2. **Use strong, unique passwords, and regularly change them**
+3. **Regularly change ports** for RDP (3389) and SSH (22)
+4. **Regularly update** your system and applications
+5. **Use key-based authentication** for SSH instead of passwords
+6. **Monitor access logs** regularly:
+```bash
+sudo tail -f /var/log/ufw.log
+sudo tail -f /var/log/auth.log
+sudo tail -f /var/log/xrdp.log
+```
+
+**🔒 Before Sharing or Committing:**
+- Replace all actual values in your local copy with `<placeholders>` 
+- Never commit files containing real API tokens, passwords, or IP addresses
+- Use environment variables or separate config files for sensitive data
