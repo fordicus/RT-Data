@@ -23,7 +23,8 @@ data/
 temp/
 
 __unshared__/
-__dev_log__/
+
+__dev__/
 
 __bom_2025-07-25_nas__/
 __dns__
