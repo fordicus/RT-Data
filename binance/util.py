@@ -38,8 +38,7 @@ def resource_path(	# Resource Resolver for PyInstaller
 				)
 
 			logger.info(
-				f"[{my_name()}] Called with "
-				f"relative_path='{relative_path}'"
+				f"[{my_name()}] 📂 {relative_path}"
 			)
 
 		if hasattr(sys, "_MEIPASS"):		# PyInstaller
@@ -284,33 +283,63 @@ async def geo(ip: str) -> str:
 #———————————————————————————————————————————————————————————————————————————————
 
 def format_ws_url(
-	url: str, label: str = ""
+	url: str, 
+	symbols: list[str]
 ) -> str:
 
 	"""
 	Formats a Binance WebSocket URL for multi-symbol readability.
-	Example:
-		wss://stream.binance.com:9443/stream?streams=
-			btcusdc@depth/
-			ethusdc@depth/
-			solusdc@depth (@depth)
+	Adjusts the output based on the number of symbols in the subscription.
+
+	Args:
+		url (str): The original WebSocket URL.
+		symbols (list[str]): List of subscribed symbols.
+
+	Returns:
+		str: Formatted WebSocket URL for logging.
 	"""
 
-	if "streams=" not in url:
+	try:
 
-		return url + (f" {label}" if label else "")
+		# If the number of symbols is less than 3, return the URL as-is
 
-	prefix, streams = url.split("streams=", 1)
-	symbols = streams.split("/")
-	formatted = "\t" + prefix + "streams=\n"
-	formatted += "".join(f"\t\t{s}/\n" for s in symbols if s)
-	formatted = formatted.rstrip("/\n")
+		if len(symbols) < 3:
 
-	if label:
+			return url
 
-		formatted += f" {label}"
+		# Extract the prefix and streams from the URL
 
-	return formatted
+		if "streams=" not in url:
+
+			return url  # Return as-is if the URL doesn't contain streams
+
+		prefix, streams = url.split("streams=", 1)
+		symbol_streams = streams.split("/")
+
+		# Ensure the number of streams matches the number of symbols
+
+		if len(symbol_streams) != len(symbols):
+
+			raise ValueError(
+				f"Mismatch between symbols and streams: "
+				f"{len(symbols)} symbols, {len(symbol_streams)} streams."
+			)
+
+		# Format the URL with the first and last symbols,
+		# and "..." in the middle
+
+		formatted = (
+			f"{prefix}streams="
+			f"{symbol_streams[0]}/.../{symbol_streams[-1]}"
+		)
+
+		return formatted
+
+	except Exception as e:
+		
+		raise RuntimeError(
+			f"[{my_name()}] Failed to format WebSocket URL: {e}"
+		) from e
 
 #———————————————————————————————————————————————————————————————————————————————
 # Unified Process-Agnostic Logger

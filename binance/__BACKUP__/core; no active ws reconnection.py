@@ -7,17 +7,12 @@ from util import (
 	NanoTimer,
 	ms_to_datetime,
 	compute_bias_ms,
-	format_ws_url,
+	# format_ws_url,
 	get_current_time_ms,
 	get_global_log_queue,
 	get_subprocess_logger,
 	ensure_logging_on_exception,
 	force_print_exception,
-)
-
-from async_hotswap import (
-	HotSwapManager,
-	schedule_backup_creation,
 )
 
 import sys, os, io, asyncio, orjson
@@ -942,14 +937,7 @@ async def symbol_dump_snapshot(
 #———————————————————————————————————————————————————————————————————————————————
 
 @ensure_logging_on_exception
-async def wrapped_put_snapshot(*args, **kwargs):
-	return await put_snapshot(*args, **kwargs)
-
-#———————————————————————————————————————————————————————————————————————————————
-
-@ensure_logging_on_exception
 async def put_snapshot(					# @depth20@100ms
-	#
 	websocket_recv_interval:			deque[float],
 	websocket_recv_intv_stat:			dict[str, float],
 	put_snapshot_interval:				dict[str, deque[int]],
@@ -968,27 +956,16 @@ async def put_snapshot(					# @depth20@100ms
 	#
 	ws_ping_interval:					int,
 	ws_ping_timeout:					int,
-	symbols:							list[str],
+	symbols:							list,
 	logger:								logging.Logger,
-	#
 	base_interval_ms:					int	  = 100,
 	ws_timeout_multiplier:				float =	  8.0,
 	ws_timeout_default_sec:				float =	  2.0,
 	ws_timeout_min_sec:					float =	  1.0,
 	#
-	# port_cycling_period_hours: float =  12.0,		# 12 hours
-	port_cycling_period_hours: float =  0.5,		# 30 minutes
-	# port_cycling_period_hours: float =  0.016667,	# 60 seconds
-	# port_cycling_period_hours: float =  0.008333, # 30 seconds
-	# 백업 준비
-	back_up_ready_ahead_sec: float = 10.0,
-	# back_up_ready_ahead_sec: float =  7.5,
-	#
-	hot_swap_manager: HotSwapManager = None,
-	shutdown_event: Optional[asyncio.Event] = None,
-	handoff_event:  Optional[asyncio.Event] = None,
-	is_backup: bool = False,
-	#
+	# port_cycling_period_hours:			float =  12.0,
+	port_cycling_period_hours: float =  0.00833333333333333333333333333333,
+	# 30 seconds
 ):
 
 	"""—————————————————————————————————————————————————————————————————————————
@@ -1079,16 +1056,6 @@ async def put_snapshot(					# @depth20@100ms
 
 	#———————————————————————————————————————————————————————————————————————————
 
-	# Hot swap 상태 변수
-	is_connection_active = not is_backup  # 백업 연결은 비활성으로 시작
-	refresh_period = port_cycling_period_hours * 3600.0
-	backup_start_time = refresh_period - back_up_ready_ahead_sec
-	hot_swap_initiated = False
-
-	# shutdown_event 안전 처리
-	def is_shutdown_requested():
-		return shutdown_event and shutdown_event.is_set()
-
 	ws_retry_cnt = 0
 	last_success_time = time.time()
 
@@ -1124,7 +1091,7 @@ async def put_snapshot(					# @depth20@100ms
 
 	cur_port_index = 0
 
-	while not is_shutdown_requested():
+	while True:
 
 		cur_symbol = "UNKNOWN"
 
@@ -1146,178 +1113,51 @@ async def put_snapshot(					# @depth20@100ms
 				ping_timeout  = ws_ping_timeout
 			) as ws:
 
+				logger.info(
+					f"[{my_name()}] Connected to: {ws_url_complete}"
+				)
+
 				ws_retry_cnt = 0
 				last_success_time = time.time()
 				ws_start_time	  = time.time()
-
-				logger.info(
-					f"[{my_name()}] 🟢\n  "
-					f"{format_ws_url(ws_url_complete, symbols)} "
-					f"(is_backup: {int(is_backup)})"
-				)
-
-				# 백업 연결의 대기 및 활성화
-				if is_backup and handoff_event:
-					logger.info(f"[{my_name()}] 🕒 Backup Standby")
+				
+				while True:
+					
 					try:
-						# 무한 대기 대신 타임아웃 설정
-						await asyncio.wait_for(
-							handoff_event.wait(), 
-							timeout=refresh_period + 30.0
+
+						#———————————————————————————————————————————————————————
+						# Break to Refresh Old Connection
+						#———————————————————————————————————————————————————————
+						# Reasoning from https://tinyurl.com/BinanceWsMan
+						#
+						# 	"A single connection to stream.binance.com is only
+						# 	 valid for 24 hours; expect to be disconnected at
+						# 	 the 24 hour mark"
+						#———————————————————————————————————————————————————————
+
+						ws_duration = (
+							time.time() - ws_start_time
 						)
-						is_connection_active = True
-						logger.info(f"[{my_name()}] 🔥 Backup → Main")
-						
-						# 백업이 활성화되면 새로운 백업 생성 스케줄링
-						if hot_swap_manager:
-							# hot_swap_initiated는 메인 연결의 것이므로 백업에서는 새로 시작
-							logger.info(f"[{my_name()}] 📅 Next Backup Scheduled")
+
+						if (ws_duration >= port_cycling_period_hours * 3600.0):
 							
-							# schedule_backup_creation 사용 (올바른 방법)
-							next_schedule_task = asyncio.create_task(
-								schedule_backup_creation(
-									hot_swap_manager,
-									backup_start_time,
-									lambda event, backup: wrapped_put_snapshot(
-										websocket_recv_interval,
-										websocket_recv_intv_stat,
-										put_snapshot_interval,
-										snapshots_queue_dict,
-										event_stream_enable,
-										mean_latency_dict,
-										event_1st_snapshot,
-										max_backoff,
-										base_backoff,
-										reset_cycle_after,
-										reset_backoff_level,
-										ws_url,
-										wildcard_stream_binance_com_port,
-										ports_stream_binance_com,
-										ws_ping_interval,
-										ws_ping_timeout,
-										symbols,
-										logger,
-										#
-										base_interval_ms,
-										ws_timeout_multiplier,
-										ws_timeout_default_sec,
-										ws_timeout_min_sec,
-										#
-										port_cycling_period_hours,
-										back_up_ready_ahead_sec,
-										#
-										hot_swap_manager,
-										shutdown_event,
-										event,   # handoff_event
-										backup,  # is_backup
-									),
-									logger,
-									back_up_ready_ahead_sec,
-									ws_start_time
-								)
+							# https://tinyurl.com/ws-close-1501
+
+							logger.info(
+								f"[{my_name()}] "
+								f"Refreshing old WebSocket connection "
+								f"on port {target_port}: "
+								# f"{ws_duration / 3600.0:.02f} hours passed."
+								f"{ws_duration:.02f} seconds passed."
 							)
 
-							hot_swap_manager.hot_swap_tasks.append(next_schedule_task)
-							
-					except asyncio.TimeoutError:
-						logger.warning(f"[{my_name()}] Backup handoff timeout, terminating backup")
-						return  # 백업 연결 종료
-					except Exception as e:
-						logger.error(f"[{my_name()}] Backup connection error: {e}")
-						return  # 백업 연결 종료
-
-				# Hot swap 시작 (지정된 시간에 스케줄링)
-				elif (not is_backup and 
-					hot_swap_manager and 
-					not hot_swap_initiated):
-
-					hot_swap_initiated = True
-					logger.info(f"[{my_name()}] 📅 Backup Schedule")
-					
-					# schedule_backup_creation 태스크 생성 및 등록
-					schedule_task = asyncio.create_task(
-						schedule_backup_creation(
-							hot_swap_manager,
-							backup_start_time,
-							lambda event, backup: wrapped_put_snapshot(
-								websocket_recv_interval,
-								websocket_recv_intv_stat,
-								put_snapshot_interval,
-								snapshots_queue_dict,
-								event_stream_enable,
-								mean_latency_dict,
-								event_1st_snapshot,
-								max_backoff,
-								base_backoff,
-								reset_cycle_after,
-								reset_backoff_level,
-								ws_url,
-								wildcard_stream_binance_com_port,
-								ports_stream_binance_com,
-								ws_ping_interval,
-								ws_ping_timeout,
-								symbols,
-								logger,
-								#
-								base_interval_ms,
-								ws_timeout_multiplier,
-								ws_timeout_default_sec,
-								ws_timeout_min_sec,
-								#
-								port_cycling_period_hours,
-								back_up_ready_ahead_sec,
-								#
-								hot_swap_manager,
-								shutdown_event,
-								event,   # handoff_event
-								backup,  # is_backup
-							),
-							logger,
-							back_up_ready_ahead_sec,
-							ws_start_time  # 연결 시작 시간 전달
-						)
-					)
-
-					hot_swap_manager.hot_swap_tasks.append(schedule_task)
-				
-				while not is_shutdown_requested():
-					
-					# Hot swap 체크 (종료 중이면 Hot swap 시도 안 함)
-					if (is_connection_active and 
-						hot_swap_manager and 
-						not is_shutdown_requested() and  # 추가 체크
-						(time.time() - ws_start_time) >= refresh_period):
+							await ws.close()
+							break
 						
-						# 백업 상태 재확인
-						if hot_swap_manager.is_ready_for_handoff():
-							try:
-								logger.info(f"[{my_name()}] 🔄 HotSwap Init")
-								await hot_swap_manager.complete_handoff(logger)
-								logger.info(f"[{my_name()}] ✅ HotSwap Done")
-								return
-							except Exception as e:
-								logger.warning(f"[{my_name()}] Hot swap failed, continuing with current connection: {e}")
-								hot_swap_initiated = False
-								ws_start_time = time.time()
-						else:
-							logger.warning(f"[{my_name()}] Backup not ready, continuing with current connection")
-							hot_swap_initiated = False
-							ws_start_time = time.time()
-					
-					# 종료 요청 재확인 (메시지 루프 전)
-					if is_shutdown_requested():
-						logger.info(f"[{my_name()}] Shutdown requested, exiting message loop")
-						break
-					
-					try:
-
 						raw = await asyncio.wait_for(
 							ws.recv(),
 							timeout = ws_timeout_sec
 						)
-
-						if not is_connection_active:
-							continue
 
 						try:
 
@@ -1543,7 +1383,7 @@ async def put_snapshot(					# @depth20@100ms
 				else "UNKNOWN"
 			)
 			logger.info(
-				f"[{my_name()}] 📴 WS Closed"
+				f"[{my_name()}] WebSocket connection closed."
 			)
 
 #———————————————————————————————————————————————————————————————————————————————

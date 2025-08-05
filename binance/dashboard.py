@@ -503,7 +503,7 @@ async def monitor_hardware(
 	prev_time = time.time()
 
 	logger.info(
-		f"[{my_name()}] Hardware monitoring started."
+		f"[{my_name()}] 💻 HW Monitor ON"
 	)
 
 	while True:

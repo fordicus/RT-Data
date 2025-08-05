@@ -28,7 +28,7 @@ from util import (
 	my_name,
 	NanoTimer,
 	get_current_time_ms, geo, 
-	# format_ws_url,
+	format_ws_url,
 	ensure_logging_on_exception,
 )
 
@@ -64,8 +64,7 @@ async def gate_streaming_by_latency(
 
 				logger.info(
 					f"[{my_name()}] "
-					f"Latency normalized. "
-					f"Enable LOB stream."
+					f"Latency Normalized → LOB ▶️"
 				)
 
 				event_stream_enable.set()
@@ -79,9 +78,7 @@ async def gate_streaming_by_latency(
 				):
 
 					logger.info(
-						f"[{my_name()}] "
-						f"Warming up latency "
-						f"measurements..."
+						f"[{my_name()}] 🔥 Warming up "
 					)
 
 					has_logged_warmup = True
@@ -93,8 +90,7 @@ async def gate_streaming_by_latency(
 
 					logger.warning(
 						f"[{my_name()}] "
-						f"Latency degraded. "
-						f"Pausing LOB stream."
+						f"Latency Degraded → LOB ⏸️"
 					)
 
 					event_stream_enable.clear()
@@ -278,14 +274,12 @@ async def estimate_latency(
 				)
 
 				logger.info(
-					f"[{my_name()}] WebSocket Peer {websocket_peer['value']}"
+					f"[{my_name()}] 🌐 WS Peer {websocket_peer['value']}"
 				)
 				
 				logger.info(
-					f"[{my_name()}] "
-					f"Connected to: {url}"
-					# f"Connected to:\n"
-					# f"{format_ws_url(url, '(@depth)')}\n"
+					f"[{my_name()}] 🟢\n  "
+					f"{format_ws_url(url, symbols)}"
 				)
 
 				ws_retry_cnt = 0
@@ -387,10 +381,7 @@ async def estimate_latency(
 										event_latency_valid.set()
 
 										logger.info(
-											f"[{my_name()}] "
-											f"Latency OK — "
-											f"All symbols within "
-											f"threshold. Event set."
+											f"[{my_name()}] ✅ Latency OK"
 										)
 								
 								else:

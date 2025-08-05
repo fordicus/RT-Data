@@ -401,14 +401,16 @@ class ShutdownManager:
 					if writer and not writer.closed: writer.close()
 					
 					self.logger.info(
-						f"[{my_name()}] Closed file for {symbol}"
+						f"[{my_name()}] Closed file for "
+						f"{symbol}"
 					)
 				
 				except Exception as e:
 					
 					self.logger.error(
 						f"[{my_name()}] "
-						f"Failed to close file for {symbol}: {e}"
+						f"Failed to close file for "
+						f"{symbol}: {e}"
 					)
 	
 	#———————————————————————————————————————————————————————————————————————————
@@ -434,63 +436,92 @@ class ShutdownManager:
 				)
 	
 	#———————————————————————————————————————————————————————————————————————————
-	
-	def graceful_shutdown(
-		self
-	) -> None:
 
-		"""
-		Perform complete graceful shutdown sequence.
-		Thread-safe and idempotent with early termination signal.
-		"""
-
-		# Check shutdown status first (with lock)
-
+	def register_shutdown_event(self, shutdown_event: asyncio.Event) -> None:
+		"""외부 shutdown_event를 등록하여 종료 시 함께 설정"""
 		with self._lock:
+			if not hasattr(self, '_external_shutdown_events'):
+				self._external_shutdown_events = []
+			self._external_shutdown_events.append(shutdown_event)
 
+	#———————————————————————————————————————————————————————————————————————————
+	
+	def graceful_shutdown(self) -> None:
+		"""Complete graceful shutdown sequence."""
+		with self._lock:
 			if self._shutdown_complete:
-
-				return  # Already shutdown
+				return
 		
 		try:
-			self.logger.info(
-				f"[{my_name()}] Starting graceful shutdown..."
-			)
+			self.logger.info(f"[{my_name()}] Starting graceful shutdown...")
+			
+			# Force exit timer 시작 (개선된 버전)
+			def force_exit_timer():
+				time.sleep(10.0)
+				if not self._shutdown_complete:  # ✅ 완료 상태 확인 추가
+					print("[FORCE EXIT] Graceful shutdown timeout - forcing exit")
+					self.logger.warning(f"[{my_name()}] Graceful shutdown timeout - forcing exit")
+					import os
+					os._exit(1)
+			
+			timer_thread = threading.Thread(target=force_exit_timer, daemon=True)
+			timer_thread.start()
 			
 			# 1. Set shutdown event to signal other components
 			self._shutdown_event.set()
+
+			# 2. Set external shutdown events (스레드 안전하게)
+			with self._lock:
+				if hasattr(self, '_external_shutdown_events'):
+					external_events = list(self._external_shutdown_events)  # 복사본 생성
 			
-			# 2. Cancel asyncio tasks first (prevents new I/O operations)
-			self.cancel_asyncio_tasks()
+			# 락 해제 후 이벤트 설정
+			if 'external_events' in locals():
+				for event in external_events:
+					try:
+						if not event.is_set():
+							event.set()
+					except Exception as e:
+						self.logger.warning(f"Failed to set external shutdown event: {e}")
+
 			
-			# 3. Run custom cleanup callbacks
+			# 3. Run custom cleanup callbacks (먼저 실행)
 			self.run_custom_cleanup()
 			
-			# 4. Close all file handles
+			# 4. Brief delay to allow cleanup tasks to start
+			time.sleep(0.1)
+			
+			# 5. Cancel asyncio tasks (cleanup 후 실행)
+			self.cancel_asyncio_tasks()
+			
+			# 6. Close all file handles
 			self.close_file_handles()
 			
-			# 5. Shutdown executors
+			# 7. Shutdown executors
 			self.shutdown_executors()
 			
-			# 6. Mark shutdown as complete (with lock)
+			# 8. Mark shutdown as complete (✅ 타이머 무력화)
 			with self._lock:
-
 				self._shutdown_complete = True
 			
-			self.logger.info(
-				f"[{my_name()}] Graceful shutdown completed."
-			)
+			self.logger.info(f"[{my_name()}] Graceful shutdown completed.")
+
+			print(f"[DEBUG] ShutdownManager.graceful_shutdown completed at {time.time()}")
+
+			# 추가: 활성 태스크 수 확인
+			try:
+				loop = asyncio.get_running_loop()
+				if loop:
+					active_tasks = [t for t in asyncio.all_tasks(loop) if not t.done()]
+					print(f"[DEBUG] Active tasks remaining: {len(active_tasks)}")
+					for i, task in enumerate(active_tasks[:5]):  # 처음 5개만 표시
+						print(f"[DEBUG] Active task {i+1}: {task.get_name()}")
+			except:
+				print("[DEBUG] Could not check active tasks")
 			
 		except Exception as e:
-
-			self.logger.error(
-				f"[{my_name()}] Error during shutdown: {e}"
-			)
-			
-			# Mark as complete even on error to prevent infinite retry
-
+			self.logger.error(f"[{my_name()}] Error during shutdown: {e}")
 			with self._lock:
-				
 				self._shutdown_complete = True
 
 	#———————————————————————————————————————————————————————————————————————————
@@ -549,8 +580,7 @@ class ShutdownManager:
 		signal.signal(signal.SIGTERM, self.signal_handler)
 		
 		self.logger.info(
-			f"[{my_name()}] Signal handlers registered "
-			f"(SIGINT, SIGTERM)"
+			f"[{my_name()}] 📡 SIGINT/SIGTERM"
 		)
 
 #———————————————————————————————————————————————————————————————————————————————

@@ -78,6 +78,10 @@ from util import (
 	set_global_logger,
 )
 
+from async_hotswap import (
+	HotSwapManager,
+)
+
 from latency import (
 	gate_streaming_by_latency,
 	estimate_latency,
@@ -274,6 +278,17 @@ if __name__ == "__main__":
 					name="estimate_latency()",
 				)
 
+				# shutdown_event를 ShutdownManager와 연동
+				main_shutdown_event = asyncio.Event()
+
+				# ShutdownManager에 shutdown_event 등록
+				shutdown_manager.register_shutdown_event(main_shutdown_event)
+				
+				hot_swap_manager = HotSwapManager()
+
+				# HotSwapManager에도 shutdown_event 전달
+				hot_swap_manager.set_shutdown_event(main_shutdown_event)
+
 				put_snapshot_task = asyncio.create_task(
 					put_snapshot(	# @depth20@100ms
 						WEBSOCKET_RECV_INTERVAL,
@@ -296,6 +311,11 @@ if __name__ == "__main__":
 						WS_PING_TIMEOUT,
 						SYMBOLS,
 						logger,
+						#
+						hot_swap_manager = hot_swap_manager,
+						shutdown_event = main_shutdown_event,	# 실제 연동된 이벤트
+						handoff_event = None,  # 메인 연결
+						is_backup = False,
 					),
 					name="put_snapshot()",
 				)
@@ -358,6 +378,64 @@ if __name__ == "__main__":
 
 				shutdown_manager.register_asyncio_tasks(*all_tasks)
 
+				# shutdown_manager에서 shutdown_event 생성
+				def shutdown_callback():
+					"""Hot Swap 관련 리소스 정리"""
+					try:
+						print(f"[DEBUG] shutdown_callback started at {time.time()}")  # 디버그 로그
+						logger.info("[main] shutdown_callback started")
+
+						# Hot Swap 태스크들을 ShutdownManager에 추가 등록
+						if hot_swap_manager and hasattr(hot_swap_manager, 'hot_swap_tasks'):
+							print(f"[DEBUG] Registering {len(hot_swap_manager.hot_swap_tasks)} hot swap tasks")
+							if hot_swap_manager.hot_swap_tasks:
+								shutdown_manager.register_asyncio_tasks(*hot_swap_manager.hot_swap_tasks)
+								logger.info(f"[main] Registered {len(hot_swap_manager.hot_swap_tasks)} hot swap tasks with ShutdownManager")
+
+						if hot_swap_manager:
+							try:
+								print(f"[DEBUG] Getting event loop at {time.time()}")
+								loop = asyncio.get_running_loop()
+								if loop and not loop.is_closed():
+									print(f"[DEBUG] Creating cleanup task at {time.time()}")
+									# Task 생성만 하고 백그라운드에서 실행
+									cleanup_task = loop.create_task(
+										hot_swap_manager.graceful_shutdown(logger)
+									)
+									
+									def cleanup_done_callback(task):
+										print(f"[DEBUG] Cleanup task completed at {time.time()}")
+										try:
+											if task.cancelled():
+												logger.info("[main] Hot Swap cleanup task was cancelled")
+											elif task.exception():
+												logger.error(f"[main] Hot Swap cleanup error: {task.exception()}")
+											else:
+												logger.info("[main] Hot Swap cleanup task completed")
+										except Exception as e:
+											logger.warning(f"[main] Error in cleanup callback: {e}")
+									
+									# Task 완료를 위한 콜백 등록
+									cleanup_task.add_done_callback(cleanup_done_callback)
+									print(f"[DEBUG] Cleanup task registered at {time.time()}")
+									
+								else:
+									logger.warning("Cannot shutdown HotSwapManager - no running loop")
+							except RuntimeError as e:
+								logger.warning(f"Cannot shutdown HotSwapManager - runtime error: {e}")
+							except Exception as e:
+								logger.error(f"Unexpected error during HotSwapManager shutdown: {e}")
+						else:
+							logger.warning("[main] HotSwapManager is None during shutdown")
+						
+						print(f"[DEBUG] shutdown_callback ending at {time.time()}")
+						logger.info("[main] Hot Swap cleanup initiated")
+					except Exception as e:
+						print(f"[DEBUG] shutdown_callback error at {time.time()}: {e}")
+						logger.error(f"[main] Hot Swap cleanup error: {e}", exc_info=True)
+
+				shutdown_manager.add_cleanup_callback(shutdown_callback)
+
 			except Exception as e:
 
 				logger.critical(
@@ -388,7 +466,7 @@ if __name__ == "__main__":
 			try:
 
 				logger.info(
-					f"[{my_name()}] FastAPI server starts. Try: "
+					f"[{my_name()}] 🚀 FastAPI Start → "
 					f"http://localhost:{DASHBOARD_PORT_NUMBER}/dashboard"
 				)
 
@@ -404,7 +482,10 @@ if __name__ == "__main__":
 				)
 
 				server = Server(cfg)
+				print(f"[DEBUG] Starting uvicorn server at {time.time()}")
 				await server.serve()
+				print(f"[DEBUG] Uvicorn server stopped at {time.time()}")
+				logger.info("[main] FastAPI server has stopped")
 
 			except Exception as e:
 
