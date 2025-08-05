@@ -848,12 +848,12 @@ sudo ufw allow \
 	from 192.168.1.0/24 \
 	to any port <your-ssh-port> \
 	proto tcp \
-	comment 'Local Network → SFTP'
+	comment 'Local Network → SSH'
 sudo ufw allow \
 	from 192.168.1.0/24 \
 	to any port <your-dashboard-port> \
 	proto tcp \
-	comment 'Local Network → Dashboard'
+	comment 'Local Network → HTTP'
 
 # CloudFlare IPv4
 for ip in $(curl -s https://www.cloudflare.com/ips-v4); do
@@ -939,19 +939,21 @@ Test-NetConnection -ComputerName <your-domain> -Port <your-port>
 ### 6.1 A few Changes for the `CloudFlare and Router Settings`
 
 What changes regarding *CloudFlare*:  
-+	`<CloudFlare IP Ranges>` allowed at *UFW are no longer necessary*
-for `RDP` and `SFTP`.
-+	Separate *A Records* for `RDP` and `SFTP` are unified to `VPN`,
-while remaining as *DNS-only*.
++	separate *A Records* for {`rdp`, `sftp`, `www`}
+are <span style="color:yellow">unified</span> to `vpn`,
+while remaining as *DNS-only*;  
+<span style="color:yellow">*delete*</span> `<CloudFlare IP Ranges>` allowed at *UFW*
+for {`rdp`, `sftp`, `www`}.
 +	*DDNS automation* script periodically updates
 the public IPv4 of your router to *CloudFlare*  
-only for the subdomain designated to `VPN`.
+only for the *A Record* designated to `vpn`.
 
 What changes at *your router*:  
-+	*Eliminate* port forwarding of `<your-rdp-port>` and `<your-ssh-port>`,  
-which also does not affect their local access. However, `<your-dashboard-port>`  
-will still have the port forwarding, since this port is 
-<span style="color:cyan">*proxied*</span> via *CloudFlare*.
++	*Eliminate* port forwarding of
+`<your-rdp-port>`,
+`<your-ssh-port>`,  
+and `<your-dashboard-port>`,
+which also does not affect their local access.
 +	Now, you have to add a port-forwarding rule that uses 
 the <span style="color:yellow">*UDP*</span> protocol for *WireGuard:*  
 
@@ -1037,14 +1039,19 @@ sudo ufw allow \
 	in on wg0 \
 	to any port <your-ssh-port> \
 	comment 'SSH via WireGuard'
+sudo ufw allow \
+    in on wg0 \
+    to any port <your-http-port> \
+    comment 'HTTP via WireGuard'
 
 # in case IPv6 is not used for this purpose
 sudo ufw status numbered \
 	| grep -E '<your-udp-port>/udp \(v6\).*WireGuard|\(v6\) on wg0 .*WireGuard' \
 	| awk -F'[][]' '{gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2}' \
 	| sort -rn \
-	| xargs -r -I{} sudo ufw --force delete {}
+	| xargs -r -I{} sudo ufw --force delete {}	
 
+sudo ufw reload
 sudo ufw status numbered
 ```
 

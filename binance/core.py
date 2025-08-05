@@ -7,7 +7,7 @@ from util import (
 	NanoTimer,
 	ms_to_datetime,
 	compute_bias_ms,
-	format_ws_url,
+	# format_ws_url,
 	get_current_time_ms,
 	get_global_log_queue,
 	get_subprocess_logger,
@@ -937,27 +937,35 @@ async def symbol_dump_snapshot(
 #———————————————————————————————————————————————————————————————————————————————
 
 @ensure_logging_on_exception
-async def put_snapshot(			# @depth20@100ms
-	websocket_recv_interval:	deque[float],
-	websocket_recv_intv_stat:	dict[str, float],
-	put_snapshot_interval:		dict[str, deque[int]],
-	snapshots_queue_dict:		dict[str, asyncio.Queue],
-	event_stream_enable:		asyncio.Event,
-	mean_latency_dict:			dict[str, int],
-	event_1st_snapshot:			asyncio.Event,
-	max_backoff:				int, 
-	base_backoff:				int,
-	reset_cycle_after:			int,
-	reset_backoff_level:		int,
-	ws_url:						str,
-	ws_ping_interval:			int,
-	ws_ping_timeout:			int,
-	symbols:					list,
-	logger:						logging.Logger,
-	base_interval_ms:			int	  = 100,
-	ws_timeout_multiplier:		float =	  8.0,
-	ws_timeout_default_sec:		float =	  2.0,
-	ws_timeout_min_sec:			float =	  1.0,
+async def put_snapshot(					# @depth20@100ms
+	websocket_recv_interval:			deque[float],
+	websocket_recv_intv_stat:			dict[str, float],
+	put_snapshot_interval:				dict[str, deque[int]],
+	snapshots_queue_dict:				dict[str, asyncio.Queue],
+	event_stream_enable:				asyncio.Event,
+	mean_latency_dict:					dict[str, int],
+	event_1st_snapshot:					asyncio.Event,
+	max_backoff:						int, 
+	base_backoff:						int,
+	reset_cycle_after:					int,
+	reset_backoff_level:				int,
+	#
+	ws_url:								str,
+	wildcard_stream_binance_com_port:	str,
+	ports_stream_binance_com:			list[str],
+	#
+	ws_ping_interval:					int,
+	ws_ping_timeout:					int,
+	symbols:							list,
+	logger:								logging.Logger,
+	base_interval_ms:					int	  = 100,
+	ws_timeout_multiplier:				float =	  8.0,
+	ws_timeout_default_sec:				float =	  2.0,
+	ws_timeout_min_sec:					float =	  1.0,
+	#
+	# port_cycling_period_hours:			float =  12.0,
+	port_cycling_period_hours: float =  0.00833333333333333333333333333333,
+	# 30 seconds
 ):
 
 	"""—————————————————————————————————————————————————————————————————————————
@@ -1033,6 +1041,21 @@ async def put_snapshot(			# @depth20@100ms
 
 	#———————————————————————————————————————————————————————————————————————————
 
+	def cycle_port_number(
+		ports_list: list[str],
+		cur_port_index: int,
+	) -> tuple[str, int]:
+
+		port = ports_list[cur_port_index]
+
+		cur_port_index += 1
+		if cur_port_index >= len(ports_list):
+			cur_port_index = 0
+
+		return port, cur_port_index
+
+	#———————————————————————————————————————————————————————————————————————————
+
 	ws_retry_cnt = 0
 	last_success_time = time.time()
 
@@ -1066,29 +1089,70 @@ async def put_snapshot(			# @depth20@100ms
 
 	#———————————————————————————————————————————————————————————————————————————
 
+	cur_port_index = 0
+
 	while True:
 
 		cur_symbol = "UNKNOWN"
 
 		try:
 
+			target_port, cur_port_index = cycle_port_number(
+				ports_stream_binance_com,
+				cur_port_index,
+			)
+
+			ws_url_complete = ws_url.replace(
+				wildcard_stream_binance_com_port,
+				target_port,
+			)
+
 			async with websockets.connect(
-				ws_url,
+				ws_url_complete,
 				ping_interval = ws_ping_interval,
 				ping_timeout  = ws_ping_timeout
 			) as ws:
 
 				logger.info(
-					f"[{my_name()}] Connected to:\n"
-					f"{format_ws_url(ws_url, '(depth20@100ms)')}\n"
+					f"[{my_name()}] Connected to: {ws_url_complete}"
 				)
 
 				ws_retry_cnt = 0
 				last_success_time = time.time()
+				ws_start_time	  = time.time()
 				
 				while True:
 					
 					try:
+
+						#———————————————————————————————————————————————————————
+						# Break to Refresh Old Connection
+						#———————————————————————————————————————————————————————
+						# Reasoning from https://tinyurl.com/BinanceWsMan
+						#
+						# 	"A single connection to stream.binance.com is only
+						# 	 valid for 24 hours; expect to be disconnected at
+						# 	 the 24 hour mark"
+						#———————————————————————————————————————————————————————
+
+						ws_duration = (
+							time.time() - ws_start_time
+						)
+
+						if (ws_duration >= port_cycling_period_hours * 3600.0):
+							
+							# https://tinyurl.com/ws-close-1501
+
+							logger.info(
+								f"[{my_name()}] "
+								f"Refreshing old WebSocket connection "
+								f"on port {target_port}: "
+								# f"{ws_duration / 3600.0:.02f} hours passed."
+								f"{ws_duration:.02f} seconds passed."
+							)
+
+							await ws.close()
+							break
 						
 						raw = await asyncio.wait_for(
 							ws.recv(),
@@ -1319,8 +1383,7 @@ async def put_snapshot(			# @depth20@100ms
 				else "UNKNOWN"
 			)
 			logger.info(
-				f"[{my_name()}][{sym.upper()}] "
-				f"WebSocket connection closed."
+				f"[{my_name()}] WebSocket connection closed."
 			)
 
 #———————————————————————————————————————————————————————————————————————————————

@@ -27,8 +27,8 @@ from typing import Optional
 from util import (
 	my_name,
 	NanoTimer,
-	get_current_time_ms,
-	geo, format_ws_url,
+	get_current_time_ms, geo, 
+	# format_ws_url,
 	ensure_logging_on_exception,
 )
 
@@ -65,7 +65,7 @@ async def gate_streaming_by_latency(
 				logger.info(
 					f"[{my_name()}] "
 					f"Latency normalized. "
-					f"Enable LOB stream.\n"
+					f"Enable LOB stream."
 				)
 
 				event_stream_enable.set()
@@ -81,7 +81,7 @@ async def gate_streaming_by_latency(
 					logger.info(
 						f"[{my_name()}] "
 						f"Warming up latency "
-						f"measurements...\n"
+						f"measurements..."
 					)
 
 					has_logged_warmup = True
@@ -205,7 +205,7 @@ async def estimate_latency(
 	#———————————————————————————————————————————————————————————————————————————
 
 	url = (
-		"wss://stream.binance.com:9443/stream?streams="
+		"wss://stream.binance.com:443/stream?streams="
 		+ "/".join(f"{symbol}@depth@100ms" for symbol in symbols)
 	)
 
@@ -283,8 +283,9 @@ async def estimate_latency(
 				
 				logger.info(
 					f"[{my_name()}] "
-					f"Connected to:\n"
-					f"{format_ws_url(url, '(@depth)')}\n"
+					f"Connected to: {url}"
+					# f"Connected to:\n"
+					# f"{format_ws_url(url, '(@depth)')}\n"
 				)
 
 				ws_retry_cnt = 0

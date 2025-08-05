@@ -88,6 +88,40 @@ def load_config(
 
 	#——————————————————————————————————————————————————————————————
 
+	def extract_comma_delimited(
+		config: dict[str, str],
+		key: str,
+	) -> list[str]:
+
+		try:
+
+			val_str = config.get(f"{key}")
+
+			if not isinstance(val_str, str):
+
+				raise ValueError(
+					f"[{my_name()}] {key} field "
+					f"missing or not a string."
+				)
+
+			return list(
+				# the input order is preserved
+				OrderedDict.fromkeys(
+					s.lower()
+					for s in val_str.split(",")
+					if s.strip()
+				)
+			)
+
+		except Exception as e:
+
+			raise RuntimeError(
+				f"[{my_name()}] Failed to "
+				f"extract {key} from {config_path}."
+			) from e
+
+	#——————————————————————————————————————————————————————————————
+
 	def extract_symbols(
 		config: dict[str, str]
 	) -> list[str]:
@@ -122,6 +156,7 @@ def load_config(
 		config: dict[str, str]
 	) -> tuple[
 		str,			# lob_dir
+		str,			# wildcard_stream_binance_com_port
 		#
 		int,			# purge_on_date_change
 		int,			# save_interval_min
@@ -154,6 +189,10 @@ def load_config(
 		try:
 
 			lob_dir = config.get("LOB_DIR")
+
+			wildcard_stream_binance_com_port = config.get(
+				"WILDCARD_STREAM_BINANCE_COM_PORT"
+			)
 
 			purge_on_date_change = int(config.get("PURGE_ON_DATE_CHANGE"))
 			save_interval_min	 = int(config.get("SAVE_INTERVAL_MIN"))
@@ -188,6 +227,7 @@ def load_config(
 
 			return (
 				lob_dir,
+				wildcard_stream_binance_com_port,
 				#
 				purge_on_date_change,
 				save_interval_min,
@@ -255,8 +295,11 @@ def load_config(
 				config[key.strip()] = val.strip()
 		
 		symbols = extract_symbols(config)
+
 		(
 			lob_dir,
+			#
+			wildcard_stream_binance_com_port,
 			#
 			purge_on_date_change, save_interval_min,
 			#
@@ -286,14 +329,30 @@ def load_config(
 				f"No SYMBOLS loaded from config."
 			)
 
+		#———————————————————————————————————————————————————————————————————————
+		# https://tinyurl.com/BinanceWsMan
+		#———————————————————————————————————————————————————————————————————————
+		# [2025-08-05] The base endpoint is: 
+		# 	wss://stream.binance.com:9443 or
+		# 	wss://stream.binance.com:443.
+		#———————————————————————————————————————————————————————————————————————
+
 		ws_url = (
-			f"wss://stream.binance.com:9443/stream?streams="
+			f"wss://stream.binance.com:{wildcard_stream_binance_com_port}"
+			f"/stream?streams="
 			f"{'/'.join(f'{sym}@depth20@100ms' for sym in symbols)}"
+		)
+
+		ports_stream_binance_com = extract_comma_delimited(
+			config, "PORTS_STREAM_BINANCE_COM",
 		)
 
 		return (
 			symbols,
+			#
 			ws_url,
+			wildcard_stream_binance_com_port,
+			ports_stream_binance_com,
 			#
 			lob_dir,
 			#

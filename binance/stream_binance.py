@@ -8,7 +8,7 @@ BinanceWsMan:
 
 Binance websocket:
 
-	wss://stream.binance.com:9443/stream?
+	wss://stream.binance.com:{9443|443}/stream?
 		streams={symbol}@depth20@100ms
 
 ————————————————————————————————————————————————————————————————————————————————
@@ -113,7 +113,10 @@ setup_uvloop(logger = logger)
 
 (
 	SYMBOLS,
+	#
 	WS_URL,
+	WILDCARD_STREAM_BINANCE_COM_PORT,
+	PORTS_STREAM_BINANCE_COM,
 	#
 	LOB_DIR,
 	#
@@ -216,7 +219,7 @@ if __name__ == "__main__":
 			)
 
 			#———————————————————————————————————————————————————————————————————
-			# 대시보드 서버 설정
+			# Dashboard Endpoint Configuration
 			#———————————————————————————————————————————————————————————————————
 			
 			dashboard_config = {
@@ -284,7 +287,11 @@ if __name__ == "__main__":
 						BASE_BACKOFF,
 						RESET_CYCLE_AFTER,
 						RESET_BACKOFF_LEVEL,
+						#
 						WS_URL,
+						WILDCARD_STREAM_BINANCE_COM_PORT,
+						PORTS_STREAM_BINANCE_COM,
+						#
 						WS_PING_INTERVAL,
 						WS_PING_TIMEOUT,
 						SYMBOLS,
@@ -381,8 +388,8 @@ if __name__ == "__main__":
 			try:
 
 				logger.info(
-					f"[{my_name()}] FastAPI server starts. Try:\n"
-					f"\thttp://localhost:{DASHBOARD_PORT_NUMBER}/dashboard\n"
+					f"[{my_name()}] FastAPI server starts. Try: "
+					f"http://localhost:{DASHBOARD_PORT_NUMBER}/dashboard"
 				)
 
 				cfg = Config(
