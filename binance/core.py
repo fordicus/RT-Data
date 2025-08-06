@@ -1058,7 +1058,6 @@ async def put_snapshot(					# @depth20@100ms
 
 	async def calculate_backoff_and_sleep(
 		retry_count: int,
-		symbol: str = "UNKNOWN",
 		last_success_time: Optional[float] = None,
 		reset_retry_count_after_sec: float = 3600,	# an hour
 	) -> tuple[int, float]:
@@ -1077,7 +1076,7 @@ async def put_snapshot(					# @depth20@100ms
 		):
 
 			logger.info(
-				f"[{my_name()}][{symbol.upper()}] "
+				f"[{my_name()}] "
 				f"Resetting retry_count after {reset_retry_count_after_sec} sec; "
 				f"previous retry_count={retry_count}."
 			)
@@ -1090,7 +1089,7 @@ async def put_snapshot(					# @depth20@100ms
 		) + random.uniform(0, 1)
 
 		logger.warning(
-			f"[{my_name()}][{symbol.upper()}] "
+			f"[{my_name()}] "
 			f"Retrying in {backoff:.1f} seconds..."
 		)
 		
@@ -1590,7 +1589,7 @@ async def put_snapshot(					# @depth20@100ms
 							#
 						) = await calculate_backoff_and_sleep(
 							#
-							ws_retry_cnt, cur_symbol,
+							ws_retry_cnt, 
 							last_success_time,
 							#
 						)
@@ -1620,7 +1619,6 @@ async def put_snapshot(					# @depth20@100ms
 						) = await calculate_backoff_and_sleep(
 							#
 							ws_retry_cnt,
-							cur_symbol,
 							last_success_time,
 							#
 						)
@@ -1665,7 +1663,6 @@ async def put_snapshot(					# @depth20@100ms
 			) = await calculate_backoff_and_sleep(
 				#
 				ws_retry_cnt,
-				cur_symbol,
 				last_success_time,
 				#
 			)
