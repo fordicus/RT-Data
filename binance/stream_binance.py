@@ -78,7 +78,7 @@ from util import (
 	set_global_logger,
 )
 
-from async_hotswap import (
+from hotswap import (
 	HotSwapManager,
 )
 
@@ -291,13 +291,17 @@ if __name__ == "__main__":
 
 				put_snapshot_task = asyncio.create_task(
 					put_snapshot(	# @depth20@100ms
+						#
 						WEBSOCKET_RECV_INTERVAL,
 						WEBSOCKET_RECV_INTV_STAT,
 						PUT_SNAPSHOT_INTERVAL,
+						#
 						SNAPSHOTS_QUEUE_DICT,
+						#
 						EVENT_STREAM_ENABLE,
 						MEAN_LATENCY_DICT,
 						EVENT_1ST_SNAPSHOT,
+						#
 						MAX_BACKOFF, 
 						BASE_BACKOFF,
 						RESET_CYCLE_AFTER,
@@ -312,10 +316,16 @@ if __name__ == "__main__":
 						SYMBOLS,
 						logger,
 						#
-						hot_swap_manager = hot_swap_manager,
-						shutdown_event = main_shutdown_event,	# 실제 연동된 이벤트
-						handoff_event = None,  # 메인 연결
-						is_backup = False,
+						# port_cycling_period_hours =  12.0,		# 12 hours
+						port_cycling_period_hours =  0.5,		# 30 minutes
+						# port_cycling_period_hours =  0.016667,	# 60 seconds
+						# port_cycling_period_hours =  0.008333, # 30 seconds
+						back_up_ready_ahead_sec = 10.0,
+						# back_up_ready_ahead_sec =  7.5,
+						hot_swap_manager =	hot_swap_manager,
+						shutdown_event =	main_shutdown_event,	# 실제 연동된 이벤트
+						handoff_event =		None,  # 메인 연결
+						is_backup =			False,
 					),
 					name="put_snapshot()",
 				)
