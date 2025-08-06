@@ -25,7 +25,7 @@ def setup_uvloop(
 		import uvloop
 		asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
-		to_prt = f"[{my_name()}] ⚡ uvloop"
+		to_prt = f"[{my_name()}]⚡ uvloop"
 		if logger:	  logger.info(to_prt)
 		elif verbose: print(to_prt, flush = True)
 
@@ -456,7 +456,7 @@ def init_runtime_state(
 		})
 
 		logger.info(
-			f"[{my_name()}] 📦 Runtime Ready"
+			f"[{my_name()}]📦 runtime ready"
 		)
 
 		event_1st_snapshot  = asyncio.Event()

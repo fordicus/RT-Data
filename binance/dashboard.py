@@ -121,7 +121,7 @@ class DashboardServer:
 
 					self.logger.info(
 						f"[{my_name()}] "
-						f"Initiating shutdown via ShutdownManager..."
+						f"ShutdownManager called"
 					)
 					self.shutdown_manager.graceful_shutdown()
 		
@@ -503,7 +503,7 @@ async def monitor_hardware(
 	prev_time = time.time()
 
 	logger.info(
-		f"[{my_name()}] 💻 HW Monitor ON"
+		f"[{my_name()}]💻 hw monitor on"
 	)
 
 	while True:

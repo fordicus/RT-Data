@@ -438,9 +438,18 @@ async def symbol_dump_snapshot(
 	records_znr_minutes:	dict[str, OrderedDict[str, None]],
 	records_max:			int,
 	logger:					logging.Logger,
-	shutdown_manager =		None,
+	shutdown_event:			Optional[asyncio.Event] = None,
 	file_sync_delay_sec:	float = 0.0005,
 ):
+
+	#———————————————————————————————————————————————————————————————————————————————
+
+	def is_shutting_down():
+
+		return (
+			shutdown_event
+			and shutdown_event.is_set()
+		)
 
 	#———————————————————————————————————————————————————————————————————————————————
 
@@ -656,23 +665,24 @@ async def symbol_dump_snapshot(
 		json_flush_interval:	dict[str, deque[int]],
 		latest_json_flush:		dict[str, int],
 		file_path: str,
-		shutdown_manager = None,
 	) -> bool:
-
+		
 		try:
 
-			if (
-				shutdown_manager and
-				shutdown_manager.is_shutting_down()
-			):	return False
-			
 			if json_writer.closed:
 				
-				logger.warning(
-					f"[{my_name()}][{symbol.upper()}] "
-					f"Attempted to write to closed file: {file_path}"
-				)
-				return False
+				if is_shutting_down():
+
+					return True
+
+				else:
+
+					logger.warning(
+						f"[{my_name()}][{symbol.upper()}] "
+						f"attempted to write to closed file: {file_path}"
+					)
+
+					return False
 
 			json_writer.write(
 				orjson.dumps(snapshot).decode() + "\n"
@@ -699,7 +709,7 @@ async def symbol_dump_snapshot(
 
 			logger.error(
 				f"[{my_name()}][{symbol.upper()}] "
-				f"Write failed: {file_path} → {e}",
+				f"write failed: {file_path} → {e}",
 				exc_info=True
 			)
 
@@ -743,201 +753,217 @@ async def symbol_dump_snapshot(
 	queue = snapshots_queue_dict[symbol]
 	symbol_upper = symbol.upper()
 
-	while True:
+	try:
 
-		#———————————————————————————————————————————————————————————————————————————
+		while not is_shutting_down():	# infinite standalone loop
 
-		snapshot = await fetch_snapshot(queue, symbol)
-		
-		if snapshot is None:
-			logger.warning(
-				f"[{my_name()}][{symbol_upper}] "
-				f"Snapshot is None, skipping iteration."
+			#———————————————————————————————————————————————————————————————————————————
+
+			snapshot = await fetch_snapshot(queue, symbol)
+			
+			if snapshot is None:
+				logger.warning(
+					f"[{my_name()}][{symbol_upper}] "
+					f"snapshot is None, skipping iteration."
+				)
+				continue
+
+			if not event_stream_enable.is_set():
+				continue
+			
+			suffix, date_str = get_suffix_n_date(
+				save_interval_min,
+				snapshot, symbol
 			)
-			continue
 
-		if not event_stream_enable.is_set():
-			continue
-		
-		suffix, date_str = get_suffix_n_date(
-			save_interval_min,
-			snapshot, symbol
-		)
+			if ((suffix is None) or (date_str is None)):
+				logger.warning(
+					f"[{my_name()}][{symbol_upper}] "
+					f"suffix or date string is None, "
+					f"skipping iteration."
+				)
+				continue
 
-		if ((suffix is None) or (date_str is None)):
-			logger.warning(
-				f"[{my_name()}][{symbol_upper}] "
-				f"Suffix or date string is None, "
-				f"skipping iteration."
+			file_path = await gen_file_path(
+				symbol_upper, suffix,
+				lob_dir, date_str
 			)
-			continue
+			
+			if file_path is None:
+				logger.warning(
+					f"[{my_name()}][{symbol_upper}] "
+					f"file path is None, "
+					f"skipping iteration."
+				)
+				continue
 
-		file_path = await gen_file_path(
-			symbol_upper, suffix,
-			lob_dir, date_str
-		)
-		
-		if file_path is None:
-			logger.warning(
-				f"[{my_name()}][{symbol_upper}] "
-				f"File path is None, "
-				f"skipping iteration."
-			)
-			continue
+			# ────────────────────────────────────────────────────────────────────
+			# STEP 1: Roll-over by Minute
+			# ────────────────────────────────────────────────────────────────────
+			# `last_suffix` will be `None` at the beginning.
+			# ────────────────────────────────────────────────────────────────────
 
-		# ────────────────────────────────────────────────────────────────────
-		# STEP 1: Roll-over by Minute
-		# ────────────────────────────────────────────────────────────────────
-		# `last_suffix` will be `None` at the beginning.
-		# ────────────────────────────────────────────────────────────────────
+			last_suffix, json_writer = symbol_to_file_handles.get(
+				symbol, (None, None))
 
-		last_suffix, json_writer = symbol_to_file_handles.get(
-			symbol, (None, None))
-
-		if last_suffix != suffix:
-
-			# logger.warning(
-			# 	f"\n"
-			# 	f"\tsuffix:	{suffix}\n"
-			# 	f"\tlast_s: {last_suffix}\n"
-			# )
-
-			if json_writer:							  # if not the first flush
-
-				# ────────────────────────────────────────────────────────────
-
-				if not safe_close_jsonl(json_writer):
-
-					logger.warning(
-						f"[{my_name()}][{symbol.upper()}] "
-						f"JSON writer may not "
-						f"have been closed."
-					)
-
-				del json_writer
-
-				# ────────────────────────────────────────────────────────────
-				# fire and forget
-				# ────────────────────────────────────────────────────────────
+			if last_suffix != suffix:
 
 				# logger.warning(
-				# 	f"\trecords_znr_minutes[symbol]: "
-				# 	f"{records_znr_minutes[symbol]}"
+				# 	f"\n"
+				# 	f"\tsuffix:	{suffix}\n"
+				# 	f"\tlast_s: {last_suffix}\n"
 				# )
 
-				await asyncio.sleep(file_sync_delay_sec)
+				if json_writer:							  # if not the first flush
 
-				if last_suffix not in records_znr_minutes[symbol]:
+					# ────────────────────────────────────────────────────────────
 
-					memorize_treated(
-						records_znr_minutes,
-						records_max,
-						symbol, last_suffix
+					if not safe_close_jsonl(json_writer):
+
+						logger.warning(
+							f"[{my_name()}][{symbol.upper()}] "
+							f"JSON writer may not "
+							f"have been closed."
+						)
+
+					del json_writer
+
+					# ────────────────────────────────────────────────────────────
+					# fire and forget
+					# ────────────────────────────────────────────────────────────
+
+					# logger.warning(
+					# 	f"\trecords_znr_minutes[symbol]: "
+					# 	f"{records_znr_minutes[symbol]}"
+					# )
+
+					await asyncio.sleep(file_sync_delay_sec)
+
+					if last_suffix not in records_znr_minutes[symbol]:
+
+						memorize_treated(
+							records_znr_minutes,
+							records_max,
+							symbol, last_suffix
+						)
+
+						# logger.warning(f"\tznr_executor.submit()")
+
+						znr_executor.submit(	# pickle
+							proc_zip_n_remove_jsonl,
+							lob_dir, symbol_upper, 
+							last_suffix
+						)
+
+				# ────────────────────────────────────────────────────────────────
+
+				try: 
+					
+					json_writer = refresh_file_handle(
+						file_path, suffix, symbol, 
+						symbol_to_file_handles,
 					)
+					if json_writer is None: continue 
 
-					# logger.warning(f"\tznr_executor.submit()")
+				except Exception as e:
 
-					znr_executor.submit(	# pickle
-						proc_zip_n_remove_jsonl,
-						lob_dir, symbol_upper, 
-						last_suffix
+					logger.error(
+						f"[{my_name()}][{symbol_upper}] "
+						f"Failed to refresh file handles → {e}",
+						exc_info=True
 					)
+					continue
 
-			# ────────────────────────────────────────────────────────────────
+			# ────────────────────────────────────────────────────────────────────
+			# STEP 2: Check for day rollover and trigger merge
+			# At this point, ALL previous files are guaranteed to be .zip
+			# ────────────────────────────────────────────────────────────────────
 
-			try: 
-				
-				json_writer = refresh_file_handle(
-					file_path, suffix, symbol, 
-					symbol_to_file_handles,
-				)
-				if json_writer is None: continue 
+			try:
+
+				if last_suffix:
+
+					last_date = get_date_from_suffix(last_suffix)
+
+					if ((last_date != date_str) and 
+						(last_date not in records_merged_dates[symbol])
+					):
+
+						memorize_treated(
+							records_merged_dates,
+							records_max,
+							symbol, last_date
+						)
+						
+						merge_executor.submit(			# pickle
+							proc_symbol_consolidate_a_day,
+							symbol, last_date, lob_dir,
+							purge_on_date_change == 1
+						)
+
+						logger.info(
+							f"[{my_name()}][{symbol_upper}] "
+							f"Triggered merge for {last_date} "
+							f"(current day: {date_str})."
+						)
+
+						del last_date
 
 			except Exception as e:
 
 				logger.error(
 					f"[{my_name()}][{symbol_upper}] "
-					f"Failed to refresh file handles → {e}",
+					f"Failed to check/trigger merge: {e}",
 					exc_info=True
 				)
+
+				if 'last_date' in locals(): del last_date
+				del e
 				continue
 
-		# ────────────────────────────────────────────────────────────────────
-		# STEP 2: Check for day rollover and trigger merge
-		# At this point, ALL previous files are guaranteed to be .zip
-		# ────────────────────────────────────────────────────────────────────
+			finally:
 
-		try:
+				del date_str, last_suffix
 
-			if last_suffix:
+			# ────────────────────────────────────────────────────────────────────
+			# STEP 3: Write snapshot to file and update flush intervals
+			# This step ensures the snapshot is saved and flush intervals are updated.
+			# ────────────────────────────────────────────────────────────────────
 
-				last_date = get_date_from_suffix(last_suffix)
+			if not flush_snapshot(
+				json_writer,
+				snapshot,
+				symbol,
+				symbol_to_file_handles,
+				json_flush_interval,
+				latest_json_flush,
+				file_path,
+				# shutdown_event,
+			):
 
-				if ((last_date != date_str) and 
-					(last_date not in records_merged_dates[symbol])
-				):
+				logger.error(
+					f"[{my_name()}][{symbol_upper}] "
+					f"failed to flush snapshot.",
+					exc_info=True
+				)
 
-					memorize_treated(
-						records_merged_dates,
-						records_max,
-						symbol, last_date
-					)
-					
-					merge_executor.submit(			# pickle
-						proc_symbol_consolidate_a_day,
-						symbol, last_date, lob_dir,
-						purge_on_date_change == 1
-					)
+			# await asyncio.sleep(1)		# when simulating some delays
 
-					logger.info(
-						f"[{my_name()}][{symbol_upper}] "
-						f"Triggered merge for {last_date} "
-						f"(current day: {date_str})."
-					)
+			del snapshot, file_path
 
-					del last_date
+	except asyncio.CancelledError:
 
-		except Exception as e:
+		raise # logging unnecessary
 
-			logger.error(
-				f"[{my_name()}][{symbol_upper}] "
-				f"Failed to check/trigger merge: {e}",
-				exc_info=True
-			)
+	except Exception as e:
 
-			if 'last_date' in locals(): del last_date
-			del e
-			continue
+		logger.error(
+			f"[{my_name()}][{symbol_upper}] unexpected error: {e}"
+		)
 
-		finally:
+	finally:
 
-			del date_str, last_suffix
-
-		# ────────────────────────────────────────────────────────────────────
-		# STEP 3: Write snapshot to file and update flush intervals
-		# This step ensures the snapshot is saved and flush intervals are updated.
-		# ────────────────────────────────────────────────────────────────────
-
-		if not flush_snapshot(
-			json_writer,
-			snapshot,
-			symbol,
-			symbol_to_file_handles,
-			json_flush_interval,
-			latest_json_flush,
-			file_path,
-			shutdown_manager,
-		):
-
-			logger.error(
-				f"[{my_name()}][{symbol_upper}] "
-				f"Failed to flush snapshot.",
-				exc_info=True
-			)
-
-		# await asyncio.sleep(1)	# when simulating some delays
-
-		del snapshot, file_path
+		logger.info(f"[{my_name()}][{symbol_upper}] task ends")
 
 #———————————————————————————————————————————————————————————————————————————————
 # Wrapper to ensure logging of exceptions during asynchronous operations.
@@ -945,49 +971,51 @@ async def symbol_dump_snapshot(
 
 @ensure_logging_on_exception
 async def wrapped_put_snapshot(*args, **kwargs):
-	return await put_snapshot(*args, **kwargs)
+	try: return await put_snapshot(*args, **kwargs)
+	except asyncio.CancelledError: pass
+	except Exception as e: raise
 
 #———————————————————————————————————————————————————————————————————————————————
 
 @ensure_logging_on_exception
 async def put_snapshot(					# @depth20@100ms
-	#
+	#———————————————————————————————————————————————————————————————————————————
 	websocket_recv_interval:			deque[float],
 	websocket_recv_intv_stat:			dict[str, float],
 	put_snapshot_interval:				dict[str, deque[int]],
-	#
+	#———————————————————————————————————————————————————————————————————————————
 	snapshots_queue_dict:				dict[str, asyncio.Queue],
-	#
+	#———————————————————————————————————————————————————————————————————————————
 	event_stream_enable:				asyncio.Event,
 	mean_latency_dict:					dict[str, int],
 	event_1st_snapshot:					asyncio.Event,
-	#
+	#———————————————————————————————————————————————————————————————————————————
 	max_backoff:						int, 
 	base_backoff:						int,
 	reset_cycle_after:					int,
 	reset_backoff_level:				int,
-	#
+	#———————————————————————————————————————————————————————————————————————————
 	ws_url:								str,
 	wildcard_stream_binance_com_port:	str,
 	ports_stream_binance_com:			list[str],
-	#
+	#———————————————————————————————————————————————————————————————————————————
 	ws_ping_interval:					int,
 	ws_ping_timeout:					int,
 	symbols:							list[str],
 	logger:								logging.Logger,
-	#
+	#——————————————————————————————————————————————————————————————————— Howswap
 	port_cycling_period_hours:			float,
 	back_up_ready_ahead_sec:			float,
-	hot_swap_manager:					HotSwapManager = None,
+	hotswap_manager:					HotSwapManager = None,
 	shutdown_event:						Optional[asyncio.Event] = None,
 	handoff_event:						Optional[asyncio.Event] = None,
 	is_backup:							bool = False,
-	#
+	#———————————————————————————————————————————————————————————————————————————
 	base_interval_ms:					int	  = 100,
 	ws_timeout_multiplier:				float =	  8.0,
 	ws_timeout_default_sec:				float =	  2.0,
 	ws_timeout_min_sec:					float =	  1.0,	
-	#
+	#———————————————————————————————————————————————————————————————————————————
 ):
 
 	"""—————————————————————————————————————————————————————————————————————————
@@ -999,6 +1027,15 @@ async def put_snapshot(					# @depth20@100ms
 	HINT:
 		asyncio.Queue(maxsize=SNAPSHOTS_QUEUE_MAX)
 	—————————————————————————————————————————————————————————————————————————"""
+
+	def is_shutting_down():
+
+		return (
+			shutdown_event
+			and shutdown_event.is_set()
+		)
+
+	#———————————————————————————————————————————————————————————————————————————
 
 	def update_ws_recv_timeout(
 		data:		deque[float],
@@ -1084,10 +1121,6 @@ async def put_snapshot(					# @depth20@100ms
 	backup_start_time = refresh_period - back_up_ready_ahead_sec
 	hot_swap_initiated = False
 
-	# shutdown_event 안전 처리
-	def is_shutdown_requested():
-		return shutdown_event and shutdown_event.is_set()
-
 	ws_retry_cnt = 0
 	last_success_time = time.time()
 
@@ -1123,7 +1156,7 @@ async def put_snapshot(					# @depth20@100ms
 
 	cur_port_index = 0
 
-	while not is_shutdown_requested():
+	while not is_shutting_down():	# infinite standalone loop
 
 		cur_symbol = "UNKNOWN"
 
@@ -1150,32 +1183,41 @@ async def put_snapshot(					# @depth20@100ms
 				ws_start_time	  = time.time()
 
 				logger.info(
-					f"[{my_name()}] 🟢\n  "
+					f"[{my_name()}]🟢\n  "
 					f"{format_ws_url(ws_url_complete, symbols)} "
 					f"(is_backup: {int(is_backup)})"
 				)
 
 				# 백업 연결의 대기 및 활성화
+
 				if is_backup and handoff_event:
-					logger.info(f"[{my_name()}] 🕒 Backup Standby")
+
+					logger.info(f"[{my_name()}]🕒 backup standby")
+
 					try:
+
 						# 무한 대기 대신 타임아웃 설정
+
 						await asyncio.wait_for(
 							handoff_event.wait(), 
-							timeout=refresh_period + 30.0
+							timeout = refresh_period + 30.0
 						)
 						is_connection_active = True
-						logger.info(f"[{my_name()}] 🔥 Backup → Main")
+						logger.info(f"[{my_name()}]🔥 backup → main")
 						
 						# 백업이 활성화되면 새로운 백업 생성 스케줄링
-						if hot_swap_manager:
+
+						if hotswap_manager:
+
 							# hot_swap_initiated는 메인 연결의 것이므로 백업에서는 새로 시작
-							logger.info(f"[{my_name()}] 📅 Next Backup Scheduled")
+
+							logger.info(
+								f"[{my_name()}]📅 next backup scheduled"
+							)
 							
-							# schedule_backup_creation 사용 (올바른 방법)
 							next_schedule_task = asyncio.create_task(
 								schedule_backup_creation(
-									hot_swap_manager,
+									hotswap_manager,
 									backup_start_time,
 									lambda event, backup: wrapped_put_snapshot(
 										#
@@ -1205,7 +1247,7 @@ async def put_snapshot(					# @depth20@100ms
 										#
 										port_cycling_period_hours,
 										back_up_ready_ahead_sec,
-										hot_swap_manager,
+										hotswap_manager,
 										shutdown_event,
 										event,
 										backup,
@@ -1217,27 +1259,43 @@ async def put_snapshot(					# @depth20@100ms
 								)
 							)
 
-							hot_swap_manager.hot_swap_tasks.append(next_schedule_task)
+							hotswap_manager.hot_swap_tasks.append(
+								next_schedule_task
+							)
 							
 					except asyncio.TimeoutError:
-						logger.warning(f"[{my_name()}] Backup handoff timeout, terminating backup")
+
+						logger.warning(
+							f"[{my_name()}] backup handoff timeout, "
+							f"terminating backup"
+						)
 						return  # 백업 연결 종료
+
 					except Exception as e:
-						logger.error(f"[{my_name()}] Backup connection error: {e}")
+
+						logger.error(
+							f"[{my_name()}] backup connection error: {e}"
+						)
 						return  # 백업 연결 종료
 
 				# Hot swap 시작 (지정된 시간에 스케줄링)
-				elif (not is_backup and 
-					hot_swap_manager and 
-					not hot_swap_initiated):
+
+				elif (
+					not is_backup
+					and hotswap_manager
+					and not hot_swap_initiated
+				):
 
 					hot_swap_initiated = True
-					logger.info(f"[{my_name()}] 📅 Backup Schedule")
+					logger.info(
+						f"[{my_name()}]📅 backup schedule"
+					)
 					
 					# schedule_backup_creation 태스크 생성 및 등록
+
 					schedule_task = asyncio.create_task(
 						schedule_backup_creation(
-							hot_swap_manager,
+							hotswap_manager,
 							backup_start_time,
 							lambda event, backup: wrapped_put_snapshot(
 								#
@@ -1267,7 +1325,7 @@ async def put_snapshot(					# @depth20@100ms
 								#
 								port_cycling_period_hours,
 								back_up_ready_ahead_sec,
-								hot_swap_manager,
+								hotswap_manager,
 								shutdown_event,
 								event,
 								backup,
@@ -1279,45 +1337,68 @@ async def put_snapshot(					# @depth20@100ms
 						)
 					)
 
-					hot_swap_manager.hot_swap_tasks.append(schedule_task)
+					hotswap_manager.hot_swap_tasks.append(schedule_task)
 				
-				while not is_shutdown_requested():
+				while not is_shutting_down():
 					
 					# Hot swap 체크 (종료 중이면 Hot swap 시도 안 함)
-					if (is_connection_active and 
-						hot_swap_manager and 
-						not is_shutdown_requested() and  # 추가 체크
-						(time.time() - ws_start_time) >= refresh_period):
+
+					if (
+						is_connection_active
+						and hotswap_manager
+						and not is_shutting_down()
+						and (time.time() - ws_start_time) >= refresh_period
+					):
 						
 						# 백업 상태 재확인
-						if hot_swap_manager.is_ready_for_handoff():
+
+						if hotswap_manager.is_ready_for_handoff():
+
 							try:
-								logger.info(f"[{my_name()}] 🔄 HotSwap Init")
-								await hot_swap_manager.complete_handoff(logger)
-								logger.info(f"[{my_name()}] ✅ HotSwap Done")
-								return
+
+								logger.info(
+									f"[{my_name()}]🔄 hotswap starts"
+								)
+
+								await hotswap_manager.complete_handoff(logger)
+
+								logger.info(
+									f"[{my_name()}]✅ hotswap done"
+								)
+
+								return	# (Tidy for Readability) → (Flow Chart)
+
 							except Exception as e:
-								logger.warning(f"[{my_name()}] Hot swap failed, continuing with current connection: {e}")
+
+								logger.warning(
+									f"[{my_name()}] hotswap failed, "
+									f"continuing with current connection: {e}"
+								)
 								hot_swap_initiated = False
 								ws_start_time = time.time()
+
 						else:
-							logger.warning(f"[{my_name()}] Backup not ready, continuing with current connection")
+
+							logger.warning(
+								f"[{my_name()}] backup not ready; "
+								f"continuing with current conn."
+							)
 							hot_swap_initiated = False
 							ws_start_time = time.time()
 					
-					# 종료 요청 재확인 (메시지 루프 전)
-					if is_shutdown_requested():
-						logger.info(f"[{my_name()}] Shutdown requested, exiting message loop")
-						break
-					
 					try:
+
+						if is_shutting_down(): break
 
 						raw = await asyncio.wait_for(
 							ws.recv(),
 							timeout = ws_timeout_sec
 						)
 
+						if is_shutting_down(): break
+
 						if not is_connection_active:
+
 							continue
 
 						try:
@@ -1480,33 +1561,51 @@ async def put_snapshot(					# @depth20@100ms
 							)
 							logger.warning(
 								f"[{my_name()}][{sym.upper()}] "
-								f"Failed to process message: {e}",
+								f"failed to process message: {e}",
 								exc_info=True
 							)
 							continue  # stay in websocket loop
 
 					except asyncio.TimeoutError:
 
+						if is_shutting_down(): break
+
 						ws_retry_cnt += 1
 						
 						logger.warning(
 							f"[{my_name()}]\n"
-							f"\tNo data received for {ws_timeout_sec:.6f} seconds.\n"
-							f"\tp90 ws.recv() intv.: {websocket_recv_intv_stat['p90']:.6f}.\n"
+							f"\tno data received for "
+							f"{ws_timeout_sec:.6f}s\n"
+							f"\tp90 ws.recv() intv.: "
+							f"{websocket_recv_intv_stat['p90']:.6f}.\n"
 							f"\tReconnecting..."
 						)
 
-						ws_retry_cnt, last_success_time = await calculate_backoff_and_sleep(
-							ws_retry_cnt, cur_symbol, last_success_time,
+						(
+							#
+							ws_retry_cnt,
+							last_success_time
+							#
+						) = await calculate_backoff_and_sleep(
+							#
+							ws_retry_cnt, cur_symbol,
+							last_success_time,
+							#
 						)
 
 						break
 
+					except asyncio.CancelledError:
+
+						break
+
 		except asyncio.CancelledError:
-			# propagate so caller can shut down gracefully
-			raise
+			
+			raise # logging unnecessary
 
 		except Exception as e:
+
+			if is_shutting_down(): break
 
 			# websocket-level error → exponential backoff + retry
 
@@ -1520,7 +1619,7 @@ async def put_snapshot(					# @depth20@100ms
 
 			logger.warning(
 				f"[{my_name()}][{sym.upper()}] "
-				f"WebSocket error "
+				f"websocket error "
 				f"(ws_retry_cnt {ws_retry_cnt}): "
 				f"{e}",
 				exc_info=True
@@ -1544,7 +1643,7 @@ async def put_snapshot(					# @depth20@100ms
 				else "UNKNOWN"
 			)
 			logger.info(
-				f"[{my_name()}] 📴 WS Closed"
+				f"[{my_name()}]📴 ws closed"
 			)
 
 #———————————————————————————————————————————————————————————————————————————————

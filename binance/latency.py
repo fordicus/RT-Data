@@ -41,11 +41,19 @@ async def gate_streaming_by_latency(
 	latency_signal_sleep: float,
 	symbols:			  list[str],
 	logger:				  logging.Logger,
+	shutdown_event:		  Optional[asyncio.Event] = None,
 ):
+
+	#———————————————————————————————————————————————————————————————————————————
+
+	def is_shutting_down():
+		return (shutdown_event and shutdown_event.is_set())
+
+	#———————————————————————————————————————————————————————————————————————————
 
 	has_logged_warmup = False
 
-	while True:
+	while not is_shutting_down():	# infinite standalone loop
 
 		try:
 
@@ -64,7 +72,7 @@ async def gate_streaming_by_latency(
 
 				logger.info(
 					f"[{my_name()}] "
-					f"Latency Normalized → LOB ▶️"
+					f"latency normalized → orderbook▶️"
 				)
 
 				event_stream_enable.set()
@@ -78,7 +86,7 @@ async def gate_streaming_by_latency(
 				):
 
 					logger.info(
-						f"[{my_name()}] 🔥 Warming up "
+						f"[{my_name()}]🔥 warming up"
 					)
 
 					has_logged_warmup = True
@@ -90,12 +98,16 @@ async def gate_streaming_by_latency(
 
 					logger.warning(
 						f"[{my_name()}] "
-						f"Latency Degraded → LOB ⏸️"
+						f"latency degraded → orderbook⏸️"
 					)
 
 					event_stream_enable.clear()
 
 			await asyncio.sleep(latency_signal_sleep)
+
+		except asyncio.CancelledError:
+
+			raise # logging unnecessary
 
 		except Exception as e:
 
@@ -107,6 +119,10 @@ async def gate_streaming_by_latency(
 			)
 
 			await asyncio.sleep(latency_signal_sleep)
+			
+	logger.info(
+		f"[{my_name()}] task ends"
+	)
 
 #———————————————————————————————————————————————————————————————————————————————
 
@@ -126,6 +142,7 @@ async def estimate_latency(
 	reset_backoff_level:	int,
 	symbols:				list[str],
 	logger:					logging.Logger,
+	shutdown_event:			Optional[asyncio.Event] = None,
 	base_interval_ms:		int   = 100,
 	ws_timeout_multiplier:	float =	  8.0,
 	ws_timeout_default_sec:	float =	  2.0,
@@ -136,6 +153,11 @@ async def estimate_latency(
 	CORE FUNCTIONALITY:
 		Measure network latency via @depth@100ms stream with timeout-based recv
 	—————————————————————————————————————————————————————————————————————————"""
+
+	def is_shutting_down():
+		return (shutdown_event and shutdown_event.is_set())
+
+	#———————————————————————————————————————————————————————————————————————————
 
 	def update_ws_recv_timeout(
 		data:		deque[float],
@@ -230,7 +252,7 @@ async def estimate_latency(
 
 	#———————————————————————————————————————————————————————————————————————————
 
-	while True:
+	while not is_shutting_down():	# infinite standalone loop
 
 		cur_symbol = "UNKNOWN"
 
@@ -274,25 +296,29 @@ async def estimate_latency(
 				)
 
 				logger.info(
-					f"[{my_name()}] 🌐 WS Peer {websocket_peer['value']}"
+					f"[{my_name()}]🌐 ws peer {websocket_peer['value']}"
 				)
 				
 				logger.info(
-					f"[{my_name()}] 🟢\n  "
+					f"[{my_name()}]🟢\n  "
 					f"{format_ws_url(url, symbols)}"
 				)
 
 				ws_retry_cnt = 0
 				last_success_time = time.time()
 
-				while True:
+				while not is_shutting_down():
 
 					try:
+
+						if is_shutting_down(): break
 
 						raw_msg = await asyncio.wait_for(
 							ws.recv(),
 							timeout = ws_timeout_sec
 						)
+
+						if is_shutting_down(): break
 
 						try:
 
@@ -381,7 +407,7 @@ async def estimate_latency(
 										event_latency_valid.set()
 
 										logger.info(
-											f"[{my_name()}] ✅ Latency OK"
+											f"[{my_name()}]✅ latency ok"
 										)
 								
 								else:
@@ -423,6 +449,8 @@ async def estimate_latency(
 
 					except asyncio.TimeoutError:
 
+						if is_shutting_down(): break
+
 						ws_retry_cnt += 1
 						
 						logger.warning(
@@ -439,10 +467,18 @@ async def estimate_latency(
 						break
 
 		except asyncio.CancelledError:
-			# propagate so caller can shut down gracefully
-			raise
+			
+			event_latency_valid.clear()
+			for symbol in symbols:
+				latency_dict[symbol].clear()
+				depth_update_id_dict[symbol] = 0
+				mean_latency_dict[symbol] = None
+
+			raise # logging unnecessary
 
 		except Exception as e:
+
+			if is_shutting_down(): break
 
 			ws_retry_cnt += 1
 
@@ -467,8 +503,10 @@ async def estimate_latency(
 		finally:
 
 			logger.info(
-				f"[{my_name()}] "
-				f"WebSocket connection closed."
+				f"[{my_name()}]📴 ws closed"
 			)
+
+	logger.info(f"[{my_name()}] task ends")
+	event_latency_valid.clear()
 
 #———————————————————————————————————————————————————————————————————————————————

@@ -38,7 +38,7 @@ def resource_path(	# Resource Resolver for PyInstaller
 				)
 
 			logger.info(
-				f"[{my_name()}] 📂 {relative_path}"
+				f"[{my_name()}]📂 {relative_path}"
 			)
 
 		if hasattr(sys, "_MEIPASS"):		# PyInstaller
@@ -383,14 +383,19 @@ class UTCFormatter(logging.Formatter):
 	def formatTime(self, record, datefmt=None):
 
 		# Convert record creation time to UTC datetime
-		dt = datetime.fromtimestamp(record.created, tz=timezone.utc)
+		dt = datetime.fromtimestamp(
+			record.created,
+			tz=timezone.utc
+		)
 		
 		# Return formatted string based on optional format string
 		if datefmt:
 			return dt.strftime(datefmt)
 		
 		# Default to ISO 8601 format
-		return dt.isoformat(timespec='microseconds')
+		return dt.isoformat(
+			timespec='microseconds'
+		)
 
 #———————————————————————————————————————————————————————————————————————————————
 
@@ -603,6 +608,10 @@ def ensure_logging_on_exception(
 		try:
 
 			return await coro_func(*args, **kwargs)
+
+		except asyncio.CancelledError:
+			
+			raise
 
 		except Exception as e:
 

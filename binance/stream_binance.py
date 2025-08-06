@@ -66,7 +66,8 @@ from init import (
 )
 
 from shutdown import (
-	create_shutdown_manager
+	ShutdownManager,
+	create_shutdown_manager,
 )
 
 from util import (
@@ -97,7 +98,7 @@ from dashboard import (
 	create_dashboard_server,
 )
 
-import os, time, random, logging
+import os, signal, threading, time, random, logging
 import asyncio, certifi
 from datetime import datetime, timezone
 from collections import deque
@@ -148,23 +149,25 @@ setup_uvloop(logger = logger)
 
 #———————————————————————————————————————————————————————————————————————————————
 
-SNAPSHOTS_QUEUE_DICT:   dict[str, asyncio.Queue] = {}
-SYMBOL_TO_FILE_HANDLES: dict[str, tuple[str, TextIOWrapper]] = {}
+SNAPSHOTS_QUEUE_DICT:	  dict[str, asyncio.Queue] = {}
+SYMBOL_TO_FILE_HANDLES:	  dict[str, tuple[str, TextIOWrapper]] = {}
 
-RECORDS_MERGED_DATES: dict[str, OrderedDict[str]] = {}
-RECORDS_ZNR_MINUTES:  dict[str, OrderedDict[str]] = {}
+RECORDS_MERGED_DATES:	  dict[str, OrderedDict[str]] = {}
+RECORDS_ZNR_MINUTES:	  dict[str, OrderedDict[str]] = {}
 
-PUT_SNAPSHOT_INTERVAL: dict[str, deque[int]] = {}
-MEAN_LATENCY_DICT:	   dict[str, int] = {}
+PUT_SNAPSHOT_INTERVAL:	  dict[str, deque[int]] = {}
+MEAN_LATENCY_DICT:		  dict[str, int] = {}
 
-LATEST_JSON_FLUSH:   dict[str, int] = {}
-JSON_FLUSH_INTERVAL: dict[str, deque[int]] = {}
+LATEST_JSON_FLUSH:		  dict[str, int] = {}
+JSON_FLUSH_INTERVAL:	  dict[str, deque[int]] = {}
 
 WEBSOCKET_PEER:			  dict[str, str]   = {"value": "UNKNOWN"}
 WEBSOCKET_RECV_INTV_STAT: dict[str, float] = {"p90": float('inf')}
 WEBSOCKET_RECV_INTERVAL:  deque[float] = deque(
 	maxlen = max(len(SYMBOLS), 300)
 )
+
+#———————————————————————————————————————————————————————————————————————————————
 
 #———————————————————————————————————————————————————————————————————————————————
 
@@ -201,10 +204,13 @@ if __name__ == "__main__":
 			#———————————————————————————————————————————————————————————————————
 
 			(
+			#
 				EVENT_1ST_SNAPSHOT,
 				EVENT_LATENCY_VALID,
 				EVENT_STREAM_ENABLE,
+			#
 			) = init_runtime_state(
+			#
 				MEAN_LATENCY_DICT,
 				LATEST_JSON_FLUSH,
 				JSON_FLUSH_INTERVAL,
@@ -216,10 +222,19 @@ if __name__ == "__main__":
 				RECORDS_ZNR_MINUTES,
 				SYMBOLS,
 				logger,
+			#
 			)
 
 			shutdown_manager.register_file_handles(
 				SYMBOL_TO_FILE_HANDLES
+			)
+
+			#———————————————————————————————————————————————————————————————————
+
+			MAIN_SHUTDOWN_EVENT = asyncio.Event()
+
+			shutdown_manager.register_shutdown_event(
+				MAIN_SHUTDOWN_EVENT
 			)
 
 			#———————————————————————————————————————————————————————————————————
@@ -246,10 +261,10 @@ if __name__ == "__main__":
 			}
 			
 			dashboard_server = create_dashboard_server(
-				state_refs=dashboard_state,
-				config=dashboard_config,
-				shutdown_manager=shutdown_manager,
-				logger=logger
+				state_refs =	   dashboard_state,
+				config =		   dashboard_config,
+				shutdown_manager = shutdown_manager,
+				logger =		   logger
 			)
 			
 			#———————————————————————————————————————————————————————————————————
@@ -274,20 +289,19 @@ if __name__ == "__main__":
 						RESET_BACKOFF_LEVEL,
 						SYMBOLS,
 						logger,
+						shutdown_event = MAIN_SHUTDOWN_EVENT,
 					), 
 					name="estimate_latency()",
 				)
 
-				# shutdown_event를 ShutdownManager와 연동
-				main_shutdown_event = asyncio.Event()
-
-				# ShutdownManager에 shutdown_event 등록
-				shutdown_manager.register_shutdown_event(main_shutdown_event)
+				#———————————————————————————————————————————————————————————————
 				
-				hot_swap_manager = HotSwapManager()
+				HOTSWAP_MANAGER = HotSwapManager()
+				HOTSWAP_MANAGER.set_shutdown_event(
+					MAIN_SHUTDOWN_EVENT
+				)
 
-				# HotSwapManager에도 shutdown_event 전달
-				hot_swap_manager.set_shutdown_event(main_shutdown_event)
+				#———————————————————————————————————————————————————————————————
 
 				put_snapshot_task = asyncio.create_task(
 					put_snapshot(	# @depth20@100ms
@@ -317,18 +331,21 @@ if __name__ == "__main__":
 						logger,
 						#
 						# port_cycling_period_hours =  12.0,		# 12 hours
-						port_cycling_period_hours =  0.5,		# 30 minutes
-						# port_cycling_period_hours =  0.016667,	# 60 seconds
-						# port_cycling_period_hours =  0.008333, # 30 seconds
-						back_up_ready_ahead_sec = 10.0,
+						# port_cycling_period_hours =   0.5,		# 30 minutes
+						# port_cycling_period_hours =   0.016667,	# 60 seconds
+						port_cycling_period_hours =  0.008333, # 30 seconds
+						# back_up_ready_ahead_sec = 10.0,
 						# back_up_ready_ahead_sec =  7.5,
-						hot_swap_manager =	hot_swap_manager,
-						shutdown_event =	main_shutdown_event,	# 실제 연동된 이벤트
-						handoff_event =		None,  # 메인 연결
+						back_up_ready_ahead_sec =  5.0,
+						hotswap_manager =	HOTSWAP_MANAGER,
+						shutdown_event =	MAIN_SHUTDOWN_EVENT,	# 실제 연동된 이벤트
+						handoff_event =		None,					# 메인 연결
 						is_backup =			False,
 					),
 					name="put_snapshot()",
 				)
+
+				#———————————————————————————————————————————————————————————————
 
 				monitor_hardware_task = asyncio.create_task(
 					monitor_hardware(
@@ -340,6 +357,8 @@ if __name__ == "__main__":
 					),
 					name="monitor_hardware()",
 				)
+
+				#———————————————————————————————————————————————————————————————
 
 				dump_tasks = []
 				for symbol in SYMBOLS:
@@ -360,11 +379,13 @@ if __name__ == "__main__":
 							RECORDS_ZNR_MINUTES,
 							RECORDS_MAX,
 							logger,
-							shutdown_manager,
+							shutdown_event = MAIN_SHUTDOWN_EVENT,
 						),
 						name=f"symbol_dump_snapshot({symbol})"
 					)
 					dump_tasks.append(task)
+
+				#———————————————————————————————————————————————————————————————
 
 				gate_streaming_by_latency_task = asyncio.create_task(
 					gate_streaming_by_latency(
@@ -374,9 +395,12 @@ if __name__ == "__main__":
 						LATENCY_SIGNAL_SLEEP,
 						SYMBOLS,
 						logger,
+						shutdown_event = MAIN_SHUTDOWN_EVENT,
 					),
 					name="gate_streaming_by_latency()",
 				)
+
+				#———————————————————————————————————————————————————————————————
 
 				all_tasks = [
 					estimate_latency_task,
@@ -386,70 +410,82 @@ if __name__ == "__main__":
 					gate_streaming_by_latency_task,
 				]
 
-				shutdown_manager.register_asyncio_tasks(*all_tasks)
+				#———————————————————————————————————————————————————————————————
 
-				# shutdown_manager에서 shutdown_event 생성
 				def shutdown_callback():
-					"""Hot Swap 관련 리소스 정리"""
-					try:
-						print(f"[DEBUG] shutdown_callback started at {time.time()}")  # 디버그 로그
-						logger.info("[main] shutdown_callback started")
 
-						# Hot Swap 태스크들을 ShutdownManager에 추가 등록
-						if hot_swap_manager and hasattr(hot_swap_manager, 'hot_swap_tasks'):
-							print(f"[DEBUG] Registering {len(hot_swap_manager.hot_swap_tasks)} hot swap tasks")
-							if hot_swap_manager.hot_swap_tasks:
-								shutdown_manager.register_asyncio_tasks(*hot_swap_manager.hot_swap_tasks)
-								logger.info(f"[main] Registered {len(hot_swap_manager.hot_swap_tasks)} hot swap tasks with ShutdownManager")
+					#———————————————————————————————————————————————————————————
 
-						if hot_swap_manager:
-							try:
-								print(f"[DEBUG] Getting event loop at {time.time()}")
-								loop = asyncio.get_running_loop()
-								if loop and not loop.is_closed():
-									print(f"[DEBUG] Creating cleanup task at {time.time()}")
-									# Task 생성만 하고 백그라운드에서 실행
-									cleanup_task = loop.create_task(
-										hot_swap_manager.graceful_shutdown(logger)
+					async def wait_and_print_final(
+						shutdown_manager:	ShutdownManager,
+						cleanup_task:		asyncio.Task,
+						logger:				logging.Logger,
+					):
+
+						try:
+
+							await cleanup_task
+
+						except Exception as e:
+
+							logger.error(
+								f"[{my_name()}] "
+								f"Hotswap cleanup error: {e}"
+							)
+
+						finally:
+
+							shutdown_manager.final_message()
+
+					#———————————————————————————————————————————————————————————
+
+					logger.info(
+						f"[{my_name()}] HOTSWAP_MANAGER @main"
+					)
+
+					if HOTSWAP_MANAGER:
+
+						try:
+
+							loop = asyncio.get_running_loop()
+
+							if loop and not loop.is_closed():
+
+								cleanup_task = loop.create_task(
+									HOTSWAP_MANAGER.graceful_shutdown(logger)
+								)
+								
+								asyncio.create_task(
+									wait_and_print_final(
+										shutdown_manager,
+										cleanup_task,
+										logger,
 									)
-									
-									def cleanup_done_callback(task):
-										print(f"[DEBUG] Cleanup task completed at {time.time()}")
-										try:
-											if task.cancelled():
-												logger.info("[main] Hot Swap cleanup task was cancelled")
-											elif task.exception():
-												logger.error(f"[main] Hot Swap cleanup error: {task.exception()}")
-											else:
-												logger.info("[main] Hot Swap cleanup task completed")
-										except Exception as e:
-											logger.warning(f"[main] Error in cleanup callback: {e}")
-									
-									# Task 완료를 위한 콜백 등록
-									cleanup_task.add_done_callback(cleanup_done_callback)
-									print(f"[DEBUG] Cleanup task registered at {time.time()}")
-									
-								else:
-									logger.warning("Cannot shutdown HotSwapManager - no running loop")
-							except RuntimeError as e:
-								logger.warning(f"Cannot shutdown HotSwapManager - runtime error: {e}")
-							except Exception as e:
-								logger.error(f"Unexpected error during HotSwapManager shutdown: {e}")
-						else:
-							logger.warning("[main] HotSwapManager is None during shutdown")
-						
-						print(f"[DEBUG] shutdown_callback ending at {time.time()}")
-						logger.info("[main] Hot Swap cleanup initiated")
-					except Exception as e:
-						print(f"[DEBUG] shutdown_callback error at {time.time()}: {e}")
-						logger.error(f"[main] Hot Swap cleanup error: {e}", exc_info=True)
+								)
 
-				shutdown_manager.add_cleanup_callback(shutdown_callback)
+						except Exception as e:
+
+							logger.error(
+								f"[{my_name()}] HOTSWAP_MANAGER: {e}"
+							)
+							
+							shutdown_manager.final_message()
+					else:
+						
+						shutdown_manager.final_message()
+
+				#———————————————————————————————————————————————————————————————
+
+				shutdown_manager.add_cleanup_callback(
+					shutdown_callback
+				)
+
+				#———————————————————————————————————————————————————————————————
 
 			except Exception as e:
 
 				logger.critical(
-					f"[{my_name()}] Failed to launch "
+					f"[{my_name()}] failed to launch "
 					f"async coroutines: {e}",
 					exc_info=True
 				)
@@ -463,7 +499,7 @@ if __name__ == "__main__":
 			except Exception as e:
 
 				logger.error(
-					f"[{my_name()}] Error while "
+					f"[{my_name()}] error while "
 					f"waiting for EVENT_1ST_SNAPSHOT: {e}",
 					exc_info=True
 				)
@@ -474,11 +510,6 @@ if __name__ == "__main__":
 			#———————————————————————————————————————————————————————————————————
 
 			try:
-
-				logger.info(
-					f"[{my_name()}] 🚀 FastAPI Start → "
-					f"http://localhost:{DASHBOARD_PORT_NUMBER}/dashboard"
-				)
 
 				cfg = Config(
 					app		   = dashboard_server.app,
@@ -492,15 +523,19 @@ if __name__ == "__main__":
 				)
 
 				server = Server(cfg)
-				print(f"[DEBUG] Starting uvicorn server at {time.time()}")
+				logger.info(
+					f"[{my_name()}]🚀 fastapi starts → "
+					f"http://localhost:{DASHBOARD_PORT_NUMBER}/dashboard"
+				)
 				await server.serve()
-				print(f"[DEBUG] Uvicorn server stopped at {time.time()}")
-				logger.info("[main] FastAPI server has stopped")
+				logger.info(
+					f"[{my_name()}]⚓ fastapi ends"
+				)
 
 			except Exception as e:
 
 				logger.critical(
-					f"[{my_name()}] FastAPI server "
+					f"[{my_name()}] fastapi "
 					f"failed to start: {e}",
 					exc_info=True
 				)
@@ -512,7 +547,7 @@ if __name__ == "__main__":
 
 			logger.critical(
 				f"[{my_name()}] "
-				f"Unhandled exception: {e}",
+				f"unhandled exception: {e}",
 				exc_info=True
 			)
 			raise SystemExit from e
@@ -524,24 +559,62 @@ if __name__ == "__main__":
 	except KeyboardInterrupt:
 
 		logger.info(
-			f"[__main__] Application terminated "
+			f"[{my_name()}] application terminated "
 			f"by user (Ctrl + C)."
 		)
 
 	except Exception as e:
 
 		logger.critical(
-			f"[__main__] Unhandled exception: {e}",
+			f"[{my_name()}] unhandled exception: {e}",
 			exc_info=True
 		)
 		raise SystemExit from e
 
-	finally: 
+	finally:
 
-		try:
-			
-			queue_listener.stop()
-
+		try: queue_listener.stop()
 		except Exception: pass
 
+		def conditional_force_exit(
+			patience_sec: float = 10.0
+		):
+
+			time.sleep(patience_sec)
+
+			if (
+				shutdown_manager
+				and not shutdown_manager.is_shutdown_complete()
+			):
+
+				logger.warning(
+					f"[{my_name()}] "
+					f"shutdown incomplete: "
+					f"forcing exit"
+				)
+
+				try:
+
+					for handler in logger.handlers:
+
+						handler.flush()
+
+					os.kill(os.getpid(), signal.SIGKILL)
+
+				except Exception:
+
+					os._exit(1)
+
+		threading.Thread(
+			target=conditional_force_exit,
+			daemon=True
+		).start()
+
+		if (
+			shutdown_manager
+			and not shutdown_manager.is_shutdown_complete()
+		):
+			
+			shutdown_manager.graceful_shutdown()
+			
 #———————————————————————————————————————————————————————————————————————————————
