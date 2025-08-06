@@ -1578,7 +1578,9 @@ async def put_snapshot(					# @depth20@100ms
 							f"{ws_timeout_sec:.6f}s\n"
 							f"\tp90 ws.recv() intv.: "
 							f"{websocket_recv_intv_stat['p90']:.6f}.\n"
-							f"\tReconnecting..."
+							f"\t(ws_retry_cnt {ws_retry_cnt}) "
+							f"reconnecting...",
+							exc_info = False,
 						)
 
 						(
@@ -1595,13 +1597,43 @@ async def put_snapshot(					# @depth20@100ms
 
 						break
 
+					except websockets.exceptions.ConnectionClosed as e:
+						
+						if is_shutting_down(): break
+						
+						ws_retry_cnt += 1
+						
+						logger.warning(
+							f"[{my_name()}]\n"
+							f"\twebSocket connection closed: "
+							f"{e.reason or 'no close frame'}\n"
+							f"\t(ws_retry_cnt {ws_retry_cnt}) "
+							f"reconnecting...",
+							exc_info = False,
+						)
+						
+						(
+							#
+							ws_retry_cnt,
+							last_success_time
+							#
+						) = await calculate_backoff_and_sleep(
+							#
+							ws_retry_cnt,
+							cur_symbol,
+							last_success_time,
+							#
+						)
+						
+						break
+
 					except asyncio.CancelledError:
 
-						break
+						break 	# logging unnecessary
 
 		except asyncio.CancelledError:
 			
-			raise # logging unnecessary
+			raise 	# logging unnecessary
 
 		except Exception as e:
 
@@ -1618,15 +1650,24 @@ async def put_snapshot(					# @depth20@100ms
 			)
 
 			logger.warning(
-				f"[{my_name()}][{sym.upper()}] "
-				f"websocket error "
-				f"(ws_retry_cnt {ws_retry_cnt}): "
-				f"{e}",
-				exc_info=True
+				f"[{my_name()}]\n"
+				f"\twebsocket error: {e}\n"
+				f"\t(ws_retry_cnt {ws_retry_cnt}) "
+				f"reconnecting ...",
+				exc_info = True,
 			)
 
-			ws_retry_cnt, last_success_time = await calculate_backoff_and_sleep(
-				ws_retry_cnt, cur_symbol, last_success_time,
+			(
+				#
+				ws_retry_cnt,
+				last_success_time
+				#
+			) = await calculate_backoff_and_sleep(
+				#
+				ws_retry_cnt,
+				cur_symbol,
+				last_success_time,
+				#
 			)
 
 		finally:

@@ -331,12 +331,14 @@ if __name__ == "__main__":
 						logger,
 						#
 						# port_cycling_period_hours =  12.0,		# 12 hours
+						port_cycling_period_hours =   1.0,		# 60 minutes
 						# port_cycling_period_hours =   0.5,		# 30 minutes
 						# port_cycling_period_hours =   0.016667,	# 60 seconds
-						port_cycling_period_hours =  0.008333, # 30 seconds
+						# port_cycling_period_hours =   0.008333, # 30 seconds
+						back_up_ready_ahead_sec = 60.0,
 						# back_up_ready_ahead_sec = 10.0,
 						# back_up_ready_ahead_sec =  7.5,
-						back_up_ready_ahead_sec =  5.0,
+						# back_up_ready_ahead_sec =  5.0,
 						hotswap_manager =	HOTSWAP_MANAGER,
 						shutdown_event =	MAIN_SHUTDOWN_EVENT,	# 실제 연동된 이벤트
 						handoff_event =		None,					# 메인 연결
