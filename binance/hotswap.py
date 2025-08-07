@@ -1,4 +1,4 @@
-# hotswap.py @2025-08-06 20:22:	DO NOT BLINDLY MODIFY THIS CODE
+# hotswap.py @2025-08-07 10:16 / DO NOT BLINDLY MODIFY THIS CODE
 
 import asyncio, time, logging
 from dataclasses import dataclass
@@ -11,10 +11,11 @@ from util import (
 
 @dataclass
 class ConnectionState:
-	task:			asyncio.Task
-	is_active:		bool = False
-	handoff_event:	Optional[asyncio.Event] = None
-	creation_time:	float = 0.0
+	
+	task:		   asyncio.Task
+	is_active:	   bool = False
+	handoff_event: Optional[asyncio.Event] = None
+	creation_time: float = 0.0
 
 #———————————————————————————————————————————————————————————————————————————————
 
@@ -24,11 +25,13 @@ class HotSwapManager:
 	
 	def __init__(self):
 
-		self.current_connection: Optional[ConnectionState] = None
-		self.pending_connection: Optional[ConnectionState] = None
-		self.swap_lock =		 asyncio.Lock()
-		self.shutdown_event:	 Optional[asyncio.Event] = None
-		self.hot_swap_tasks:	 list[asyncio.Task] = []
+		self.current_port_index =	0
+		self.current_connection:	Optional[ConnectionState] = None
+		self.pending_connection:	Optional[ConnectionState] = None
+		self.swap_lock =			asyncio.Lock()
+		self.shutdown_event:		Optional[asyncio.Event] = None
+		self.hot_swap_tasks:		list[asyncio.Task] = []
+		self.handoff_completed =	False
 
 	#———————————————————————————————————————————————————————————————————————————
 
@@ -46,6 +49,16 @@ class HotSwapManager:
 			self.shutdown_event
 			and self.shutdown_event.is_set()
 		)
+
+	#———————————————————————————————————————————————————————————————————————————
+
+	def get_next_port_index(self, ports_count: int) -> int:
+
+		self.current_port_index = (
+			(self.current_port_index + 1) % ports_count
+		)
+		
+		return self.current_port_index
 
 	#———————————————————————————————————————————————————————————————————————————
 
@@ -236,37 +249,50 @@ class HotSwapManager:
 
 	#———————————————————————————————————————————————————————————————————————————
 
-	async def _cleanup_old_connection(self,
+	async def _cleanup_old_connection( self,
 		old_conn: ConnectionState, logger
 	):
 
 		try:
 
-			await asyncio.sleep(1.0)
+			await asyncio.sleep(3.0)
 			
 			if not old_conn.task.done():
-
+		
 				old_conn.task.cancel()
 
-				try: await old_conn.task
-				except asyncio.CancelledError: pass
+				try: 
+
+					await asyncio.wait_for(
+						old_conn.task,
+						timeout = 3.0
+					)
+
+				except (
+					asyncio.CancelledError,
+					asyncio.TimeoutError
+				): 
+
+					pass
 					
-			logger.info(
-				f"[{my_name()}]🧹 old conn. closed"
-			)
+			logger.info(f"[{my_name()}]🧹 old conn. closed")
 			
 		except Exception as e:
 
-			logger.warning(
-				f"[{my_name()}] cleanup error: {e}"
-			)
+			if not isinstance(e, asyncio.CancelledError):
+
+				logger.warning(
+					f"[{my_name()}] cleanup error: {e}"
+				)
 
 	#———————————————————————————————————————————————————————————————————————————
 
 	async def complete_handoff(self, logger):
 
 		async with self.swap_lock:
+
 			if not self.pending_connection:
+
 				return
 				
 			logger.info(f"[{my_name()}]🤝 handoff")
@@ -280,8 +306,10 @@ class HotSwapManager:
 			old_connection = self.current_connection
 			self.current_connection = self.pending_connection
 			self.pending_connection = None
+			self.handoff_completed  = True
 			
 			if old_connection:
+
 				asyncio.create_task(
 					self._cleanup_old_connection(
 						old_connection, logger

@@ -346,7 +346,7 @@ class DashboardServer:
 
 									await websocket.close(
 										code=1000,
-										reason="Session time limit reached."
+										reason="session time limit"
 									)
 									break
 							
@@ -358,7 +358,7 @@ class DashboardServer:
 
 							self.logger.info(
 								f"[{my_name()}] "
-								f"WebSocket client disconnected."
+								f"ws client disconnects"
 							)
 							break
 							
@@ -366,7 +366,7 @@ class DashboardServer:
 
 							self.logger.info(
 								f"[{my_name()}] "
-								f"WebSocket handler task cancelled."
+								f"ws handler task cancelled"
 							)
 							break
 							
@@ -374,7 +374,7 @@ class DashboardServer:
 
 							self.logger.warning(
 								f"[{my_name()}] "
-								f"WebSocket error: {e}",
+								f"ws error: {e}",
 								exc_info=True
 							)
 							

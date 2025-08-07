@@ -10,6 +10,30 @@ from datetime import datetime, timezone
 from logging.handlers import QueueHandler, QueueListener
 from typing import Callable, Optional
 
+#———————————————————————————————————————————————————————————————————————————
+# https://tinyurl.com/ANSI-256-Color-Palette
+#———————————————————————————————————————————————————————————————————————————
+
+CMAP4TXT = {
+	#
+	'DEBUG':	'\033[38;5;242m',  # cool gray (low contrast, non-intrusive)
+	'INFO':	 	'\033[38;5;34m',   # green (positive, success-like)
+	'WARNING':  '\033[38;5;214m',  # orange (attention-grabbing, softer red)
+	'ERROR':	'\033[38;5;196m',  # bright red (danger, strong error)
+	'CRITICAL': '\033[38;5;199m',  # magenta red (urgent, dramatic)
+	#
+	'BLACK':	'\033[30m',
+	'RED':		'\033[31m',
+	'GREEN':	'\033[32m',
+	'YELLOW':	'\033[33m',
+	'BLUE':		'\033[34m',
+	'MAGENTA':	'\033[35m',
+	'CYAN':		'\033[36m',
+	'WHITE':	'\033[37m',
+	#
+}
+RESET4TXT = '\033[0m'
+
 #———————————————————————————————————————————————————————————————————————————————
 # Technical Utilities
 #———————————————————————————————————————————————————————————————————————————————
@@ -284,20 +308,29 @@ async def geo(ip: str) -> str:
 
 def format_ws_url(
 	url: str, 
-	symbols: list[str]
+	symbols: list[str],
+	ports_stream_binance_com: list[str] = None,
 ) -> str:
 
-	"""
-	Formats a Binance WebSocket URL for multi-symbol readability.
-	Adjusts the output based on the number of symbols in the subscription.
+	#———————————————————————————————————————————————————————————————————————————
 
-	Args:
-		url (str): The original WebSocket URL.
-		symbols (list[str]): List of subscribed symbols.
+	def colorize_prefix(
+		prefix: str,
+		ports: list[str],
+		color_code: str,
+	) -> str:
 
-	Returns:
-		str: Formatted WebSocket URL for logging.
-	"""
+		for port in ports:
+
+			if port in prefix:
+
+				colored = f"{color_code}{port}{RESET4TXT}"
+				prefix = prefix.replace(port, colored, 1)
+				break
+
+		return prefix
+
+	#———————————————————————————————————————————————————————————————————————————
 
 	try:
 
@@ -323,6 +356,16 @@ def format_ws_url(
 			raise ValueError(
 				f"Mismatch between symbols and streams: "
 				f"{len(symbols)} symbols, {len(symbol_streams)} streams."
+			)
+
+		# highlight the port number
+
+		if ports_stream_binance_com is not None:
+
+			prefix = colorize_prefix(
+				prefix, 
+				ports_stream_binance_com,
+				CMAP4TXT.get('CYAN', "\033[33m"),
 			)
 
 		# Format the URL with the first and last symbols,
@@ -354,26 +397,12 @@ _global_log_queue = None
 
 class UTCFormatter(logging.Formatter):
 
-	#———————————————————————————————————————————————————————————————————————————
-	# https://tinyurl.com/ANSI-256-Color-Palette
-	#———————————————————————————————————————————————————————————————————————————
-
-	COLOR_MAP = {
-		'DEBUG':	'\033[38;5;242m',  # cool gray (low contrast, non-intrusive)
-		'INFO':	 	'\033[38;5;34m',   # green (positive, success-like)
-		'WARNING':  '\033[38;5;214m',  # orange (attention-grabbing, softer red)
-		'ERROR':	'\033[38;5;196m',  # bright red (danger, strong error)
-		'CRITICAL': '\033[38;5;199m',  # magenta red (urgent, dramatic)
-	}
-	RESET = '\033[0m'
-	RESET = '\033[0m'
-
 	def format(self, record):
 
 		original_levelname = record.levelname
-		color = self.COLOR_MAP.get(original_levelname, '')
+		color = CMAP4TXT.get(original_levelname, '')
 		if color:
-			record.levelname = f"{color}{original_levelname}{self.RESET}"
+			record.levelname = f"{color}{original_levelname}{RESET4TXT}"
 		
 		formatted = super().format(record)
 

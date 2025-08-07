@@ -54,8 +54,13 @@ def load_config(
 	logger: logging.Logger,
 	config_path: str = "app.conf"
 ) -> tuple[
+	#
 	list[str],		# symbols
+	#
 	str,			# ws_url
+	str,			# wildcard_stream_binance_com_port
+	list[str],		# ports_stream_binance_com
+	#
 	str,			# lob_dir
 	#
 	int,			# purge_on_date_change
