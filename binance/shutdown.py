@@ -1,9 +1,12 @@
+# shutdown.py @2025-08-07 18:09 / DO NOT BLINDLY MODIFY THIS CODE
+
 import sys, os, asyncio, threading, signal, time, logging
 import concurrent.futures
 from concurrent.futures import ProcessPoolExecutor
 from io import TextIOWrapper
 from typing import Optional, Callable
 from util import my_name
+from hotswap import HotSwapManager
 
 class ShutdownManager:
 
@@ -263,5 +266,133 @@ def create_shutdown_manager(
 ) -> ShutdownManager:
 
 	return ShutdownManager(logger)
+
+#———————————————————————————————————————————————————————————————————————————————
+
+async def generic_shutdown_callback(
+	hotswap_manager:  HotSwapManager,
+	shutdown_manager: ShutdownManager,
+	logger:			  logging.Logger,
+) -> None:
+
+	"""
+	Generic shutdown callback that can be used in any script.
+	
+	Args:
+		hotswap_manager: The HotSwapManager instance to shutdown gracefully
+		shutdown_manager: The ShutdownManager instance for final cleanup
+		logger: Logger for output messages
+	"""
+	
+	async def wait_and_print_final(
+		shutdown_manager: ShutdownManager,
+		cleanup_task:	  asyncio.Task,
+		logger:			  logging.Logger,
+	) -> None:
+
+		"""
+		Wait for cleanup task completion and print final message.
+		
+		Args:
+			shutdown_manager: ShutdownManager instance for final message
+			cleanup_task: The hotswap cleanup task to wait for
+			logger: Logger for error messages
+		"""
+
+		try:
+
+			await cleanup_task
+
+		except Exception as e:
+
+			logger.error(
+				f"[{my_name()}] "
+				f"Hotswap cleanup error: {e}"
+			)
+
+		finally:
+
+			shutdown_manager.final_message()
+
+	# Log the shutdown initiation
+
+	logger.info(
+		f"[{my_name()}] {hotswap_manager.name} @main"
+	)
+
+	if hotswap_manager:
+
+		try:
+
+			loop = asyncio.get_running_loop()
+
+			if loop and not loop.is_closed():
+				cleanup_task = loop.create_task(
+					hotswap_manager.graceful_shutdown(logger)
+				)
+				
+				asyncio.create_task(
+					wait_and_print_final(
+						shutdown_manager,
+						cleanup_task,
+						logger,
+					)
+				)
+
+		except Exception as e:
+
+			logger.error(
+				f"[{my_name()}] {hotswap_manager.name}: {e}"
+			)
+
+			shutdown_manager.final_message()
+	else:
+
+		shutdown_manager.final_message()
+
+#———————————————————————————————————————————————————————————————————————————————
+
+def create_shutdown_callback(
+	hotswap_manager: HotSwapManager,
+	shutdown_manager: ShutdownManager,
+	logger: logging.Logger,
+) -> callable:
+
+	"""
+	Factory function that creates a shutdown callback with bound parameters.
+	
+	Args:
+		hotswap_manager: The HotSwapManager instance
+		shutdown_manager: The ShutdownManager instance  
+		logger: Logger instance
+		
+	Returns:
+		A parameterless callable that can be used as shutdown callback
+	"""
+
+	def shutdown_callback() -> None:
+
+		"""Parameterless shutdown callback for use with shutdown manager."""
+
+		try:
+
+			loop = asyncio.get_running_loop()
+
+			if loop and not loop.is_closed():
+
+				asyncio.create_task(
+					generic_shutdown_callback(
+						hotswap_manager,
+						shutdown_manager,
+						logger,
+					)
+				)
+
+		except RuntimeError:
+
+			# No event loop running, call final message directly
+			shutdown_manager.final_message()
+	
+	return shutdown_callback
 
 #———————————————————————————————————————————————————————————————————————————————

@@ -1,4 +1,45 @@
-# hotswap.py @2025-08-07 10:16 / DO NOT BLINDLY MODIFY THIS CODE
+# hotswap.py @2025-08-07 16:46 / DO NOT BLINDLY MODIFY THIS CODE
+
+#———————————————————————————————————————————————————————————————————————————————
+# Designed for asyncio.Task: event-driven, task-agnostic hot-swapping with
+# seamless, non-blocking transitions and robust lifecycle management.
+#———————————————————————————————————————————————————————————————————————————————
+#
+#	EXAMPLE:
+#
+#		async def generic_task(
+#			#
+#			logger:			logging.Logger,
+#			shutdown_event:	asyncio.Event,
+#			handoff_event:	Optional[asyncio.Event] = None,
+#			is_backup:		bool = False,
+#			#
+#		):
+#			
+#			is_active = not is_backup
+#		
+#			while not shutdown_event.is_set():
+#				
+#				if is_backup and handoff_event:
+#					
+#					await handoff_event.wait()
+#					
+#					is_active = True
+#		
+#				if not is_active:
+#					
+#					continue
+#		
+#				try:
+#					
+#					logger.info("Performing task operation...")
+#					await asyncio.sleep(1)
+#					
+#				except Exception as e:
+#					
+#					logger.error(f"Error during task operation: {e}")
+#		
+#———————————————————————————————————————————————————————————————————————————————
 
 import asyncio, time, logging
 from dataclasses import dataclass
@@ -23,8 +64,9 @@ class HotSwapManager:
 
 	#———————————————————————————————————————————————————————————————————————————
 	
-	def __init__(self):
+	def __init__(self, name: str):
 
+		self.name =					name
 		self.current_port_index =	0
 		self.current_connection:	Optional[ConnectionState] = None
 		self.pending_connection:	Optional[ConnectionState] = None
@@ -36,7 +78,7 @@ class HotSwapManager:
 	#———————————————————————————————————————————————————————————————————————————
 
 	def set_shutdown_event(self,
-		shutdown_event: asyncio.Event
+		shutdown_event: asyncio.Event,
 	):
 		self.shutdown_event = shutdown_event
 
@@ -65,7 +107,8 @@ class HotSwapManager:
 	def _cleanup_completed_tasks(self):
 
 		self.hot_swap_tasks = [
-			task for task in self.hot_swap_tasks 
+			task
+			for task in self.hot_swap_tasks 
 			if not task.done()
 		]
 
@@ -75,12 +118,16 @@ class HotSwapManager:
 		self
 	) -> bool:
 
-		return (self.pending_connection is not None and 
-				not self.pending_connection.task.done())
+		return (
+			self.pending_connection is not None
+			and not self.pending_connection.task.done()
+			)
 
 	#———————————————————————————————————————————————————————————————————————————
 
-	async def graceful_shutdown(self, logger):
+	async def graceful_shutdown(self, 
+		logger: logging.Logger,
+	):
 
 		try:
 
@@ -93,8 +140,9 @@ class HotSwapManager:
 				if self.hot_swap_tasks:
 
 					logger.info(
-						f"[{my_name()}] force cancelling "
-						f"{len(self.hot_swap_tasks)} hotswap tasks..."
+						f"[{my_name()}] cancelling "
+						f"{len(self.hot_swap_tasks)} "
+						f"hotswap tasks..."
 					)
 					
 					for i, task in enumerate(self.hot_swap_tasks):
@@ -102,6 +150,7 @@ class HotSwapManager:
 						if not task.done():
 
 							task.cancel()
+
 							logger.info(
 								f"[{my_name()}] "
 								f"hotswap task-{i+1} cancelled"
@@ -119,12 +168,13 @@ class HotSwapManager:
 						#———————————————————————————————————————————————————————
 
 						if self.hot_swap_tasks:
+
 							done, pending = await asyncio.wait_for(
 								asyncio.wait(
 									self.hot_swap_tasks,
 									return_when=asyncio.ALL_COMPLETED
 								),
-								timeout=1.0,
+								timeout = 1.0,
 							)
 							
 							# Silently handle any exceptions in the completed
@@ -150,7 +200,8 @@ class HotSwapManager:
 					except asyncio.TimeoutError:
 
 						logger.warning(
-							f"[{my_name()}] hotswap tasks cleanup timed out: "
+							f"[{my_name()}] hotswap tasks "
+							f"cleanup timed out: "
 							f"forcing cleanup"
 						)
 
@@ -176,7 +227,7 @@ class HotSwapManager:
 
 								await asyncio.wait_for(
 									self.pending_connection.task,
-									timeout=0.2
+									timeout = 0.2
 								)
 
 							except (
@@ -211,8 +262,9 @@ class HotSwapManager:
 
 	#———————————————————————————————————————————————————————————————————————————
 
-	async def initiate_hot_swap(self,
-		task_factory, logger
+	async def prepare_hotswap(self,
+		task_factory: Callable[[asyncio.Event, bool], asyncio.Task],
+		logger:		  logging.Logger,
 	):
 
 		if self.is_shutting_down():
@@ -233,29 +285,33 @@ class HotSwapManager:
 			logger.info(f"[{my_name()}]🔌 new conn. starts")
 			
 			handoff_event = asyncio.Event()
+
+			creation_timestamp = time.time()
 			new_task = asyncio.create_task(
 				task_factory(handoff_event, True)
 			)
+			new_task.creation_time = creation_timestamp
 			
 			self._cleanup_completed_tasks()
 			self.hot_swap_tasks.append(new_task)
 			
 			self.pending_connection = ConnectionState(
-				task=new_task,
-				is_active=False,
-				handoff_event=handoff_event,
-				creation_time=time.time()
+				task		  = new_task,
+				is_active	  = False,
+				handoff_event = handoff_event,
+				creation_time = creation_timestamp,
 			)
 
 	#———————————————————————————————————————————————————————————————————————————
 
 	async def _cleanup_old_connection( self,
-		old_conn: ConnectionState, logger
+		old_conn: ConnectionState,
+		logger:   logging.Logger,
 	):
 
 		try:
 
-			await asyncio.sleep(3.0)
+			await asyncio.sleep(2.0)
 			
 			if not old_conn.task.done():
 		
@@ -265,7 +321,7 @@ class HotSwapManager:
 
 					await asyncio.wait_for(
 						old_conn.task,
-						timeout = 3.0
+						timeout = 0.2,
 					)
 
 				except (
@@ -275,7 +331,9 @@ class HotSwapManager:
 
 					pass
 					
-			logger.info(f"[{my_name()}]🧹 old conn. closed")
+			logger.info(
+				f"[{my_name()}]🧹 old conn. closed"
+			)
 			
 		except Exception as e:
 
@@ -287,7 +345,40 @@ class HotSwapManager:
 
 	#———————————————————————————————————————————————————————————————————————————
 
-	async def complete_handoff(self, logger):
+	async def cleanup_stale_tasks(self,
+		max_age_sec: float,
+		logger: logging.Logger,
+	):
+		
+		for i, task in enumerate(
+			self.hot_swap_tasks[:]
+		):
+			
+			if (
+				hasattr(task, 'creation_time')
+				and (
+					(time.time() - task.creation_time)
+					> max_age_sec
+				)
+			):
+				
+				if not task.done():
+					
+					task.cancel()
+					
+					logger.warning(
+						f"[{my_name()}] "
+						f"stale task-{i+1} cancelled; "
+						f"older than {max_age_sec / 60.0}m"
+					)
+				
+				self.hot_swap_tasks.remove(task)
+
+	#———————————————————————————————————————————————————————————————————————————
+
+	async def commence_hotswap(self,
+		logger: logging.Logger,
+	):
 
 		async with self.swap_lock:
 
@@ -325,8 +416,9 @@ async def schedule_backup_creation(
 	logger:					 logging.Logger,
 	back_up_ready_ahead_sec: float,
 	connection_start_time:	 float,
-	check_interval:			 float = 1.0
+	check_interval:			 float = 0.1,
 ):
+
 	try:
 		
 		while True:
@@ -349,7 +441,7 @@ async def schedule_backup_creation(
 					f"age {connection_age:.2f}s"
 				)
 				
-				await hot_swap_manager.initiate_hot_swap(
+				await hot_swap_manager.prepare_hotswap(
 					task_factory, logger
 				)
 				break

@@ -427,7 +427,8 @@ async def symbol_dump_snapshot(
 	symbol:					str,
 	save_interval_min:		int,
 	snapshots_queue_dict:	dict[str, asyncio.Queue],
-	event_stream_enable:	asyncio.Event,
+	# it seems unnecessary in `symbol_dump_snapshot`
+	# event_stream_enable:	asyncio.Event,
 	lob_dir:				str,
 	symbol_to_file_handles: dict[str, tuple[str, TextIOWrapper]],
 	json_flush_interval:	dict[str, deque[int]],
@@ -753,6 +754,8 @@ async def symbol_dump_snapshot(
 
 	queue = snapshots_queue_dict[symbol]
 	symbol_upper = symbol.upper()
+	
+	last_snapshot_time_ms = None
 
 	try:
 
@@ -769,8 +772,9 @@ async def symbol_dump_snapshot(
 				)
 				continue
 
-			if not event_stream_enable.is_set():
-				continue
+			# it seems unnecessary in `symbol_dump_snapshot`
+			# if not event_stream_enable.is_set():
+			# 	continue
 			
 			suffix, date_str = get_suffix_n_date(
 				save_interval_min,
@@ -798,11 +802,11 @@ async def symbol_dump_snapshot(
 				)
 				continue
 
-			# ────────────────────────────────────────────────────────────────────
+			#─────────────────────────────────────────────────────────────────────
 			# STEP 1: Roll-over by Minute
-			# ────────────────────────────────────────────────────────────────────
+			#─────────────────────────────────────────────────────────────────────
 			# `last_suffix` will be `None` at the beginning.
-			# ────────────────────────────────────────────────────────────────────
+			#─────────────────────────────────────────────────────────────────────
 
 			last_suffix, json_writer = symbol_to_file_handles.get(
 				symbol, (None, None))
@@ -875,10 +879,10 @@ async def symbol_dump_snapshot(
 					)
 					continue
 
-			# ────────────────────────────────────────────────────────────────────
+			#─────────────────────────────────────────────────────────────────────
 			# STEP 2: Check for day rollover and trigger merge
 			# At this point, ALL previous files are guaranteed to be .zip
-			# ────────────────────────────────────────────────────────────────────
+			#─────────────────────────────────────────────────────────────────────
 
 			try:
 
@@ -926,10 +930,26 @@ async def symbol_dump_snapshot(
 
 				del date_str, last_suffix
 
-			# ────────────────────────────────────────────────────────────────────
+			#─────────────────────────────────────────────────────────────────────
 			# STEP 3: Write snapshot to file and update flush intervals
-			# This step ensures the snapshot is saved and flush intervals are updated.
-			# ────────────────────────────────────────────────────────────────────
+			#─────────────────────────────────────────────────────────────────────
+
+			if last_snapshot_time_ms is not None:
+
+				if (
+					snapshot['recv_ms']
+					< last_snapshot_time_ms
+				):
+
+					logger.critical(
+						f"[{my_name()}] "
+						f"snapshot timestamp order reversed: "
+						f"{snapshot['recv_ms']} < {last_snapshot_time_ms}"
+					)
+
+			last_snapshot_time_ms = snapshot['recv_ms']
+
+			#─────────────────────────────────────────────────────────────────────
 
 			if not flush_snapshot(
 				json_writer,
@@ -939,7 +959,6 @@ async def symbol_dump_snapshot(
 				json_flush_interval,
 				latest_json_flush,
 				file_path,
-				# shutdown_event,
 			):
 
 				logger.error(
@@ -1025,6 +1044,7 @@ async def put_snapshot(					# @depth20@100ms
 	shutdown_event:						Optional[asyncio.Event] = None,
 	handoff_event:						Optional[asyncio.Event] = None,
 	is_backup:							bool = False,
+	hotswap_tolerance_sec:				float = 60.0,
 	#———————————————————————————————————————————————————————————————————————————
 	# WebSocket Liveness Control
 	#———————————————————————————————————————————————————————————————————————————
@@ -1039,15 +1059,6 @@ async def put_snapshot(					# @depth20@100ms
 	HINT:
 		asyncio.Queue(maxsize=SNAPSHOTS_QUEUE_MAX)
 	—————————————————————————————————————————————————————————————————————————"""
-
-	def is_shutting_down():			# necessary for safe termination
-
-		return (
-			shutdown_event
-			and shutdown_event.is_set()
-		)
-
-	#———————————————————————————————————————————————————————————————————————————
 
 	def update_ws_recv_timeout(		# to detect websockets with no data
 		data:		deque[float],
@@ -1131,11 +1142,13 @@ async def put_snapshot(					# @depth20@100ms
 		port_cycling_period_hrs
 		* 3600.0
 	)
+
 	is_active_conn = not is_backup		# backup starts inactive
 	backup_start_time = (				# backup starts earlier
 		refresh_period_sec 
 		- back_up_ready_ahead_sec
 	)
+
 	hotswap_prepared = False
 
 	#———————————————————————————————————————————————————————————————————————————
@@ -1174,7 +1187,7 @@ async def put_snapshot(					# @depth20@100ms
 
 	#———————————————————————————————————————————————————————————————————————————
 
-	while not is_shutting_down():	# infinite standalone loop
+	while not hotswap_manager.is_shutting_down():	# infinite standalone loop
 
 		cur_symbol = "UNKNOWN"
 
@@ -1402,7 +1415,7 @@ async def put_snapshot(					# @depth20@100ms
 				# loop inside ws
 				#———————————————————————————————————————————————————————————————
 
-				while not is_shutting_down():
+				while not hotswap_manager.is_shutting_down():
 
 					#———————————————————————————————————————————————————————————
 					# main: commence hotswap
@@ -1410,7 +1423,7 @@ async def put_snapshot(					# @depth20@100ms
 					
 					if (
 						is_active_conn
-						and not is_shutting_down()
+						and not hotswap_manager.is_shutting_down()
 						and (time.time() - ws_start_time) >= refresh_period_sec
 					):
 
@@ -1426,13 +1439,13 @@ async def put_snapshot(					# @depth20@100ms
 
 								with NanoTimer() as timer:
 
-									await hotswap_manager.complete_handoff(
+									await hotswap_manager.commence_hotswap(
 										logger,
 									)
 
 									logger.info(
 										f"[{my_name()}]✅ hotswap done"
-										f" in {timer.tock():.5f} sec"
+										f" in {timer.tock() * 1000.:.3f} ms"
 									)
 
 								if (
@@ -1448,12 +1461,12 @@ async def put_snapshot(					# @depth20@100ms
 
 							except Exception as e:
 
-								logger.warning(
-									f"[{my_name()}] hotswap failed, "
-									f"continuing with current connection: {e}"
+								logger.critical(
+									f"[{my_name()}] hotswap failed: "
+									f"{e}; task terminates"
 								)
 								hotswap_prepared = False
-								ws_start_time = time.time()
+								return
 
 						#———————————————————————————————————————————————————————
 
@@ -1464,7 +1477,6 @@ async def put_snapshot(					# @depth20@100ms
 								f"continuing with current conn."
 							)
 							hotswap_prepared = False
-							ws_start_time = time.time()
 
 					#———————————————————————————————————————————————————————————
 					# Messages within WebSocket
@@ -1491,7 +1503,7 @@ async def put_snapshot(					# @depth20@100ms
 							
 							raise asyncio.TimeoutError()
 
-						if is_shutting_down(): break
+						if hotswap_manager.is_shutting_down(): break
 						
 						for task in done:
 
@@ -1590,13 +1602,6 @@ async def put_snapshot(					# @depth20@100ms
 								measured_interval_ms[cur_symbol]
 								- base_interval_ms
 							)
-							
-							delay_adjusted_time = (
-								cur_time_ms - (
-									oneway_network_latency_ms
-									+ interval_delay_ms
-								)
-							)
 
 							#———————————————————————————————————————————————————————
 
@@ -1682,13 +1687,21 @@ async def put_snapshot(					# @depth20@100ms
 							)
 							continue  # stay in websocket loop
 
+						finally:
+
+							await hotswap_manager.cleanup_stale_tasks(
+								refresh_period_sec
+								+ hotswap_tolerance_sec,
+								logger,
+							)
+
 					#———————————————————————————————————————————————————————————
 					# No Messages even though WebSocket Alive
 					#———————————————————————————————————————————————————————————
 
 					except asyncio.TimeoutError:
 
-						if is_shutting_down(): break
+						if hotswap_manager.is_shutting_down(): break
 
 						ws_retry_cnt += 1
 						
@@ -1723,7 +1736,7 @@ async def put_snapshot(					# @depth20@100ms
 
 					except websockets.exceptions.ConnectionClosed as e:
 						
-						if is_shutting_down(): break
+						if hotswap_manager.is_shutting_down(): break
 						
 						ws_retry_cnt += 1
 						
@@ -1772,7 +1785,7 @@ async def put_snapshot(					# @depth20@100ms
 
 		except Exception as e:
 
-			if is_shutting_down(): break
+			if hotswap_manager.is_shutting_down(): break
 
 			# websocket-level error → exponential backoff + retry
 

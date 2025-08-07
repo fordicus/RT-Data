@@ -68,6 +68,26 @@ from init import (
 from shutdown import (
 	ShutdownManager,
 	create_shutdown_manager,
+	create_shutdown_callback,
+)
+
+from hotswap import (
+	HotSwapManager,
+)
+
+from core import (
+	put_snapshot,
+	symbol_dump_snapshot,
+)
+
+from latency import (
+	gate_streaming_by_latency,
+	estimate_latency,
+)
+
+from dashboard import (
+	monitor_hardware,
+	create_dashboard_server,
 )
 
 from util import (
@@ -77,25 +97,6 @@ from util import (
 	ms_to_datetime,
 	format_ws_url,
 	set_global_logger,
-)
-
-from hotswap import (
-	HotSwapManager,
-)
-
-from latency import (
-	gate_streaming_by_latency,
-	estimate_latency,
-)
-
-from core import (
-	put_snapshot,
-	symbol_dump_snapshot,
-)
-
-from dashboard import (
-	monitor_hardware,
-	create_dashboard_server,
 )
 
 import os, signal, threading, time, random, logging
@@ -296,7 +297,9 @@ if __name__ == "__main__":
 
 				#———————————————————————————————————————————————————————————————
 				
-				HOTSWAP_MANAGER = HotSwapManager()
+				HOTSWAP_MANAGER = HotSwapManager(
+					name = "put_snapshot @depth20@100ms",
+				)
 				HOTSWAP_MANAGER.set_shutdown_event(
 					MAIN_SHUTDOWN_EVENT
 				)
@@ -335,11 +338,13 @@ if __name__ == "__main__":
 						# port_cycling_period_hrs =   0.5,		# 30 minutes
 						# port_cycling_period_hrs =   0.016667,	# 60 seconds
 						# port_cycling_period_hrs =   0.008333, # 30 seconds
-						port_cycling_period_hrs =   0.002777, # 10 seconds
+						# port_cycling_period_hrs =   0.002777, # 10 seconds
+						port_cycling_period_hrs =   0.001388, #  5 seconds
 						# back_up_ready_ahead_sec = 60.0,
 						# back_up_ready_ahead_sec = 10.0,
 						# back_up_ready_ahead_sec =  7.5,
-						back_up_ready_ahead_sec =  5.0,
+						# back_up_ready_ahead_sec =  5.0,
+						back_up_ready_ahead_sec =  2.0,
 						hotswap_manager =	HOTSWAP_MANAGER,
 						shutdown_event =	MAIN_SHUTDOWN_EVENT,	# 실제 연동된 이벤트
 						handoff_event =		None,					# 메인 연결
@@ -347,6 +352,7 @@ if __name__ == "__main__":
 					),
 					name="put_snapshot()",
 				)
+				put_snapshot_task.creation_time = time.time()
 
 				#———————————————————————————————————————————————————————————————
 
@@ -370,7 +376,8 @@ if __name__ == "__main__":
 							symbol,
 							SAVE_INTERVAL_MIN,
 							SNAPSHOTS_QUEUE_DICT,
-							EVENT_STREAM_ENABLE,
+							# it seems unnecessary in `symbol_dump_snapshot`
+							# EVENT_STREAM_ENABLE,
 							LOB_DIR,
 							SYMBOL_TO_FILE_HANDLES,
 							JSON_FLUSH_INTERVAL,
@@ -415,69 +422,11 @@ if __name__ == "__main__":
 
 				#———————————————————————————————————————————————————————————————
 
-				def shutdown_callback():
-
-					#———————————————————————————————————————————————————————————
-
-					async def wait_and_print_final(
-						shutdown_manager:	ShutdownManager,
-						cleanup_task:		asyncio.Task,
-						logger:				logging.Logger,
-					):
-
-						try:
-
-							await cleanup_task
-
-						except Exception as e:
-
-							logger.error(
-								f"[{my_name()}] "
-								f"Hotswap cleanup error: {e}"
-							)
-
-						finally:
-
-							shutdown_manager.final_message()
-
-					#———————————————————————————————————————————————————————————
-
-					logger.info(
-						f"[{my_name()}] HOTSWAP_MANAGER @main"
-					)
-
-					if HOTSWAP_MANAGER:
-
-						try:
-
-							loop = asyncio.get_running_loop()
-
-							if loop and not loop.is_closed():
-
-								cleanup_task = loop.create_task(
-									HOTSWAP_MANAGER.graceful_shutdown(logger)
-								)
-								
-								asyncio.create_task(
-									wait_and_print_final(
-										shutdown_manager,
-										cleanup_task,
-										logger,
-									)
-								)
-
-						except Exception as e:
-
-							logger.error(
-								f"[{my_name()}] HOTSWAP_MANAGER: {e}"
-							)
-							
-							shutdown_manager.final_message()
-					else:
-						
-						shutdown_manager.final_message()
-
-				#———————————————————————————————————————————————————————————————
+				shutdown_callback = create_shutdown_callback(
+					hotswap_manager  = HOTSWAP_MANAGER,
+					shutdown_manager = shutdown_manager,
+					logger			 = logger,
+				)
 
 				shutdown_manager.add_cleanup_callback(
 					shutdown_callback
