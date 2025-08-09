@@ -73,6 +73,7 @@ from shutdown import (
 
 from hotswap import (
 	HotSwapManager,
+	create_task_with_creation_time,
 )
 
 from core import (
@@ -346,14 +347,14 @@ if __name__ == "__main__":
 						# back_up_ready_ahead_sec =  5.0,
 						back_up_ready_ahead_sec =  2.0,
 						hotswap_manager =	HOTSWAP_MANAGER,
-						shutdown_event =	MAIN_SHUTDOWN_EVENT,	# 실제 연동된 이벤트
-						handoff_event =		None,					# 메인 연결
+						shutdown_event =	MAIN_SHUTDOWN_EVENT,
+						handoff_event =		None,
 						is_backup =			False,
 					),
 					name="put_snapshot()",
 				)
 				put_snapshot_task.creation_time = time.time()
-
+				
 				#———————————————————————————————————————————————————————————————
 
 				monitor_hardware_task = asyncio.create_task(

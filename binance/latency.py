@@ -72,7 +72,7 @@ async def gate_streaming_by_latency(
 
 				logger.info(
 					f"[{my_name()}] "
-					f"latency normalized → orderbook▶️"
+					f"📈 latency normalized"
 				)
 
 				event_stream_enable.set()
@@ -98,7 +98,7 @@ async def gate_streaming_by_latency(
 
 					logger.warning(
 						f"[{my_name()}] "
-						f"latency degraded → orderbook⏸️"
+						f"📉 latency degraded"
 					)
 
 					event_stream_enable.clear()
@@ -387,6 +387,10 @@ async def estimate_latency(
 									)
 								)
 
+								#———————————————————————————————————————————————————
+								# TODO: The gating logic here must be redefined
+								# when trading is the concern. See also
+								# 	gate_streaming_by_latency().
 								#———————————————————————————————————————————————————
 
 								if all(

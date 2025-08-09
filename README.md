@@ -19,7 +19,7 @@ to extract alpha signals from market microstructure dynamics.
 
 ---
 
-## 📅 Latest Data Acquisition
+## 📅 Latest Data Acquisition: Deprecated on 2025-08-09
 
 - **Date:**  2025.07.27  
 - **Range (78 days):** 2025.05.10 ~ 2025.07.26  
@@ -29,7 +29,7 @@ ETHUSDT,BTCUSDT,SOLUSDT,ETHUSDC,BTCUSDC,XRPUSDT,PEPEUSDT,DOGEUSDT,SUIUSDT,AAVEUS
 
 ---
 
-## 📅 Next Data Acquisition
+## 📅 Next Data Acquisition: Deprecated on 2025-08-09
 Next data acquisition date is +13 days from the latest data acquisition date, e.g.,  
 Latest Acq. Date +00: 2025-07-27  
 Next Acq.... Date   +13: ***2025-08-09***
