@@ -16,20 +16,22 @@ from typing import Callable, Optional
 
 CMAP4TXT = {
 	#
-	'DEBUG':	'\033[38;5;242m',  # cool gray (low contrast, non-intrusive)
-	'INFO':	 	'\033[38;5;34m',   # green (positive, success-like)
-	'WARNING':  '\033[38;5;214m',  # orange (attention-grabbing, softer red)
-	'ERROR':	'\033[38;5;196m',  # bright red (danger, strong error)
-	'CRITICAL': '\033[38;5;199m',  # magenta red (urgent, dramatic)
+	'DEBUG':		'\033[38;5;242m',  # cool gray
+	'INFO':	 		'\033[38;5;34m',   # green
+	'WARNING':  	'\033[38;5;214m',  # orange
+	'ERROR':		'\033[38;5;196m',  # bright red
+	'CRITICAL': 	'\033[38;5;199m',  # magenta red
 	#
-	'BLACK':	'\033[30m',
-	'RED':		'\033[31m',
-	'GREEN':	'\033[32m',
-	'YELLOW':	'\033[33m',
-	'BLUE':		'\033[34m',
-	'MAGENTA':	'\033[35m',
-	'CYAN':		'\033[36m',
-	'WHITE':	'\033[37m',
+	'CYBER TEAL':	'\033[38;2;35;209;110m',
+	#
+	'BLACK':		'\033[30m',
+	'RED':			'\033[31m',
+	'GREEN':		'\033[32m',
+	'YELLOW':		'\033[33m',
+	'BLUE':			'\033[34m',
+	'MAGENTA':		'\033[35m',
+	'CYAN':			'\033[36m',
+	'WHITE':		'\033[37m',
 	#
 }
 RESET4TXT = '\033[0m'
@@ -365,7 +367,7 @@ def format_ws_url(
 			prefix = colorize_prefix(
 				prefix, 
 				ports_stream_binance_com,
-				CMAP4TXT.get('CYAN', "\033[33m"),
+				CMAP4TXT.get('YELLOW', "\033[33m"),
 			)
 
 		# Format the URL with the first and last symbols,

@@ -1391,7 +1391,7 @@ async def put_snapshot(					# @depth20@100ms
 
 								with NanoTimer() as timer:
 
-									await hotswap_manager.finish_hotswap(
+									await hotswap_manager.commit_hotswap(
 										logger,
 									)
 
@@ -1810,7 +1810,7 @@ async def put_snapshot(					# @depth20@100ms
 			logger.info(
 				f"[{my_name()}]📴 ws closed / "
 				f"len(hotswap_tasks): "
-				f"{CMAP4TXT.get('CYAN')}"
+				f"{CMAP4TXT.get('YELLOW')}"
 				f"{len(hotswap_manager.hotswap_tasks)}"
 				f"{RESET4TXT}"
 			)

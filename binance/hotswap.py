@@ -350,7 +350,7 @@ class HotSwapManager:
 
 	#———————————————————————————————————————————————————————————————————————————
 
-	async def finish_hotswap(self,
+	async def commit_hotswap(self,
 		logger: logging.Logger,
 	):
 
