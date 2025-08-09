@@ -354,6 +354,9 @@ if __name__ == "__main__":
 					name="put_snapshot()",
 				)
 				put_snapshot_task.creation_time = time.time()
+				HOTSWAP_MANAGER.hotswap_tasks.append(
+					put_snapshot_task
+				)
 				
 				#———————————————————————————————————————————————————————————————
 

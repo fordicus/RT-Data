@@ -71,7 +71,7 @@ async def gate_streaming_by_latency(
 			):
 
 				logger.info(
-					f"[{my_name()}] "
+					f"[{my_name()}]"
 					f"📈 latency normalized"
 				)
 
@@ -97,7 +97,7 @@ async def gate_streaming_by_latency(
 				):
 
 					logger.warning(
-						f"[{my_name()}] "
+						f"[{my_name()}]"
 						f"📉 latency degraded"
 					)
 
