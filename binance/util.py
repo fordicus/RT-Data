@@ -5,6 +5,7 @@
 import sys, os, time, inspect, logging, multiprocessing
 import asyncio, uvloop
 import aiohttp, socket
+import ssl, certifi
 from functools import lru_cache
 from datetime import datetime, timezone
 from logging.handlers import QueueHandler, QueueListener
@@ -42,8 +43,13 @@ RESET4TXT = '\033[0m'
 
 def my_name() -> str:
 
-	frame = inspect.stack()[1]
-	return f"{frame.function}:{frame.lineno}"
+	f = sys._getframe(1)
+	try: return f"{f.f_code.co_name}:{f.f_lineno}"
+	finally: del f
+
+	# legacy style
+	# frame = inspect.stack()[1]
+	# return f"{frame.function}:{frame.lineno}"
 
 #———————————————————————————————————————————————————————————————————————————————
 
@@ -90,6 +96,25 @@ def resource_path(	# Resource Resolver for PyInstaller
 			f"[{my_name()}] Failed to "
 			f"resolve path: {relative_path}"
 		) from e
+
+#———————————————————————————————————————————————————————————————————————————————
+
+_SSL_CTX = None
+
+def get_ssl_context():
+
+	global _SSL_CTX
+
+	if _SSL_CTX is None:
+
+		ctx = ssl.create_default_context(cafile=certifi.where())
+
+		ctx.check_hostname = True
+		ctx.verify_mode	   = ssl.CERT_REQUIRED
+
+		_SSL_CTX = ctx
+
+	return _SSL_CTX
 
 #———————————————————————————————————————————————————————————————————————————————
 
@@ -367,7 +392,7 @@ def format_ws_url(
 			prefix = colorize_prefix(
 				prefix, 
 				ports_stream_binance_com,
-				CMAP4TXT.get('YELLOW', "\033[33m"),
+				CMAP4TXT.get('CYBER TEAL', "\033[33m"),
 			)
 
 		# Format the URL with the first and last symbols,

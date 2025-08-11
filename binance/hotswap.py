@@ -1,44 +1,8 @@
-# hotswap.py @2025-08-07 16:46 / DO NOT BLINDLY MODIFY THIS CODE
+# hotswap.py @2025-08-11 11:43Z / DO NOT BLINDLY MODIFY THIS CODE
 
 #———————————————————————————————————————————————————————————————————————————————
 # Designed for asyncio.Task: event-driven, task-agnostic hot-swapping with
 # seamless, non-blocking transitions and robust lifecycle management.
-#———————————————————————————————————————————————————————————————————————————————
-#
-#	EXAMPLE:
-#
-#		async def generic_task(
-#			#
-#			logger:			logging.Logger,
-#			shutdown_event:	asyncio.Event,
-#			handoff_event:	Optional[asyncio.Event] = None,
-#			is_backup:		bool = False,
-#			#
-#		):
-#			
-#			is_active = not is_backup
-#		
-#			while not shutdown_event.is_set():
-#				
-#				if is_backup and handoff_event:
-#					
-#					await handoff_event.wait()
-#					
-#					is_active = True
-#		
-#				if not is_active:
-#					
-#					continue
-#		
-#				try:
-#					
-#					logger.info("Performing task operation...")
-#					await asyncio.sleep(1)
-#					
-#				except Exception as e:
-#					
-#					logger.error(f"Error during task operation: {e}")
-#		
 #———————————————————————————————————————————————————————————————————————————————
 
 import asyncio, time, logging
@@ -64,23 +28,19 @@ class HotSwapManager:
 
 	#———————————————————————————————————————————————————————————————————————————
 	
-	def __init__(self, name: str):
+	def __init__(self, 
+		name:			str,
+		shutdown_event:	asyncio.Event,
+	):
 
 		self.name =					name
-		self.current_port_index =	0
+		self.current_port_index =	-1
 		self.current_connection:	Optional[ConnectionState] = None
 		self.pending_connection:	Optional[ConnectionState] = None
 		self.swap_lock =			asyncio.Lock()
-		self.shutdown_event:		Optional[asyncio.Event] = None
-		self.hotswap_tasks:		list[asyncio.Task] = []
+		self.shutdown_event:		asyncio.Event = shutdown_event
+		self.hotswap_tasks:			list[asyncio.Task] = []
 		self.handoff_completed =	False
-
-	#———————————————————————————————————————————————————————————————————————————
-
-	def set_shutdown_event(self,
-		shutdown_event: asyncio.Event,
-	):
-		self.shutdown_event = shutdown_event
 
 	#———————————————————————————————————————————————————————————————————————————
 
@@ -94,13 +54,38 @@ class HotSwapManager:
 
 	#———————————————————————————————————————————————————————————————————————————
 
-	def get_next_port_index(self, ports_count: int) -> int:
+	def append_task_w_creation_time(self,
+		task: asyncio.Task,
 
-		self.current_port_index = (
-			(self.current_port_index + 1) % ports_count
-		)
+	):
+		task.creation_time = time.time()
+		self.hotswap_tasks.append(task)
+
+	#———————————————————————————————————————————————————————————————————————————
+
+	def cycle_port_number(self,						# utilize various ws ports
+		ports_list: list[str],
+	) -> tuple[str, int]:
 		
-		return self.current_port_index
+		#———————————————————————————————————————————————————————————————————————
+
+		def get_next_port_index(
+			ports_count: int,
+		) -> int:
+
+			self.current_port_index = (
+				(self.current_port_index + 1) % ports_count
+			)
+			
+			return self.current_port_index
+
+		#———————————————————————————————————————————————————————————————————————
+
+		new_index = (
+			get_next_port_index(len(ports_list))
+		)
+
+		return ports_list[new_index], new_index
 
 	#———————————————————————————————————————————————————————————————————————————
 
@@ -308,48 +293,6 @@ class HotSwapManager:
 
 	#———————————————————————————————————————————————————————————————————————————
 
-	async def cleanup_stale_tasks(self,
-		max_age_sec: float,
-		logger: logging.Logger,
-	):
-		
-		for i, task in enumerate(
-			self.hotswap_tasks[:]
-		):
-
-			try: 
-
-				running_duration = (
-					time.time() - task.creation_time
-				)
-
-				if (
-					running_duration
-					> max_age_sec
-				):
-				
-					if not task.done():
-						
-						task.cancel()
-					
-					self.hotswap_tasks.remove(task)
-
-					logger.warning(
-						f"[{my_name()}] "
-						f"hotswap_tasks.remove(task) → "
-						f"len(hotswap_tasks): {len(self.hotswap_tasks)}",
-					)
-
-			except Exception as e:
-
-				logger.error(
-					f"[{my_name()}] e",
-					exc_info = True,
-				)
-				raise
-
-	#———————————————————————————————————————————————————————————————————————————
-
 	async def commit_hotswap(self,
 		logger: logging.Logger,
 	):
@@ -375,7 +318,7 @@ class HotSwapManager:
 
 #———————————————————————————————————————————————————————————————————————————————
 
-async def schedule_backup_creation(
+async def hsm_schedule_backup(
 	#———————————————————————————————————————————————————————————————————————————
 	hotswap_manager:		 HotSwapManager,
 	backup_start_time:		 float,
@@ -431,18 +374,16 @@ async def schedule_backup_creation(
 
 #———————————————————————————————————————————————————————————————————————————————
 
-def create_task_with_creation_time(
+def hsm_create_task(
 	hotswap_manager: HotSwapManager,
-	coro: Awaitable[Any],				# schedule_backup_creation
+	coro: Awaitable[Any],				# hsm_schedule_backup
 	name: Optional[str] = None,
 ):
 
-	task = asyncio.create_task(
-		coro, name = name
-	)
-	task.creation_time = time.time()
-	hotswap_manager.hotswap_tasks.append(
-		task
+	hotswap_manager.append_task_w_creation_time(
+		asyncio.create_task(
+			coro, name = name
+		)
 	)
 
 #———————————————————————————————————————————————————————————————————————————————

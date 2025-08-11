@@ -73,7 +73,6 @@ from shutdown import (
 
 from hotswap import (
 	HotSwapManager,
-	create_task_with_creation_time,
 )
 
 from core import (
@@ -98,6 +97,7 @@ from util import (
 	ms_to_datetime,
 	format_ws_url,
 	set_global_logger,
+	get_ssl_context,
 )
 
 import os, signal, threading, time, random, logging
@@ -110,7 +110,8 @@ from concurrent.futures import ProcessPoolExecutor
 
 #———————————————————————————————————————————————————————————————————————————————
 
-os.environ["SSL_CERT_FILE"] = certifi.where()
+# os.environ["SSL_CERT_FILE"] = certifi.where()
+get_ssl_context()
 
 logger, queue_listener = set_global_logger()
 
@@ -124,6 +125,8 @@ setup_uvloop(logger = logger)
 	WS_URL,
 	WILDCARD_STREAM_BINANCE_COM_PORT,
 	PORTS_STREAM_BINANCE_COM,
+	PORT_CYCLING_PERIOD_HRS,
+	BACK_UP_READY_AHEAD_SEC,
 	#
 	LOB_DIR,
 	#
@@ -132,7 +135,7 @@ setup_uvloop(logger = logger)
 	SNAPSHOTS_QUEUE_MAX, RECORDS_MAX,
 	#
 	LATENCY_DEQUE_SIZE, LATENCY_SAMPLE_MIN,
-	LATENCY_THRESHOLD_MS, LATENCY_SIGNAL_SLEEP,
+	LATENCY_THRESHOLD_MS, LATENCY_ROUTINE_SLEEP_SEC,
 	#
 	BASE_BACKOFF, MAX_BACKOFF,
 	RESET_CYCLE_AFTER, RESET_BACKOFF_LEVEL,
@@ -189,13 +192,17 @@ if __name__ == "__main__":
 	# SHUTDOWN MANAGER SETUP
 	#———————————————————————————————————————————————————————————————————————————
 
-	shutdown_manager = create_shutdown_manager(logger)
-	shutdown_manager.register_executors(
-		merge=MERGE_EXECUTOR,
-		znr=ZNR_EXECUTOR
+	(
+		SHUTDOWN_MANAGER,
+		MAIN_SHUTDOWN_EVENT,
+	) = create_shutdown_manager(logger)
+
+	SHUTDOWN_MANAGER.register_executors(
+		merge = MERGE_EXECUTOR,
+		znr   = ZNR_EXECUTOR
 	)
-	shutdown_manager.register_symbols(SYMBOLS)
-	shutdown_manager.register_signal_handlers()
+	SHUTDOWN_MANAGER.register_symbols(SYMBOLS)
+	SHUTDOWN_MANAGER.register_signal_handlers()
 
 	#———————————————————————————————————————————————————————————————————————————
 
@@ -227,16 +234,8 @@ if __name__ == "__main__":
 			#
 			)
 
-			shutdown_manager.register_file_handles(
-				SYMBOL_TO_FILE_HANDLES
-			)
-
-			#———————————————————————————————————————————————————————————————————
-
-			MAIN_SHUTDOWN_EVENT = asyncio.Event()
-
-			shutdown_manager.register_shutdown_event(
-				MAIN_SHUTDOWN_EVENT
+			SHUTDOWN_MANAGER.register_file_handles(
+				SYMBOL_TO_FILE_HANDLES,
 			)
 
 			#———————————————————————————————————————————————————————————————————
@@ -265,7 +264,7 @@ if __name__ == "__main__":
 			dashboard_server = create_dashboard_server(
 				state_refs =	   dashboard_state,
 				config =		   dashboard_config,
-				shutdown_manager = shutdown_manager,
+				shutdown_manager = SHUTDOWN_MANAGER,
 				logger =		   logger
 			)
 			
@@ -297,12 +296,12 @@ if __name__ == "__main__":
 				)
 
 				#———————————————————————————————————————————————————————————————
+				# Instantiate HotSwapManager registering Main Shutdown Event
+				#———————————————————————————————————————————————————————————————
 				
-				HOTSWAP_MANAGER = HotSwapManager(
-					name = "put_snapshot @depth20@100ms",
-				)
-				HOTSWAP_MANAGER.set_shutdown_event(
-					MAIN_SHUTDOWN_EVENT
+				HSM_PUT_SNAPSHOT_BINANCE_DEPTH20_100MS = HotSwapManager(
+					name = "put_snapshot_binance_depth20_100ms",
+					shutdown_event = MAIN_SHUTDOWN_EVENT,
 				)
 
 				#———————————————————————————————————————————————————————————————
@@ -334,29 +333,19 @@ if __name__ == "__main__":
 						SYMBOLS,
 						logger,
 						#
-						# port_cycling_period_hrs =  12.0,		# 12 hours
-						# port_cycling_period_hrs =   1.0,		# 60 minutes
-						# port_cycling_period_hrs =   0.5,		# 30 minutes
-						# port_cycling_period_hrs =   0.016667,	# 60 seconds
-						# port_cycling_period_hrs =   0.008333, # 30 seconds
-						# port_cycling_period_hrs =   0.002777, # 10 seconds
-						port_cycling_period_hrs =   0.001388, #  5 seconds
-						# back_up_ready_ahead_sec = 60.0,
-						# back_up_ready_ahead_sec = 10.0,
-						# back_up_ready_ahead_sec =  7.5,
-						# back_up_ready_ahead_sec =  5.0,
-						back_up_ready_ahead_sec =  2.0,
-						hotswap_manager =	HOTSWAP_MANAGER,
-						shutdown_event =	MAIN_SHUTDOWN_EVENT,
-						handoff_event =		None,
-						is_backup =			False,
+						port_cycling_period_hrs = PORT_CYCLING_PERIOD_HRS,
+						back_up_ready_ahead_sec = BACK_UP_READY_AHEAD_SEC,
+						hotswap_manager = HSM_PUT_SNAPSHOT_BINANCE_DEPTH20_100MS,
+						shutdown_event =  MAIN_SHUTDOWN_EVENT,
+						handoff_event =	  None,
+						is_backup =		  False,
 					),
 					name="put_snapshot()",
 				)
-				put_snapshot_task.creation_time = time.time()
-				HOTSWAP_MANAGER.hotswap_tasks.append(
-					put_snapshot_task
-				)
+				HSM_PUT_SNAPSHOT_BINANCE_DEPTH20_100MS.\
+					append_task_w_creation_time(
+						put_snapshot_task,
+					)
 				
 				#———————————————————————————————————————————————————————————————
 
@@ -406,7 +395,7 @@ if __name__ == "__main__":
 						EVENT_LATENCY_VALID,
 						EVENT_STREAM_ENABLE,
 						MEAN_LATENCY_DICT,
-						LATENCY_SIGNAL_SLEEP,
+						LATENCY_ROUTINE_SLEEP_SEC,
 						SYMBOLS,
 						logger,
 						shutdown_event = MAIN_SHUTDOWN_EVENT,
@@ -425,15 +414,15 @@ if __name__ == "__main__":
 				]
 
 				#———————————————————————————————————————————————————————————————
+				# Cleanup Callback for HotSwapManaters
+				#———————————————————————————————————————————————————————————————
 
-				shutdown_callback = create_shutdown_callback(
-					hotswap_manager  = HOTSWAP_MANAGER,
-					shutdown_manager = shutdown_manager,
-					logger			 = logger,
-				)
-
-				shutdown_manager.add_cleanup_callback(
-					shutdown_callback
+				SHUTDOWN_MANAGER.add_cleanup_callback(
+					create_shutdown_callback(
+						hotswap_manager  = HSM_PUT_SNAPSHOT_BINANCE_DEPTH20_100MS,
+						shutdown_manager = SHUTDOWN_MANAGER,
+						logger			 = logger,
+					)
 				)
 
 				#———————————————————————————————————————————————————————————————
@@ -468,14 +457,15 @@ if __name__ == "__main__":
 			try:
 
 				cfg = Config(
-					app		   = dashboard_server.app,
-					host	   = "0.0.0.0",
-					port	   = DASHBOARD_PORT_NUMBER,
-					lifespan   = "on",
-					use_colors = True,
-					log_level  = "warning",
-					workers	   = 1,
-					loop	   = "asyncio",
+					app		  			   = dashboard_server.app,
+					host	  			   = "0.0.0.0",
+					port	  			   = DASHBOARD_PORT_NUMBER,
+					lifespan  			   = "on",
+					use_colors			   = True,
+					log_level 			   = "warning",
+					workers	  			   = 1,
+					loop	  			   = "asyncio",
+					ws_per_message_deflate = False,
 				)
 
 				server = Server(cfg)
@@ -539,8 +529,8 @@ if __name__ == "__main__":
 			time.sleep(patience_sec)
 
 			if (
-				shutdown_manager
-				and not shutdown_manager.is_shutdown_complete()
+				SHUTDOWN_MANAGER
+				and not SHUTDOWN_MANAGER.is_shutdown_complete()
 			):
 
 				logger.warning(
@@ -567,10 +557,10 @@ if __name__ == "__main__":
 		).start()
 
 		if (
-			shutdown_manager
-			and not shutdown_manager.is_shutdown_complete()
+			SHUTDOWN_MANAGER
+			and not SHUTDOWN_MANAGER.is_shutdown_complete()
 		):
 			
-			shutdown_manager.graceful_shutdown()
+			SHUTDOWN_MANAGER.graceful_shutdown()
 			
 #———————————————————————————————————————————————————————————————————————————————

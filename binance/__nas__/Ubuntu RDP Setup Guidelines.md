@@ -352,6 +352,7 @@ Chrony will now sync with the specified servers and persist across reboots.
 #### 🧪 Check Synchronization Status
 
 ```bash
+chronyc sourcestats -v
 watch -n 1 chronyc tracking
 ```
 
@@ -367,10 +368,6 @@ watch -n 1 chronyc tracking
 | `Update interval` | Time between updates								  |
 | `Leap status`	 | Leap second info (normally `Normal`)				  |
 
-Also, the following command is proven to be useful:
-```bash
-chronyc sourcestats -v
-```
 
 
 

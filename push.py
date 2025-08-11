@@ -80,11 +80,8 @@ run_cmd('git pull')
 if '__pycache__' in os.listdir():
 	run_cmd('rm -rf __pycache__/')
 
-# Stage all files for Git
-run_cmd('git add *')
-
-# Commit and push
-commit_msg = build_commit_msg()
+# Stage all files, commit, and push
+run_cmd('git add *');	  commit_msg = build_commit_msg()
 run_cmd(f'git commit -m "{commit_msg}: "')
 run_cmd('git push origin main')
 run_cmd('git log -1')

@@ -29,7 +29,9 @@ class ShutdownManager:
 
 	#———————————————————————————————————————————————————————————————————————————
 
-	def __init__(self, logger: logging.Logger):
+	def __init__(self, 
+		logger: logging.Logger
+	):
 
 		self.logger = logger
 		self._lock = threading.Lock()
@@ -37,7 +39,8 @@ class ShutdownManager:
 		self._executors: dict[str, ProcessPoolExecutor] = {}
 		self._file_handles: dict[str, tuple[str, TextIOWrapper]] = {}
 		self._symbols: list = []
-		self._shutdown_event: Optional[asyncio.Event] = None
+		self._shutdown_event: asyncio.Event = asyncio.Event()
+		# self._shutdown_event: Optional[asyncio.Event] = None
 		self._custom_cleanup_callbacks:	list = []
 		self._final_message_printed = False
 
@@ -70,12 +73,12 @@ class ShutdownManager:
 
 	#———————————————————————————————————————————————————————————————————————————
 
-	def register_shutdown_event(
-		self,
-		shutdown_event: asyncio.Event
-	) -> None:
+	# def register_shutdown_event(
+	# 	self,
+	# 	shutdown_event: asyncio.Event
+	# ) -> None:
 
-		self._shutdown_event = shutdown_event
+	# 	self._shutdown_event = shutdown_event
 
 	#———————————————————————————————————————————————————————————————————————————
 
@@ -119,7 +122,10 @@ class ShutdownManager:
 
 	def is_shutting_down(self) -> bool:
 
-		return self._shutdown_event and self._shutdown_event.is_set()
+		return (
+			self._shutdown_event
+			and self._shutdown_event.is_set()
+		)
 
 	#———————————————————————————————————————————————————————————————————————————
 
@@ -209,12 +215,15 @@ class ShutdownManager:
 			self.logger.info(f"[{my_name()}] starts")
 			
 			if self._shutdown_event:
+
 				self._shutdown_event.set()
+
 			self.shutdown_executors()
 			self.close_file_handles()
 			self.run_custom_cleanup()
 			
 			with self._lock:
+
 				self._shutdown_complete = True
 			
 			self.logger.info(f"[{my_name()}] completes")
@@ -263,9 +272,14 @@ class ShutdownManager:
 
 def create_shutdown_manager(
 	logger: logging.Logger
-) -> ShutdownManager:
+) -> tuple[ShutdownManager, asyncio.Event]:
 
-	return ShutdownManager(logger)
+	shutdown_manager = ShutdownManager(logger)
+
+	return (
+		shutdown_manager,
+		shutdown_manager._shutdown_event,
+	)
 
 #———————————————————————————————————————————————————————————————————————————————
 
@@ -358,21 +372,7 @@ def create_shutdown_callback(
 	logger: logging.Logger,
 ) -> callable:
 
-	"""
-	Factory function that creates a shutdown callback with bound parameters.
-	
-	Args:
-		hotswap_manager: The HotSwapManager instance
-		shutdown_manager: The ShutdownManager instance  
-		logger: Logger instance
-		
-	Returns:
-		A parameterless callable that can be used as shutdown callback
-	"""
-
 	def shutdown_callback() -> None:
-
-		"""Parameterless shutdown callback for use with shutdown manager."""
 
 		try:
 

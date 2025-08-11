@@ -307,6 +307,7 @@ class DashboardServer:
 				self.active_connections += 1  # Atomic operation
 				
 				try:
+					
 					await websocket.accept()
 					reconnect_attempt = 0
 					

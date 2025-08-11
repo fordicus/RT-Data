@@ -60,6 +60,8 @@ def load_config(
 	str,			# ws_url
 	str,			# wildcard_stream_binance_com_port
 	list[str],		# ports_stream_binance_com
+	float,			# port_cycling_period_hrs
+	float,			# back_up_ready_ahead_sec
 	#
 	str,			# lob_dir
 	#
@@ -72,7 +74,7 @@ def load_config(
 	int, 			# latency_deque_size
 	int,			# latency_sample_min
 	int, 			# latency_threshold_ms
-	float,			# latency_signal_sleep
+	float,			# latency_routine_sleep_sec
 	#
 	int,			# base_backoff
 	int,			# max_backoff
@@ -162,6 +164,8 @@ def load_config(
 	) -> tuple[
 		str,			# lob_dir
 		str,			# wildcard_stream_binance_com_port
+		float,			# port_cycling_period_hrs
+		float,			# back_up_ready_ahead_sec
 		#
 		int,			# purge_on_date_change
 		int,			# save_interval_min
@@ -172,7 +176,7 @@ def load_config(
 		int, 			# latency_deque_size
 		int,			# latency_sample_min
 		int, 			# latency_threshold_ms
-		float,			# latency_signal_sleep
+		float,			# latency_routine_sleep_sec
 		#
 		int,			# base_backoff
 		int,			# max_backoff
@@ -198,6 +202,12 @@ def load_config(
 			wildcard_stream_binance_com_port = config.get(
 				"WILDCARD_STREAM_BINANCE_COM_PORT"
 			)
+			port_cycling_period_hrs = float(config.get(
+				"PORT_CYCLING_PERIOD_HRS"
+			))
+			back_up_ready_ahead_sec = float(config.get(
+				"BACK_UP_READY_AHEAD_SEC"
+			))
 
 			purge_on_date_change = int(config.get("PURGE_ON_DATE_CHANGE"))
 			save_interval_min	 = int(config.get("SAVE_INTERVAL_MIN"))
@@ -210,7 +220,7 @@ def load_config(
 			latency_deque_size   = int(config.get("LATENCY_DEQUE_SIZE"))
 			latency_sample_min   = int(config.get("LATENCY_SAMPLE_MIN"))
 			latency_threshold_ms = int(config.get("LATENCY_THRESHOLD_MS"))
-			latency_signal_sleep = float(config.get("LATENCY_SIGNAL_SLEEP"))
+			latency_routine_sleep_sec = float(config.get("LATENCY_ROUTINE_SLEEP_SEC"))
 
 			base_backoff		= int(config.get("BASE_BACKOFF"))
 			max_backoff			= int(config.get("MAX_BACKOFF"))
@@ -233,6 +243,8 @@ def load_config(
 			return (
 				lob_dir,
 				wildcard_stream_binance_com_port,
+				port_cycling_period_hrs,
+				back_up_ready_ahead_sec,
 				#
 				purge_on_date_change,
 				save_interval_min,
@@ -243,7 +255,7 @@ def load_config(
 				latency_deque_size,
 				latency_sample_min,
 				latency_threshold_ms,
-				latency_signal_sleep,
+				latency_routine_sleep_sec,
 				#
 				base_backoff,
 				max_backoff,
@@ -305,13 +317,15 @@ def load_config(
 			lob_dir,
 			#
 			wildcard_stream_binance_com_port,
+			port_cycling_period_hrs,
+			back_up_ready_ahead_sec,
 			#
 			purge_on_date_change, save_interval_min,
 			#
 			snapshots_queue_max, records_max,
 			#
 			latency_deque_size, latency_sample_min,
-			latency_threshold_ms, latency_signal_sleep,
+			latency_threshold_ms, latency_routine_sleep_sec,
 			#
 			base_backoff, max_backoff,
 			reset_cycle_after, reset_backoff_level,
@@ -358,6 +372,8 @@ def load_config(
 			ws_url,
 			wildcard_stream_binance_com_port,
 			ports_stream_binance_com,
+			port_cycling_period_hrs,
+			back_up_ready_ahead_sec,
 			#
 			lob_dir,
 			#
@@ -366,7 +382,7 @@ def load_config(
 			snapshots_queue_max, records_max,
 			#
 			latency_deque_size, latency_sample_min,
-			latency_threshold_ms, latency_signal_sleep,
+			latency_threshold_ms, latency_routine_sleep_sec,
 			#
 			base_backoff, max_backoff,
 			reset_cycle_after, reset_backoff_level,

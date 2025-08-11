@@ -3,13 +3,15 @@
 #———————————————————————————————————————————————————————————————————————————————
 # Binance latency sanity check
 #———————————————————————————————————————————————————————————————————————————————
-# Observed ≈135 ms one‑way latency (local_recv_ts − server_event_ts) from Swiss.
+# Observed ≈ 114 ms one‑way latency 
+# 	(local_recv_ts − server_event_ts)
+# from Swiss.
 #
 # Plausibility:
 #   • Likely route: Switzerland → AWS ap‑northeast‑1 (Tokyo, Spot REST primary)
 #	 or Cloudflare / GCP PoP → Binance WS broker.
 #	 Propagation CH→JP ≈50‑60 ms; add router, TLS, Anycast & broker hops
-#	 ≈10‑25 ms ⇒ practical upper‑bound 100‑140 ms → 135 ms fits.
+#	 ≈10‑25 ms ⇒ practical upper‑bound 100‑140 ms → 114 ms fits.
 #   • Binance exposes several hosts:
 #	   - Primary REST:   api.binance.com  (Tokyo)
 #	   - Alternatives:   api1.binance.com, api‑gcp.binance.com
@@ -26,6 +28,7 @@ from collections import deque
 from typing import Optional
 from util import (
 	my_name,
+	get_ssl_context,
 	NanoTimer,
 	get_current_time_ms, geo, 
 	format_ws_url,
@@ -38,7 +41,7 @@ async def gate_streaming_by_latency(
 	event_latency_valid:  asyncio.Event,
 	event_stream_enable:  asyncio.Event,
 	mean_latency_dict:	  dict[str, int],
-	latency_signal_sleep: float,
+	latency_routine_sleep_sec: float,
 	symbols:			  list[str],
 	logger:				  logging.Logger,
 	shutdown_event:		  Optional[asyncio.Event] = None,
@@ -103,7 +106,7 @@ async def gate_streaming_by_latency(
 
 					event_stream_enable.clear()
 
-			await asyncio.sleep(latency_signal_sleep)
+			await asyncio.sleep(latency_routine_sleep_sec)
 
 		except asyncio.CancelledError:
 
@@ -118,7 +121,7 @@ async def gate_streaming_by_latency(
 				exc_info=True
 			)
 
-			await asyncio.sleep(latency_signal_sleep)
+			await asyncio.sleep(latency_routine_sleep_sec)
 			
 	logger.info(
 		f"[{my_name()}] task ends"
@@ -260,8 +263,10 @@ async def estimate_latency(
 
 			async with websockets.connect(
 				url,
+				ssl			  = get_ssl_context(),
 				ping_interval = ws_ping_interval,
-				ping_timeout  = ws_ping_timeout
+				ping_timeout  = ws_ping_timeout,
+				compression	  = None,
 			) as ws:
 
 				ip, port = ws.remote_address or ("?", "?")
@@ -409,10 +414,6 @@ async def estimate_latency(
 									if not event_latency_valid.is_set():
 
 										event_latency_valid.set()
-
-										logger.info(
-											f"[{my_name()}]✅ latency ok"
-										)
 								
 								else:
 
@@ -456,12 +457,16 @@ async def estimate_latency(
 						if is_shutting_down(): break
 
 						ws_retry_cnt += 1
-						
+
 						logger.warning(
 							f"[{my_name()}]\n"
-							f"\tNo latency data received for {ws_timeout_sec:.6f} seconds.\n"
-							f"\tp90 ws.recv() intv.: {websocket_recv_intv_stat['p90']:.6f}.\n"
-							f"\tReconnecting..."
+							f"\tno data received for "
+							f"{ws_timeout_sec:.6f}s\n"
+							f"\tp90 ws.recv() intv.: "
+							f"{websocket_recv_intv_stat['p90']:.6f}.\n"
+							f"\t(ws_retry_cnt {ws_retry_cnt}) "
+							f"reconnecting...",
+							exc_info = False,
 						)
 
 						ws_retry_cnt, last_success_time = await calculate_backoff_and_sleep(
