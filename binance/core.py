@@ -27,6 +27,7 @@ from util import (
 	get_ssl_context,
 	NanoTimer,
 	ms_to_datetime,
+	update_shared_time_dict,
 	compute_bias_ms,
 	format_ws_url,
 	get_current_time_ms,
@@ -44,7 +45,7 @@ from hotswap import (
 
 import sys, os, io, asyncio, orjson
 import shutil, zipfile, logging
-import websockets, time, random
+import websockets, time
 import numpy as np
 
 from io import TextIOWrapper
@@ -1059,10 +1060,9 @@ async def put_snapshot(					# @depth20@100ms
 	#———————————————————————————————————————————————————————————————————————————
 	# WebSocket Recovery
 	#———————————————————————————————————————————————————————————————————————————
-	max_backoff:						int, 
-	base_backoff:						int,
-	reset_cycle_after:					int,
-	reset_backoff_level:				int,
+	shared_time_dict:					dict[str, float],
+	shared_time_dict_key:				str,
+	min_reconn_sec:						float,
 	#———————————————————————————————————————————————————————————————————————————
 	# WebSocket Peer
 	#———————————————————————————————————————————————————————————————————————————
@@ -1085,7 +1085,6 @@ async def put_snapshot(					# @depth20@100ms
 	shutdown_event:						Optional[asyncio.Event] = None,
 	handoff_event:						Optional[asyncio.Event] = None,
 	is_backup:							bool = False,
-	hotswap_cleanup_tol_sec:			float =  10.0,
 	#———————————————————————————————————————————————————————————————————————————
 	# WebSocket Liveness Control
 	#———————————————————————————————————————————————————————————————————————————
@@ -1112,55 +1111,61 @@ async def put_snapshot(					# @depth20@100ms
 		if len(data) >= max(data.maxlen, 300):
 			
 			stat['p90'] = np.percentile(list(data), 90)
-			return max(stat['p90'] * multiplier, minimum)
+			return max(
+				stat['p90'] * multiplier,
+				minimum,
+			)
 
 		else:
 
-			return max(default, minimum)
+			return max(
+				default,
+				minimum
+			)
 
 	#———————————————————————————————————————————————————————————————————————————
 
-	async def calculate_backoff_and_sleep(		# back-off when ws fails
-		retry_count: int,
-		last_success_time: Optional[float] = None,
-		reset_retry_count_after_sec: float = 3600.0,
-	) -> tuple[int, float]:
-		
-		current_time = time.time()
-		
-		if retry_count > reset_cycle_after:
+	async def sleep_on_ws_reconn(
+		shared_time_dict:	  dict[str, float],
+		shared_time_dict_key: str,
+		min_reconn_sec:		  float,
+		logger:				  logging.Logger,
+	):
 
-			retry_count = reset_backoff_level
+		#———————————————————————————————————————————————————————————————————————
+		# Websocket (re)connection attempt requires at minimum 1.0s
+		# after each trial (https://tinyurl.com/BinanceWsMan);
+		# exponential backoff unnecessary
+		#———————————————————————————————————————————————————————————————————————
 
-		elif (
-			last_success_time and 
-			(
-				current_time - last_success_time
-			) > reset_retry_count_after_sec
-		):
+		try:
 
-			logger.info(
-				f"[{my_name()}] "
-				f"resetting retry_count after "
-				f"{reset_retry_count_after_sec} sec; "
-				f"previous retry_count={retry_count}."
+			since_the_latest_sleep = (
+				time.time() - shared_time_dict[shared_time_dict_key]
 			)
 
-			retry_count = 0
+			if (
+				since_the_latest_sleep 
+				>= min_reconn_sec
+			):
 
-		backoff = min(
-			max_backoff,
-			base_backoff ** retry_count
-		) + random.uniform(0, 1)
+				backoff = 0.0
 
-		logger.warning(
-			f"[{my_name()}] "
-			f"Retrying in {backoff:.1f} seconds..."
-		)
-		
-		await asyncio.sleep(backoff)
-		
-		return retry_count, last_success_time
+			else:
+
+				backoff = (
+					min_reconn_sec
+					- since_the_latest_sleep
+				)
+				
+			await asyncio.sleep(backoff)
+
+		except Exception as e:
+
+			logger.critical(
+				f"[{my_name()}] {e}"
+			)
+			raise
 
 	#———————————————————————————————————————————————————————————————————————————
 	# Howswap State
@@ -1184,8 +1189,7 @@ async def put_snapshot(					# @depth20@100ms
 	#———————————————————————————————————————————————————————————————————————————
 
 	ws_retry_cnt = 0
-	ws_timeout_sec	  = ws_timeout_default_sec
-	last_success_time = time.time()
+	ws_timeout_sec = ws_timeout_default_sec
 	last_recv_time_ns = None
 	
 	measured_interval_ms: dict[str, int] = {}
@@ -1251,9 +1255,15 @@ async def put_snapshot(					# @depth20@100ms
 
 				#———————————————————————————————————————————————————————————————
 
+				update_shared_time_dict(
+					shared_time_dict,
+					shared_time_dict_key,
+				)	# upon successful ws (re)connection
+
+				#———————————————————————————————————————————————————————————————
+
 				ws_retry_cnt = 0
-				last_success_time = time.time()
-				ws_start_time	  = time.time()
+				ws_start_time = time.time()
 
 				ws_url_to_prt = format_ws_url(
 					ws_url_complete,
@@ -1320,10 +1330,9 @@ async def put_snapshot(					# @depth20@100ms
 									mean_latency_dict,
 									event_1st_snapshot,
 									#———————————————————————————————————————————
-									max_backoff,
-									base_backoff,
-									reset_cycle_after,
-									reset_backoff_level,
+									shared_time_dict,
+									shared_time_dict_key,
+									min_reconn_sec,
 									#———————————————————————————————————————————
 									ws_url,
 									wildcard_stream_binance_com_port,
@@ -1409,10 +1418,9 @@ async def put_snapshot(					# @depth20@100ms
 								mean_latency_dict,
 								event_1st_snapshot,
 								#———————————————————————————————————————
-								max_backoff,
-								base_backoff,
-								reset_cycle_after,
-								reset_backoff_level,
+								shared_time_dict,
+								shared_time_dict_key,
+								min_reconn_sec,
 								#———————————————————————————————————————
 								ws_url,
 								wildcard_stream_binance_com_port,
@@ -1487,9 +1495,6 @@ async def put_snapshot(					# @depth20@100ms
 
 								if hotswap_manager.handoff_completed:
 
-									ws_retry_cnt = 0
-									last_success_time = time.time()
-
 									is_active_conn = False
 
 									if (
@@ -1526,9 +1531,9 @@ async def put_snapshot(					# @depth20@100ms
 
 						else:
 
-							logger.warning(
-								f"[{my_name()}] backup not ready; "
-								f"continuing with current conn."
+							logger.info(
+								f"[{my_name()}] backup not yet ready; "
+								f"will be prepared in the next loop."
 							)
 							hotswap_prepared = False
 
@@ -1745,78 +1750,47 @@ async def put_snapshot(					# @depth20@100ms
 							)
 							continue  	# stay in the websocket loop
 
-						# finally:
-
-						# 	await hotswap_manager.cleanup_stale_tasks(
-						# 		refresh_period_sec
-						# 		+ hotswap_cleanup_tol_sec,
-						# 		logger,
-						# 	)
-
 					#———————————————————————————————————————————————————————————
-					# No Messages even though WebSocket Alive
+					# No Messages or WebSocket Closed → Backoff + Retry
 					#———————————————————————————————————————————————————————————
 
-					except asyncio.TimeoutError:
-
+					except (
+						asyncio.TimeoutError,
+						websockets.exceptions.ConnectionClosed,
+					) as e:
+						
 						if hotswap_manager.is_shutting_down(): break
 
 						ws_retry_cnt += 1
-						
+
+						if isinstance(e, asyncio.TimeoutError):
+							
+							reason = (
+								f"no data received for "
+								f"{ws_timeout_sec:.2f}s; "
+								f"p90 recv intv "
+								f"{websocket_recv_intv_stat['p90'] * 1000.:.2f}ms"
+							)
+							
+						else:  # websockets.exceptions.ConnectionClosed
+							
+							close_reason = (
+								getattr(e, "reason", None)
+								or "no close frame"
+							)
+							reason = f"ws connection closed: {close_reason}"
+
 						logger.warning(
-							f"[{my_name()}]\n"
-							f"\tno data received for "
-							f"{ws_timeout_sec:.6f}s\n"
-							f"\tp90 ws.recv() intv.: "
-							f"{websocket_recv_intv_stat['p90']:.6f}.\n"
-							f"\t(ws_retry_cnt {ws_retry_cnt}) "
-							f"reconnecting...",
+							f"[{my_name()}] {reason} / "
+							f"reconnecting: {ws_retry_cnt}",
 							exc_info = False,
 						)
 
-						(
-							#
-							ws_retry_cnt,
-							last_success_time
-							#
-						) = await calculate_backoff_and_sleep(
-							#
-							ws_retry_cnt, 
-							last_success_time,
-							#
-						)
-
-						break
-
-					#———————————————————————————————————————————————————————————
-					# WebSocket Interrupted
-					#———————————————————————————————————————————————————————————
-
-					except websockets.exceptions.ConnectionClosed as e:
-						
-						if hotswap_manager.is_shutting_down(): break
-						
-						ws_retry_cnt += 1
-						
-						logger.warning(
-							f"[{my_name()}]\n"
-							f"\tws connection closed: "
-							f"{e.reason or 'no close frame'}\n"
-							f"\t(ws_retry_cnt {ws_retry_cnt}) "
-							f"reconnecting...",
-							exc_info = False,
-						)
-						
-						(
-							#
-							ws_retry_cnt,
-							last_success_time
-							#
-						) = await calculate_backoff_and_sleep(
-							#
-							ws_retry_cnt,
-							last_success_time,
-							#
+						await sleep_on_ws_reconn(
+							shared_time_dict,
+							shared_time_dict_key,
+							min_reconn_sec,
+							logger,
 						)
 						
 						break
@@ -1838,41 +1812,26 @@ async def put_snapshot(					# @depth20@100ms
 			raise 	# logging unnecessary
 
 		#———————————————————————————————————————————————————————————————————————
-		# WebSocket Failure
+		# WebSocket Failure → Backoff + Retry
 		#———————————————————————————————————————————————————————————————————————
 
 		except Exception as e:
 
 			if hotswap_manager.is_shutting_down(): break
 
-			# websocket-level error → exponential backoff + retry
-
 			ws_retry_cnt += 1
 
-			sym = (
-				cur_symbol
-				if cur_symbol in symbols
-				else "UNKNOWN"
-			)
-
 			logger.warning(
-				f"[{my_name()}]\n"
-				f"\tws error: {e}\n"
-				f"\t(ws_retry_cnt {ws_retry_cnt}) "
-				f"reconnecting ...",
+				f"[{my_name()}] ws error: {e} / "
+				f"reconnecting: {ws_retry_cnt}",
 				exc_info = True,
 			)
 
-			(
-				#
-				ws_retry_cnt,
-				last_success_time
-				#
-			) = await calculate_backoff_and_sleep(
-				#
-				ws_retry_cnt,
-				last_success_time,
-				#
+			await sleep_on_ws_reconn(
+				shared_time_dict,
+				shared_time_dict_key,
+				min_reconn_sec,
+				logger,
 			)
 
 		#———————————————————————————————————————————————————————————————————————

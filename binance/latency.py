@@ -183,7 +183,6 @@ async def estimate_latency(
 
 	async def calculate_backoff_and_sleep(
 		retry_count: int,
-		symbol: str = "UNKNOWN",
 		last_success_time: Optional[float] = None,
 		reset_retry_count_after_sec: float = 3600,	# an hour
 	) -> tuple[int, float]:
@@ -202,7 +201,7 @@ async def estimate_latency(
 		):
 
 			logger.info(
-				f"[{my_name()}][{symbol.upper()}] "
+				f"[{my_name()}] "
 				f"Resetting retry_count after {reset_retry_count_after_sec} sec; "
 				f"previous retry_count={retry_count}."
 			)
@@ -215,7 +214,7 @@ async def estimate_latency(
 		) + random.uniform(0, 1)
 
 		logger.warning(
-			f"[{my_name()}][{symbol.upper()}] "
+			f"[{my_name()}] "
 			f"Retrying in {backoff:.1f} seconds..."
 		)
 		
@@ -452,27 +451,69 @@ async def estimate_latency(
 							)
 							continue
 
-					except asyncio.TimeoutError:
+					#———————————————————————————————————————————————————————————
+					# No Messages or WebSocket Closed → Backoff + Retry
+					#———————————————————————————————————————————————————————————
+					
+					# except asyncio.TimeoutError:
 
+					# 	if is_shutting_down(): break
+
+					# 	ws_retry_cnt += 1
+
+					# 	logger.warning(
+					# 		f"[{my_name()}]\n"
+					# 		f"\tno data received for "
+					# 		f"{ws_timeout_sec:.6f}s\n"
+					# 		f"\tp90 ws.recv() intv.: "
+					# 		f"{websocket_recv_intv_stat['p90']:.6f}.\n"
+					# 		f"\t(ws_retry_cnt {ws_retry_cnt}) "
+					# 		f"reconnecting...",
+					# 		exc_info = False,
+					# 	)
+
+					# 	ws_retry_cnt, last_success_time = await calculate_backoff_and_sleep(
+					# 		ws_retry_cnt, last_success_time,
+					# 	)
+
+					# 	break
+
+					except (
+						asyncio.TimeoutError,
+						websockets.exceptions.ConnectionClosed,
+					) as e:
+						
 						if is_shutting_down(): break
 
 						ws_retry_cnt += 1
 
+						if isinstance(e, asyncio.TimeoutError):
+							
+							reason = (
+								f"no data received for "
+								f"{ws_timeout_sec:.2f}s; "
+								f"p90 recv intv "
+								f"{websocket_recv_intv_stat['p90'] * 1000.:.2f}ms"
+							)
+							
+						else:  # websockets.exceptions.ConnectionClosed
+							
+							close_reason = (
+								getattr(e, "reason", None)
+								or "no close frame"
+							)
+							reason = f"ws connection closed: {close_reason}"
+
 						logger.warning(
-							f"[{my_name()}]\n"
-							f"\tno data received for "
-							f"{ws_timeout_sec:.6f}s\n"
-							f"\tp90 ws.recv() intv.: "
-							f"{websocket_recv_intv_stat['p90']:.6f}.\n"
-							f"\t(ws_retry_cnt {ws_retry_cnt}) "
-							f"reconnecting...",
+							f"[{my_name()}] {reason} / "
+							f"reconnecting: {ws_retry_cnt}",
 							exc_info = False,
 						)
 
 						ws_retry_cnt, last_success_time = await calculate_backoff_and_sleep(
-							ws_retry_cnt, cur_symbol, last_success_time,
+							ws_retry_cnt, last_success_time,
 						)
-
+						
 						break
 
 		except asyncio.CancelledError:
@@ -492,10 +533,9 @@ async def estimate_latency(
 			ws_retry_cnt += 1
 
 			logger.warning(
-				f"[{my_name()}] "
-				f"WebSocket connection error "
-				f"(attempt {ws_retry_cnt}): {e}",
-				exc_info=True
+				f"[{my_name()}] ws error: {e} / "
+				f"reconnecting: {ws_retry_cnt}",
+				exc_info = True,
 			)
 
 			event_latency_valid.clear()
@@ -506,7 +546,7 @@ async def estimate_latency(
 				depth_update_id_dict[symbol] = 0
 
 			ws_retry_cnt, last_success_time = await calculate_backoff_and_sleep(
-				ws_retry_cnt, cur_symbol, last_success_time,
+				ws_retry_cnt, last_success_time,
 			)
 
 		finally:

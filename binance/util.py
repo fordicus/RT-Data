@@ -158,6 +158,15 @@ def ms_to_datetime(ms: int) -> datetime:
 
 #———————————————————————————————————————————————————————————————————————————————
 
+def update_shared_time_dict(
+	shared_time_dict: dict[str, float],
+	key: str,
+):
+
+	shared_time_dict[key] = time.time()
+
+#———————————————————————————————————————————————————————————————————————————————
+
 def compute_bias_ms(
 	ts_now_ms: int,
 	target_dt: datetime

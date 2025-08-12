@@ -95,6 +95,7 @@ from util import (
 	resource_path,
 	get_current_time_ms,
 	ms_to_datetime,
+	update_shared_time_dict,
 	format_ws_url,
 	set_global_logger,
 	get_ssl_context,
@@ -153,6 +154,8 @@ setup_uvloop(logger = logger)
 ) = load_config(logger)
 
 #———————————————————————————————————————————————————————————————————————————————
+
+SHARED_TIME_DICT:		  dict[str, float] = {}
 
 SNAPSHOTS_QUEUE_DICT:	  dict[str, asyncio.Queue] = {}
 SYMBOL_TO_FILE_HANDLES:	  dict[str, tuple[str, TextIOWrapper]] = {}
@@ -296,6 +299,16 @@ if __name__ == "__main__":
 				)
 
 				#———————————————————————————————————————————————————————————————
+				# Websocket (re)connection attempt requires at minimum 1.0s
+				# after each trial (https://tinyurl.com/BinanceWsMan);
+				# exponential backoff unnecessary
+				#———————————————————————————————————————————————————————————————
+
+				update_shared_time_dict(SHARED_TIME_DICT,
+					'LATEST_SLEEP_TIME_BINANCE_DEPTH_STREAM',
+				)
+
+				#———————————————————————————————————————————————————————————————
 				# Instantiate HotSwapManager registering Main Shutdown Event
 				#———————————————————————————————————————————————————————————————
 				
@@ -304,41 +317,39 @@ if __name__ == "__main__":
 					shutdown_event = MAIN_SHUTDOWN_EVENT,
 				)
 
-				#———————————————————————————————————————————————————————————————
-
 				put_snapshot_task = asyncio.create_task(
-					put_snapshot(	# @depth20@100ms
-						#
+					put_snapshot(								# @depth20@100ms
+						#———————————————————————————————————————————————————————
 						WEBSOCKET_RECV_INTERVAL,
 						WEBSOCKET_RECV_INTV_STAT,
 						PUT_SNAPSHOT_INTERVAL,
-						#
+						#———————————————————————————————————————————————————————
 						SNAPSHOTS_QUEUE_DICT,
-						#
+						#———————————————————————————————————————————————————————
 						EVENT_STREAM_ENABLE,
 						MEAN_LATENCY_DICT,
 						EVENT_1ST_SNAPSHOT,
-						#
-						MAX_BACKOFF, 
-						BASE_BACKOFF,
-						RESET_CYCLE_AFTER,
-						RESET_BACKOFF_LEVEL,
-						#
+						#———————————————————————————————————————————————————————
+						SHARED_TIME_DICT,
+						'LATEST_SLEEP_TIME_BINANCE_DEPTH_STREAM',
+						1.5,  # `min_reconn_sec` for `sleep_on_ws_reconn`
+						#———————————————————————————————————————————————————————
 						WS_URL,
 						WILDCARD_STREAM_BINANCE_COM_PORT,
 						PORTS_STREAM_BINANCE_COM,
-						#
+						#———————————————————————————————————————————————————————
 						WS_PING_INTERVAL,
 						WS_PING_TIMEOUT,
 						SYMBOLS,
 						logger,
-						#
+						#———————————————————————————————————————————————————————
 						port_cycling_period_hrs = PORT_CYCLING_PERIOD_HRS,
 						back_up_ready_ahead_sec = BACK_UP_READY_AHEAD_SEC,
 						hotswap_manager = HSM_PUT_SNAPSHOT_BINANCE_DEPTH20_100MS,
-						shutdown_event =  MAIN_SHUTDOWN_EVENT,
-						handoff_event =	  None,
-						is_backup =		  False,
+						shutdown_event	= MAIN_SHUTDOWN_EVENT,
+						handoff_event	= None,
+						is_backup		= False,
+						#———————————————————————————————————————————————————————
 					),
 					name="put_snapshot()",
 				)
