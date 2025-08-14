@@ -2,7 +2,10 @@
 <html lang="en">
 <head>
 	<meta charset="UTF-8">
-	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<meta
+		name="viewport"
+		content="width=device-width, initial-scale=1.0"
+	>
 	<title>Stream Binance Dashboard</title>
 	<style>
 		body {
@@ -40,10 +43,14 @@
 </head>
 <body>
 	<h1>Binance Dashboard</h1>
-	<div id="statusInfo" style="margin-top: 10px; font-size: 14px; color: #555;">
+	<div
+		id="statusInfo"
+		style="margin-top: 10px; font-size: 14px; color: #555;"
+	>
 		WebSocket Peer: N/A / Last Updated: N/A
 	</div>
-	
+	<div id="lastUpdated">Last Updated: N/A</div>
+
 	<div class="section-title">Hardware Metrics</div>
 	<table id="hardwareMetricsTable">
 		<thead>
@@ -78,134 +85,272 @@
 			<tr>
 				<th>#</th>
 				<th>Symbol</th>
-				<th>Put Snapshot Interval<br>Avg.: 0 [ms]</th>
-				<th>JSON Flush Interval<br>Avg.: 0 [ms]</th>
-				<th id="queueSizeHeader">Queue Size<br>Total: 0</th>
-				<th>Mean Latency<br>Avg.: 0 [ms]</th>
+				<th>
+					Put Snapshot Interval<br>Avg.: 0 [ms]
+				</th>
+				<th>
+					JSON Flush Interval<br>Avg.: 0 [ms]
+				</th>
+				<th id="queueSizeHeader">
+					Queue Size<br>Total: 0
+				</th>
+				<th>
+					Mean Latency<br>Avg.: 0 [ms]
+				</th>
 			</tr>
 		</thead>
 		<tbody>
 			<!-- Rows will be dynamically added here -->
 		</tbody>
 	</table>
-	<div id="symbolMetricsDescription" style="margin-bottom: 15px; font-size: 14px; color: #555; line-height: 1.4;"></div>
+	<div
+		id="symbolMetricsDescription"
+		style="
+			margin-bottom: 15px;
+			font-size: 14px;
+			color: #555;
+			line-height: 1.4;
+		"
+	></div>
 
+	<!-- ———————————————————————————————————————————————— -->
 	<script>
+	// @ts-check
 
-		const SYMBOL_METRICS_DESCRIPTION = `
-			<strong>Put Snapshot Interval:</strong> The measured interval between consecutive "asyncio.Queue.put()" operations within the "put_snapshot()" coroutine. Any extra delay beyond the nominal 100ms streaming interval determines "intv_lag_ms", which is used as side information during AI training.<br>
-			<strong>JSON Flush Interval:</strong> The measured interval between consecutive "TextIOWrapper.flush()" operations to disk. This value does not affect the timestamps written to ".jsonl" files, as it only reflects disk I/O latency after "recv_ms" is determined by the "put_snapshot()" coroutine.<br>
-			<strong>Queue Size:</strong> The average of "asyncio.Queue.qsize()" values over a monitoring period. This value is typically close to zero, as the "asyncio.Queue" is consumed almost instantaneously.<br>
-			<strong>Mean Latency:</strong> The mean one-way network latency from Binance servers, calculated over a sampling period. This estimate defines "net_delay_ms", which—like "intv_lag_ms"—serves as side information for AI models.
-		`;
+	/** Types for hardware metrics. */
+	/**
+	 * @typedef {Object} HardwareMetrics
+	 * @property {number} network_mbps
+	 * @property {number} cpu_percent
+	 * @property {number} memory_percent
+	 * @property {number} storage_percent
+	 */
 
-		const ws = new WebSocket(`ws://${window.location.host}/ws/dashboard`);
+	/** Types for dashboard payload. */
+	/**
+	 * @typedef {Object} DashboardData
+	 * @property {string=} websocket_peer
+	 * @property {(string|number|Date)=} last_updated
+	 * @property {HardwareMetrics=} hardware
+	 * @property {Record<string, number>} snapshot_interval
+	 * @property {Record<string, number>} flush_interval
+	 * @property {Record<string, number>} med_latency
+	 * @property {Record<string, number>} queue_size
+	 */
 
-		ws.onopen = () => {
-			console.log("WebSocket connection established.");
-			document.getElementById("symbolMetricsDescription").innerHTML = SYMBOL_METRICS_DESCRIPTION;
-		};
+	/** Query selector alias (nullable). */
+	/** @param {string} selector */
+	function querySelectorAlias(selector) {
+		return document.querySelector(selector);
+	}
 
-		ws.onmessage = (event) => {
-			const data = JSON.parse(event.data);
+	/** Get element by id with fallback span. */
+	/**
+	 * @template {HTMLElement} T
+	 * @param {string} id
+	 * @returns {T}
+	 */
+	function byId(id) {
+		/** @type {T|null} */
+		// @ts-ignore generic inference at runtime
+		const el = document.getElementById(id);
+		if (!el) {
+			const fallback = document.createElement("span");
+			fallback.id = id;
+			document.body.appendChild(fallback);
+			// @ts-ignore explicit cast for runtime
+			return /** @type {T} */ (fallback);
+		}
+		// @ts-ignore explicit cast for runtime
+		return /** @type {T} */ (el);
+	}
 
-			const websocketPeer = data.websocket_peer || "UNKNOWN";
-			const lastUpdated = data.last_updated ? new Date(data.last_updated).toISOString() : "N/A";
+	/** Static rich description for symbol metrics. */
+	const SYMBOL_METRICS_DESCRIPTION =
+		"<strong>Put Snapshot Interval:</strong> " +
+		"The measured interval between consecutive " +
+		"\"asyncio.Queue.put()\" operations within the " +
+		"\"put_snapshot()\" coroutine. Any extra delay beyond the " +
+		"nominal 100ms streaming interval determines \"intv_lag_ms\", " +
+		"which is used as side information during AI training.<br>" +
+		"<strong>JSON Flush Interval:</strong> The measured interval " +
+		"between consecutive \"TextIOWrapper.flush()\" operations to " +
+		"disk. This value does not affect the timestamps written to " +
+		"\".jsonl\" files, as it only reflects disk I/O latency after " +
+		"\"recv_ms\" is determined by the \"put_snapshot()\" " +
+		"coroutine.<br>" +
+		"<strong>Queue Size:</strong> The average of " +
+		"\"asyncio.Queue.qsize()\" values over a monitoring period. " +
+		"This value is typically close to zero, as the " +
+		"\"asyncio.Queue\" is consumed almost instantaneously.<br>" +
+		"<strong>Mean Latency:</strong> The mean one-way network " +
+		"latency from Binance servers, calculated over a sampling " +
+		"period. This estimate defines \"net_delay_ms\", which—like " +
+		"\"intv_lag_ms\"—serves as side information for AI models.";
 
-			// Update WebSocket Peer and Last Updated information
-			document.getElementById("statusInfo").textContent = `WebSocket Peer: ${websocketPeer} / Last Updated: ${lastUpdated}`;
+	/** Build ws scheme based on page protocol. */
+	const wsScheme = location.protocol === "https:" ? "wss" : "ws";
+	const wsUrl = wsScheme + "://" + location.host + "/ws/dashboard";
+	const ws = new WebSocket(wsUrl);
 
-			// Update hardware metrics
-			const hardware = data.hardware;
-			if (hardware) {
-				document.getElementById("networkUsage").textContent = `${hardware.network_mbps.toFixed(2)} Mbps`;
-				document.getElementById("cpuUsage").textContent = `${hardware.cpu_percent.toFixed(2)}%`;
-				document.getElementById("memoryUsage").textContent = `${hardware.memory_percent.toFixed(2)}%`;
-				document.getElementById("storageUsage").textContent = `${hardware.storage_percent.toFixed(2)}%`;
-			}
+	ws.onopen = () => {
+		console.log("WebSocket connection established.");
+		/** @type {HTMLDivElement} */
+		(byId("symbolMetricsDescription")).innerHTML =
+			SYMBOL_METRICS_DESCRIPTION;
+	};
 
-			// Correct the logic for updating Symbol Metrics table header and rows
-			let snapshotIntervalAvg = 0;
-			let flushIntervalAvg = 0;
-			let medLatencyAvg = 0;
-			let snapshotCount = 0;
-			let flushCount = 0;
-			let latencyCount = 0;
-			let queueSizeTotal = 0; // Define queueSizeTotal before usage
+	/** Handle incoming dashboard payload. */
+	/** @param {MessageEvent<string>} event */
+	ws.onmessage = (event) => {
+		/** @type {DashboardData} */
+		let data;
+		try {
+			data = /** @type {DashboardData} */
+				(JSON.parse(event.data));
+		} catch (e) {
+			console.error("Invalid JSON payload:", e);
+			return;
+		}
 
-			for (const symbol in data.snapshot_interval) {
-				snapshotIntervalAvg += data.snapshot_interval[symbol];
-				snapshotCount++;
-			}
-			snapshotIntervalAvg = snapshotCount > 0 ? (snapshotIntervalAvg / snapshotCount).toFixed(2) : 0;
+		const peer = data.websocket_peer ?? "UNKNOWN";
+		const lastIso =
+			data.last_updated != null
+				? new Date(data.last_updated).toISOString()
+				: "N/A";
 
-			for (const symbol in data.flush_interval) {
-				flushIntervalAvg += data.flush_interval[symbol];
-				flushCount++;
-			}
-			flushIntervalAvg = flushCount > 0 ? (flushIntervalAvg / flushCount).toFixed(2) : 0;
+		/** @type {HTMLDivElement} */
+		(byId("statusInfo")).textContent =
+			"WebSocket Peer: " + peer + " / Last Updated: " + lastIso;
 
-			for (const symbol in data.med_latency) {
-				medLatencyAvg += data.med_latency[symbol];
-				latencyCount++;
-			}
-			medLatencyAvg = latencyCount > 0 ? (medLatencyAvg / latencyCount).toFixed(2) : 0;
+		if (data.hardware) {
+			const hw = data.hardware;
+			/** @type {HTMLTableCellElement} */
+			(byId("networkUsage")).textContent =
+				hw.network_mbps.toFixed(2) + " Mbps";
+			/** @type {HTMLTableCellElement} */
+			(byId("cpuUsage")).textContent =
+				hw.cpu_percent.toFixed(2) + "%";
+			/** @type {HTMLTableCellElement} */
+			(byId("memoryUsage")).textContent =
+				hw.memory_percent.toFixed(2) + "%";
+			/** @type {HTMLTableCellElement} */
+			(byId("storageUsage")).textContent =
+				hw.storage_percent.toFixed(2) + "%";
+		}
 
-			const symbolTableBody = document.querySelector("#symbolMetricsTable tbody");
-			symbolTableBody.innerHTML = ""; // Clear existing rows
+		let snapSum = 0;
+		let flushSum = 0;
+		let latSum = 0;
+		let snapCnt = 0;
+		let flushCnt = 0;
+		let latCnt = 0;
+		let queueTotal = 0;
 
+		for (const s in data.snapshot_interval) {
+			snapSum += data.snapshot_interval[s];
+			snapCnt++;
+		}
+		const snapAvg =
+			snapCnt > 0 ? (snapSum / snapCnt).toFixed(2) : "0";
+
+		for (const s in data.flush_interval) {
+			flushSum += data.flush_interval[s];
+			flushCnt++;
+		}
+		const flushAvg =
+			flushCnt > 0 ? (flushSum / flushCnt).toFixed(2) : "0";
+
+		for (const s in data.med_latency) {
+			latSum += data.med_latency[s];
+			latCnt++;
+		}
+		const latAvg =
+			latCnt > 0 ? (latSum / latCnt).toFixed(2) : "0";
+
+		/** @type {HTMLTableSectionElement|null} */
+		const tbody =
+			/** @type {any} */
+			(querySelectorAlias("#symbolMetricsTable tbody"));
+		if (tbody) {
+			tbody.innerHTML = "";
 			let rowIndex = 1;
+			for (const s in data.med_latency) {
+				const tr = document.createElement("tr");
 
-			for (const symbol in data.med_latency) {
-				const row = document.createElement("tr");
-				const numberCell = document.createElement("td");
-				const symbolCell = document.createElement("td");
-				const snapshotCell = document.createElement("td");
+				const nCell = document.createElement("td");
+				nCell.textContent = String(rowIndex++);
+
+				const symCell = document.createElement("td");
+				symCell.textContent = s.toUpperCase();
+
+				const snapCell = document.createElement("td");
+				snapCell.textContent =
+					String(data.snapshot_interval[s] ?? 0);
+
 				const flushCell = document.createElement("td");
-				const queueCell = document.createElement("td");
-				const latencyCell = document.createElement("td");
+				flushCell.textContent =
+					String(data.flush_interval[s] ?? 0);
 
-				numberCell.textContent = rowIndex++;
-				symbolCell.textContent = symbol.toUpperCase();
-				snapshotCell.textContent = data.snapshot_interval[symbol] || 0;
-				flushCell.textContent = data.flush_interval[symbol] || 0;
-				const queueSizeValue = data.queue_size[symbol] || 0;
-				queueCell.textContent = queueSizeValue;
-				latencyCell.textContent = data.med_latency[symbol] || 0;
+				const qCell = document.createElement("td");
+				const qVal = data.queue_size[s] ?? 0;
+				qCell.textContent = String(qVal);
 
-				queueSizeTotal += queueSizeValue;
+				const latCell = document.createElement("td");
+				latCell.textContent =
+					String(data.med_latency[s] ?? 0);
 
-				row.appendChild(numberCell);
-				row.appendChild(symbolCell);
-				row.appendChild(snapshotCell);
-				row.appendChild(flushCell);
-				row.appendChild(queueCell);
-				row.appendChild(latencyCell);
-				symbolTableBody.appendChild(row);
+				queueTotal += qVal;
+
+				tr.appendChild(nCell);
+				tr.appendChild(symCell);
+				tr.appendChild(snapCell);
+				tr.appendChild(flushCell);
+				tr.appendChild(qCell);
+				tr.appendChild(latCell);
+				tbody.appendChild(tr);
 			}
+		}
 
-			// Update Symbol Metrics table header with new style
-			const symbolMetricsHeader = document.querySelector("#symbolMetricsTable thead tr");
-			symbolMetricsHeader.innerHTML = `
-				<th>#</th>
-				<th>Symbol</th>
-				<th>Put Snapshot Interval<br>Avg.: ${snapshotIntervalAvg} [ms]</th>
-				<th>JSON Flush Interval<br>Avg.: ${flushIntervalAvg} [ms]</th>
-				<th id="queueSizeHeader">Queue Size<br>Total: ${queueSizeTotal}</th>
-				<th>Mean Latency<br>Avg.: ${medLatencyAvg} [ms]</th>
-			`;
+		/** @type {HTMLTableRowElement|null} */
+		const headRow =
+			/** @type {any} */
+			(querySelectorAlias("#symbolMetricsTable thead tr"));
+		if (headRow) {
+			headRow.innerHTML =
+				"<th>#</th>" +
+				"<th>Symbol</th>" +
+				"<th>Put Snapshot Interval<br>" +
+				"Avg.: " + snapAvg + " [ms]</th>" +
+				"<th>JSON Flush Interval<br>" +
+				"Avg.: " + flushAvg + " [ms]</th>" +
+				"<th id=\"queueSizeHeader\">Queue Size<br>" +
+				"Total: " + queueTotal + "</th>" +
+				"<th>Mean Latency<br>" +
+				"Avg.: " + latAvg + " [ms]</th>";
+		}
 
-			const formattedTime = new Date(lastUpdated).toISOString().slice(0, 19) + "Z";
-			document.querySelector("#lastUpdated").textContent = `Last Updated: ${formattedTime}`;
-		};
+		/** @type {HTMLDivElement|null} */
+		const lastEl =
+			/** @type {any} */
+			(querySelectorAlias("#lastUpdated"));
+		if (lastEl) {
+			const formatted =
+				lastIso !== "N/A"
+					? new Date(lastIso).toISOString()
+						.slice(0, 19) + "Z"
+					: "N/A";
+			lastEl.textContent = "Last Updated: " + formatted;
+		}
+	};
 
-		ws.onerror = (error) => {
-			console.error("WebSocket error:", error);
-		};
+	ws.onerror = (error) => {
+		console.error("WebSocket error:", error);
+	};
 
-		ws.onclose = () => {
-			console.log("WebSocket connection closed.");
-		};
+	ws.onclose = () => {
+		console.log("WebSocket connection closed.");
+	};
 	</script>
 </body>
 </html>

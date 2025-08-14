@@ -57,13 +57,14 @@ def load_config(
 	#
 	list[str],		# symbols
 	#
-	str,			# ws_url
+	list[str],		# ws_url
 	str,			# wildcard_stream_binance_com_port
 	list[str],		# ports_stream_binance_com
 	float,			# port_cycling_period_hrs
 	float,			# back_up_ready_ahead_sec
 	#
 	str,			# lob_dir
+	str,			# chart_dir
 	#
 	int,			# purge_on_date_change
 	int,			# save_interval_min
@@ -163,6 +164,8 @@ def load_config(
 		config: dict[str, str]
 	) -> tuple[
 		str,			# lob_dir
+		str,			# chart_dir
+		#
 		str,			# wildcard_stream_binance_com_port
 		float,			# port_cycling_period_hrs
 		float,			# back_up_ready_ahead_sec
@@ -197,7 +200,8 @@ def load_config(
 
 		try:
 
-			lob_dir = config.get("LOB_DIR")
+			lob_dir	  = config.get("LOB_DIR")
+			chart_dir = config.get("CHART_DIR")
 
 			wildcard_stream_binance_com_port = config.get(
 				"WILDCARD_STREAM_BINANCE_COM_PORT"
@@ -242,6 +246,8 @@ def load_config(
 
 			return (
 				lob_dir,
+				chart_dir,
+				#
 				wildcard_stream_binance_com_port,
 				port_cycling_period_hrs,
 				back_up_ready_ahead_sec,
@@ -315,6 +321,7 @@ def load_config(
 
 		(
 			lob_dir,
+			chart_dir,
 			#
 			wildcard_stream_binance_com_port,
 			port_cycling_period_hrs,
@@ -356,15 +363,31 @@ def load_config(
 		# 	wss://stream.binance.com:443.
 		#———————————————————————————————————————————————————————————————————————
 
-		ws_url = (
+		ws_url = {}
+
+		ws_url[
+			'STREAM_BINANCE_COM_DEPTH20_100MS'
+		] = (
 			f"wss://stream.binance.com:{wildcard_stream_binance_com_port}"
 			f"/stream?streams="
 			f"{'/'.join(f'{sym}@depth20@100ms' for sym in symbols)}"
 		)
 
+		ws_url[
+			'STREAM_BINANCE_COM_AGGTRADE'
+		] = (
+			f"wss://stream.binance.com:{wildcard_stream_binance_com_port}"
+			f"/stream?streams="
+			f"{'/'.join(f'{sym}@aggTrade' for sym in symbols)}"
+		)
+
+		#———————————————————————————————————————————————————————————————————————
+
 		ports_stream_binance_com = extract_comma_delimited(
 			config, "PORTS_STREAM_BINANCE_COM",
 		)
+
+		#———————————————————————————————————————————————————————————————————————
 
 		return (
 			symbols,
@@ -376,6 +399,7 @@ def load_config(
 			back_up_ready_ahead_sec,
 			#
 			lob_dir,
+			chart_dir,
 			#
 			purge_on_date_change, save_interval_min,
 			#
@@ -410,18 +434,25 @@ def load_config(
 #———————————————————————————————————————————————————————————————————————————————
 
 def init_runtime_state(
-	median_latency_dict:	 dict[str, int],
-	latest_json_flush:		 dict[str, int],
-	json_flush_interval:	 dict[str, deque[int]],
-	put_snapshot_interval:	 dict[str, deque[int]],
-	snapshots_queue_dict:	 dict[str, asyncio.Queue],
-	snapshots_queue_max:	 int,
-	symbol_to_file_handles:	 dict[str, tuple[str, TextIOWrapper]],
-	records_merged_dates:	 dict[str, OrderedDict[str]],
-	records_znr_minutes:	 dict[str, OrderedDict[str]],
-	symbols:				 list[str],
-	logger:					 logging.Logger,
-	monitoring_deque_len:	 int = 100,
+	#———————————————————————————————————————————————————————————————————————————
+	mean_latency_dict:			dict[str, int],
+	lob_sav_intv_spot_binance:	dict[str, deque[int]],
+	exe_sav_intv_spot_binance:	dict[str, deque[int]],
+	#———————————————————————————————————————————————————————————————————————————
+	put_snapshot_interval:		dict[str, deque[int]],
+	#———————————————————————————————————————————————————————————————————————————
+	snapshots_queue_dict:		dict[str, asyncio.Queue],
+	snapshots_queue_max:		int,
+	executions_queue_dict:		dict[str, asyncio.Queue],
+	#———————————————————————————————————————————————————————————————————————————
+	fhndls_lob_spot_binance:	dict[str, tuple[str, TextIOWrapper]],
+	fhndls_exe_spot_binance:	dict[str, tuple[str, TextIOWrapper]],
+	#———————————————————————————————————————————————————————————————————————————
+	symbols:					list[str],
+	logger:						logging.Logger,
+	#———————————————————————————————————————————————————————————————————————————
+	monitoring_deque_len:		int = 100,
+	#———————————————————————————————————————————————————————————————————————————
 ) -> tuple[
 	asyncio.Event,
 	asyncio.Event,
@@ -430,51 +461,60 @@ def init_runtime_state(
 
 	try:
 
-		median_latency_dict.clear()
-		median_latency_dict.update({
+		#———————————————————————————————————————————————————————————————————————
+
+		mean_latency_dict.clear()
+		mean_latency_dict.update({
 			symbol: None
 			for symbol in symbols
 		})
 
-		latest_json_flush.clear()
-		latest_json_flush.update({
-			symbol: get_current_time_ms()
+		lob_sav_intv_spot_binance.clear()
+		lob_sav_intv_spot_binance.update({
+			symbol: deque(
+				maxlen = monitoring_deque_len
+			)
 			for symbol in symbols
 		})
 
-		json_flush_interval.clear()
-		json_flush_interval.update({
-			symbol: deque(maxlen=monitoring_deque_len)
+		exe_sav_intv_spot_binance.clear()
+		exe_sav_intv_spot_binance.update({
+			symbol: deque(
+				maxlen = monitoring_deque_len
+			)
 			for symbol in symbols
 		})
+
+		#———————————————————————————————————————————————————————————————————————
 
 		put_snapshot_interval.clear()
 		put_snapshot_interval.update({
-			symbol: deque(maxlen=monitoring_deque_len)
+			symbol: deque(maxlen = monitoring_deque_len)
 			for symbol in symbols
 		})
 
 		snapshots_queue_dict.clear()
 		snapshots_queue_dict.update({
 			symbol: asyncio.Queue(
-				maxsize=snapshots_queue_max
+				maxsize = snapshots_queue_max
 			)
 			for symbol in symbols
 		})
 
-		symbol_to_file_handles.clear()
-
-		records_merged_dates.clear()
-		records_merged_dates.update({
-			symbol: OrderedDict()
+		executions_queue_dict.clear()
+		executions_queue_dict.update({
+			symbol: asyncio.Queue(
+				maxsize = snapshots_queue_max
+			)
 			for symbol in symbols
 		})
 
-		records_znr_minutes.clear()
-		records_znr_minutes.update({
-			symbol: OrderedDict()
-			for symbol in symbols
-		})
+		#———————————————————————————————————————————————————————————————————————
+
+		fhndls_lob_spot_binance.clear()
+		fhndls_exe_spot_binance.clear()
+
+		#———————————————————————————————————————————————————————————————————————
 
 		logger.info(
 			f"[{my_name()}]📦 runtime ready"

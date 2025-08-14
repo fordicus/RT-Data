@@ -1,6 +1,6 @@
 # shutdown.py @2025-08-07 18:09 / DO NOT BLINDLY MODIFY THIS CODE
 
-import sys, os, asyncio, threading, signal, time, logging
+import sys, os, asyncio, threading, signal, time, logging, copy
 import concurrent.futures
 from concurrent.futures import ProcessPoolExecutor
 from io import TextIOWrapper
@@ -37,7 +37,9 @@ class ShutdownManager:
 		self._lock = threading.Lock()
 		self._shutdown_complete = False
 		self._executors: dict[str, ProcessPoolExecutor] = {}
-		self._file_handles: dict[str, tuple[str, TextIOWrapper]] = {}
+		self._file_handles: list[
+			dict[str, tuple[str, TextIOWrapper]]
+		] = []
 		self._symbols: list = []
 		self._shutdown_event: asyncio.Event = asyncio.Event()
 		# self._shutdown_event: Optional[asyncio.Event] = None
@@ -82,9 +84,8 @@ class ShutdownManager:
 
 	#———————————————————————————————————————————————————————————————————————————
 
-	def register_executors(
-		self,
-		**executors: ProcessPoolExecutor
+	def register_executors(self,
+		**executors: ProcessPoolExecutor,
 	) -> None:
 
 		with self._lock:
@@ -93,9 +94,10 @@ class ShutdownManager:
 
 	#———————————————————————————————————————————————————————————————————————————
 
-	def register_file_handles(
-		self, file_handles: dict[str,
-		tuple[str, TextIOWrapper]]
+	def register_file_handles(self,
+		file_handles: list[
+			dict[str, tuple[str, TextIOWrapper]]
+		]
 	) -> None:
 
 		with self._lock:
@@ -130,26 +132,42 @@ class ShutdownManager:
 	#———————————————————————————————————————————————————————————————————————————
 
 	def close_file_handles(self) -> None:
-		
+
 		with self._lock:
-			
-			symbols_copy = list(self._symbols)
-			file_handles_copy = dict(self._file_handles)
-		
-		for symbol in symbols_copy:
 
-			suffix_writer = file_handles_copy.get(symbol)
+			symbols_snapshot   = tuple(self._symbols)
+			file_maps_snapshot = [
+				fhc.copy()
+				for fhc in self._file_handles
+			]
 
-			if suffix_writer:
+		for fhc in file_maps_snapshot:  # dict in list
+
+			for symbol in symbols_snapshot:
+
+				suffix_writer = fhc.get(symbol)
+
+				if not suffix_writer: continue
 
 				suffix, writer = suffix_writer
 
 				try:
 
-					if writer and not writer.closed:
+					if (
+						writer
+						and not writer.closed
+					):
 
 						writer.flush()
-						os.fsync(writer.fileno())
+
+						try:
+
+							os.fsync(writer.fileno())
+							
+						except (OSError, AttributeError):
+							
+							pass
+
 						writer.close()
 
 					self.logger.info(
@@ -178,12 +196,6 @@ class ShutdownManager:
 
 				if executor:
 
-					self.logger.info(
-						f"[{my_name()}] "
-						f"shutting down "
-						f"{name.upper()}_EXECUTOR..."
-					)
-
 					start_time = time.time()
 					executor.shutdown(wait=True)
 					elapsed = time.time() - start_time
@@ -191,7 +203,7 @@ class ShutdownManager:
 					self.logger.info(
 						f"[{my_name()}] "
 						f"{name.upper()}_EXECUTOR "
-						f"shut down in {elapsed:.5f}s"
+						f"shut down in {elapsed * 1000.:.3f}ms"
 						)
 
 			except Exception as e:

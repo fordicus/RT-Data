@@ -154,7 +154,7 @@ def ms_to_datetime(ms: int) -> datetime:
 	Converts a millisecond timestamp to a UTC datetime object.
 	"""
 
-	return datetime.fromtimestamp(ms / 1000.0, tz=timezone.utc)
+	return datetime.fromtimestamp(ms / 1000.0, tz = timezone.utc)
 
 #———————————————————————————————————————————————————————————————————————————————
 
@@ -340,9 +340,10 @@ async def geo(ip: str) -> str:
 
 	return "?"
 
+
 #———————————————————————————————————————————————————————————————————————————————
 
-def format_ws_url(
+def format_ws_url(	# checks # of symbols 
 	url: str, 
 	symbols: list[str],
 	ports_stream_binance_com: list[str] = None,
@@ -419,6 +420,67 @@ def format_ws_url(
 		raise RuntimeError(
 			f"[{my_name()}] Failed to format WebSocket URL: {e}"
 		) from e
+
+#———————————————————————————————————————————————————————————————————————————————
+
+# def format_ws_url(	# does NOT check # of symbols 
+# 	url: str,
+# 	symbols: list[str],
+# 	ports_stream_binance_com: list[str] = None,
+# ) -> str:
+# 	"""
+# 	Pretty-print용 URL 축약 함수.
+# 	- /stream?streams=... (combined stream)에도 안전
+# 	- /ws (단일 엔드포인트)에도 안전
+# 	- symbols 길이와 streams 길이 불일치 시 '예외 미발생' (URL 파싱 우선)
+# 	- 포트 하이라이트(colorize_prefix) 유지
+# 	"""
+# 	# ──────────────────────────────────────────────────────────────────────────
+# 	def colorize_prefix(prefix: str, ports: list[str], color_code: str) -> str:
+# 		for port in ports:
+# 			if port in prefix:
+# 				colored = f"{color_code}{port}{RESET4TXT}"
+# 				prefix = prefix.replace(port, colored, 1)
+# 				break
+# 		return prefix
+# 	# ──────────────────────────────────────────────────────────────────────────
+
+# 	try:
+# 		# 포트 하이라이트를 위해 prefix 후보를 먼저 잡아둠
+# 		prefix_for_color = url.split("streams=", 1)[0] if "streams=" in url else url
+
+# 		if ports_stream_binance_com is not None:
+# 			prefix_for_color = colorize_prefix(
+# 				prefix_for_color,
+# 				ports_stream_binance_com,
+# 				CMAP4TXT.get("CYBER TEAL", "\033[33m"),
+# 			)
+
+# 		# 1) combined stream 형태가 아니면(= /ws 등) 그대로 반환
+# 		if "streams=" not in url:
+# 			return prefix_for_color  # 색만 입혀서 반환
+
+# 		# 2) combined stream: streams 부분을 안전하게 파싱
+# 		_, streams_part = url.split("streams=", 1)
+# 		# 빈 토큰 제거(마지막에 '/'가 붙은 경우 대비)
+# 		stream_tokens = [tok for tok in streams_part.split("/") if tok]
+
+# 		# 스트림이 0~2개면 그대로(또는 색만) 보여주는 편이 가독성↑
+# 		if len(stream_tokens) < 3:
+# 			# 색상 반영한 prefix + 원본 streams 그대로 재조립
+# 			return f"{prefix_for_color}streams=" + "/".join(stream_tokens)
+
+# 		# 3) 3개 이상이면 첫/마지막만 보여주고 가운데는 축약
+# 		#	(여기서 symbols 길이와의 비교/강제 매칭은 하지 않음)
+# 		first_token = stream_tokens[0]
+# 		last_token = stream_tokens[-1]
+
+# 		return f"{prefix_for_color}streams={first_token}/.../{last_token}"
+
+# 	except Exception as e:
+# 		raise RuntimeError(
+# 			f"[{my_name()}] Failed to format WebSocket URL: {e}"
+# 		) from e
 
 #———————————————————————————————————————————————————————————————————————————————
 # Unified Process-Agnostic Logger
@@ -690,7 +752,7 @@ def ensure_logging_on_exception(
 			
 			logger.critical(
 				f"{coro_func.__name__} failed: {e}",
-				exc_info=True
+				exc_info = True,
 			)
 
 			await force_flush_logger(logger)
@@ -698,7 +760,8 @@ def ensure_logging_on_exception(
 			raise
 
 	wrapper.__name__ = coro_func.__name__
-	wrapper.__doc__ = coro_func.__doc__
+	wrapper.__doc__  = coro_func.__doc__
+
 	return wrapper
 
 #———————————————————————————————————————————————————————————————————————————————

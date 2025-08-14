@@ -80,6 +80,11 @@ from core import (
 	symbol_dump_snapshot,
 )
 
+from exec import (
+	put_execution,
+	symbol_dump_execution,
+)
+
 from latency import (
 	gate_streaming_by_latency,
 	estimate_latency,
@@ -130,6 +135,7 @@ setup_uvloop(logger = logger)
 	BACK_UP_READY_AHEAD_SEC,
 	#
 	LOB_DIR,
+	CHART_DIR,
 	#
 	PURGE_ON_DATE_CHANGE, SAVE_INTERVAL_MIN,
 	#
@@ -154,28 +160,25 @@ setup_uvloop(logger = logger)
 ) = load_config(logger)
 
 #———————————————————————————————————————————————————————————————————————————————
+# GLOBAL ARRAYS
+#———————————————————————————————————————————————————————————————————————————————
 
-SHARED_TIME_DICT:		  dict[str, float] = {}
+SNAPSHOTS_QUEUE_DICT:		dict[str, asyncio.Queue] = {}
+EXECUTIONS_QUEUE_DICT:		dict[str, asyncio.Queue] = {}
 
-SNAPSHOTS_QUEUE_DICT:	  dict[str, asyncio.Queue] = {}
-SYMBOL_TO_FILE_HANDLES:	  dict[str, tuple[str, TextIOWrapper]] = {}
+FHNDLS_LOB_SPOT_BINANCE:	dict[str, tuple[str, TextIOWrapper]] = {}
+FHNDLS_EXE_SPOT_BINANCE:	dict[str, tuple[str, TextIOWrapper]] = {}
 
-RECORDS_MERGED_DATES:	  dict[str, OrderedDict[str]] = {}
-RECORDS_ZNR_MINUTES:	  dict[str, OrderedDict[str]] = {}
-
-PUT_SNAPSHOT_INTERVAL:	  dict[str, deque[int]] = {}
-MEAN_LATENCY_DICT:		  dict[str, int] = {}
-
-LATEST_JSON_FLUSH:		  dict[str, int] = {}
-JSON_FLUSH_INTERVAL:	  dict[str, deque[int]] = {}
-
-WEBSOCKET_PEER:			  dict[str, str]   = {"value": "UNKNOWN"}
-WEBSOCKET_RECV_INTV_STAT: dict[str, float] = {"p90": float('inf')}
-WEBSOCKET_RECV_INTERVAL:  deque[float] = deque(
-	maxlen = max(len(SYMBOLS), 300)
-)
+SHARED_TIME_DICT:			dict[str, float] = {}
 
 #———————————————————————————————————————————————————————————————————————————————
+
+LOB_SAV_INTV_SPOT_BINANCE:	dict[str, deque[int]] = {}
+EXE_SAV_INTV_SPOT_BINANCE:	dict[str, deque[int]] = {}		# minimal monitoring
+
+PUT_SNAPSHOT_INTERVAL:		dict[str, deque[int]] = {}
+MEAN_LATENCY_DICT:			dict[str, int] = {}
+WEBSOCKET_PEER:				dict[str, str] = {"value": "UNKNOWN"}
 
 #———————————————————————————————————————————————————————————————————————————————
 
@@ -188,8 +191,11 @@ if __name__ == "__main__":
 	# THESE TWO MUST BE WITHIN THE MAIN PROCESS
 	#———————————————————————————————————————————————————————————————————————————
 
-	MERGE_EXECUTOR = ProcessPoolExecutor(max_workers=len(SYMBOLS))
-	ZNR_EXECUTOR   = ProcessPoolExecutor(max_workers=len(SYMBOLS))
+	LOB_MERGE_EXC_SPOT_BINANCE = ProcessPoolExecutor(max_workers = len(SYMBOLS))
+	EXE_MERGE_EXC_SPOT_BINANCE = ProcessPoolExecutor(max_workers = len(SYMBOLS))
+
+	LOB_ZNR_EXC_SPOT_BINANCE   = ProcessPoolExecutor(max_workers = len(SYMBOLS))
+	EXE_ZNR_EXC_SPOT_BINANCE   = ProcessPoolExecutor(max_workers = len(SYMBOLS))
 
 	#———————————————————————————————————————————————————————————————————————————
 	# SHUTDOWN MANAGER SETUP
@@ -201,8 +207,13 @@ if __name__ == "__main__":
 	) = create_shutdown_manager(logger)
 
 	SHUTDOWN_MANAGER.register_executors(
-		merge = MERGE_EXECUTOR,
-		znr   = ZNR_EXECUTOR
+		#———————————————————————————————————————————————————————————————————————
+		lob_merge_exc_spot_binance = LOB_MERGE_EXC_SPOT_BINANCE,
+		exe_merge_exc_spot_binance = EXE_MERGE_EXC_SPOT_BINANCE,
+		#———————————————————————————————————————————————————————————————————————
+		lob_znr_exc_spot_binance   = LOB_ZNR_EXC_SPOT_BINANCE,
+		exe_znr_exc_spot_binance   = EXE_ZNR_EXC_SPOT_BINANCE,
+		#———————————————————————————————————————————————————————————————————————
 	)
 	SHUTDOWN_MANAGER.register_symbols(SYMBOLS)
 	SHUTDOWN_MANAGER.register_signal_handlers()
@@ -222,23 +233,37 @@ if __name__ == "__main__":
 				EVENT_STREAM_ENABLE,
 			#
 			) = init_runtime_state(
-			#
+				#———————————————————————————————————————————————————————————————
 				MEAN_LATENCY_DICT,
-				LATEST_JSON_FLUSH,
-				JSON_FLUSH_INTERVAL,
+				LOB_SAV_INTV_SPOT_BINANCE,
+				EXE_SAV_INTV_SPOT_BINANCE,
+				#———————————————————————————————————————————————————————————————
 				PUT_SNAPSHOT_INTERVAL,
+				#———————————————————————————————————————————————————————————————
 				SNAPSHOTS_QUEUE_DICT,
 				SNAPSHOTS_QUEUE_MAX,
-				SYMBOL_TO_FILE_HANDLES,
-				RECORDS_MERGED_DATES,
-				RECORDS_ZNR_MINUTES,
+				EXECUTIONS_QUEUE_DICT,
+				#———————————————————————————————————————————————————————————————
+				FHNDLS_LOB_SPOT_BINANCE,
+				FHNDLS_EXE_SPOT_BINANCE,
+				#———————————————————————————————————————————————————————————————
 				SYMBOLS,
 				logger,
+				#———————————————————————————————————————————————————————————————
 			#
 			)
 
+			#———————————————————————————————————————————————————————————————————
+			#	list[
+			#		dict[str, tuple[str, TextIOWrapper]]
+			#	]
+			#———————————————————————————————————————————————————————————————————
+
 			SHUTDOWN_MANAGER.register_file_handles(
-				SYMBOL_TO_FILE_HANDLES,
+				[
+					FHNDLS_LOB_SPOT_BINANCE,
+					FHNDLS_EXE_SPOT_BINANCE,
+				]
 			)
 
 			#———————————————————————————————————————————————————————————————————
@@ -258,9 +283,9 @@ if __name__ == "__main__":
 			dashboard_state = {
 				'SYMBOLS':				 SYMBOLS,
 				'WEBSOCKET_PEER':		 WEBSOCKET_PEER,
-				'SNAPSHOTS_QUEUE_DICT':  SNAPSHOTS_QUEUE_DICT,
+				'SNAPSHOTS_QUEUE_DICT':  SNAPSHOTS_QUEUE_DICT,					# TBA
 				'MEAN_LATENCY_DICT':	 MEAN_LATENCY_DICT,
-				'JSON_FLUSH_INTERVAL':   JSON_FLUSH_INTERVAL,
+				'JSON_FLUSH_INTERVAL':   LOB_SAV_INTV_SPOT_BINANCE,				# NAME MISMATCH
 				'PUT_SNAPSHOT_INTERVAL': PUT_SNAPSHOT_INTERVAL,
 			}
 			
@@ -268,7 +293,7 @@ if __name__ == "__main__":
 				state_refs =	   dashboard_state,
 				config =		   dashboard_config,
 				shutdown_manager = SHUTDOWN_MANAGER,
-				logger =		   logger
+				logger =		   logger,
 			)
 			
 			#———————————————————————————————————————————————————————————————————
@@ -295,7 +320,7 @@ if __name__ == "__main__":
 						logger,
 						shutdown_event = MAIN_SHUTDOWN_EVENT,
 					), 
-					name="estimate_latency()",
+					name = "estimate_latency()",
 				)
 
 				#———————————————————————————————————————————————————————————————
@@ -305,11 +330,11 @@ if __name__ == "__main__":
 				#———————————————————————————————————————————————————————————————
 
 				update_shared_time_dict(SHARED_TIME_DICT,
-					'LATEST_SLEEP_TIME_BINANCE_DEPTH_STREAM',
+					'LATEST_SLEEP_TIME_BINANCE_STREAM',
 				)
 
 				#———————————————————————————————————————————————————————————————
-				# Instantiate HotSwapManager registering Main Shutdown Event
+				# put_snapshot @core.py
 				#———————————————————————————————————————————————————————————————
 				
 				HSM_PUT_SNAPSHOT_BINANCE_DEPTH20_100MS = HotSwapManager(
@@ -320,8 +345,6 @@ if __name__ == "__main__":
 				put_snapshot_task = asyncio.create_task(
 					put_snapshot(								# @depth20@100ms
 						#———————————————————————————————————————————————————————
-						WEBSOCKET_RECV_INTERVAL,
-						WEBSOCKET_RECV_INTV_STAT,
 						PUT_SNAPSHOT_INTERVAL,
 						#———————————————————————————————————————————————————————
 						SNAPSHOTS_QUEUE_DICT,
@@ -331,17 +354,15 @@ if __name__ == "__main__":
 						EVENT_1ST_SNAPSHOT,
 						#———————————————————————————————————————————————————————
 						SHARED_TIME_DICT,
-						'LATEST_SLEEP_TIME_BINANCE_DEPTH_STREAM',
-						1.5,  # `min_reconn_sec` for `sleep_on_ws_reconn`
+						'LATEST_SLEEP_TIME_BINANCE_STREAM',
+						1.5,		# `sleep_on_ws_reconn`
 						#———————————————————————————————————————————————————————
-						WS_URL,
+						WS_URL, 'STREAM_BINANCE_COM_DEPTH20_100MS',
 						WILDCARD_STREAM_BINANCE_COM_PORT,
 						PORTS_STREAM_BINANCE_COM,
 						#———————————————————————————————————————————————————————
-						WS_PING_INTERVAL,
-						WS_PING_TIMEOUT,
-						SYMBOLS,
-						logger,
+						WS_PING_INTERVAL, WS_PING_TIMEOUT,
+						SYMBOLS, logger,
 						#———————————————————————————————————————————————————————
 						port_cycling_period_hrs = PORT_CYCLING_PERIOD_HRS,
 						back_up_ready_ahead_sec = BACK_UP_READY_AHEAD_SEC,
@@ -351,11 +372,55 @@ if __name__ == "__main__":
 						is_backup		= False,
 						#———————————————————————————————————————————————————————
 					),
-					name="put_snapshot()",
+					name = "put_snapshot()",
 				)
 				HSM_PUT_SNAPSHOT_BINANCE_DEPTH20_100MS.\
 					append_task_w_creation_time(
 						put_snapshot_task,
+					)
+
+				#———————————————————————————————————————————————————————————————
+				# put_execution @exec.py
+				#———————————————————————————————————————————————————————————————
+
+				HSM_PUT_EXECUTION_BINANCE_AGGTRADE = HotSwapManager(
+					name = "put_execution_binance_aggtrade",
+					shutdown_event = MAIN_SHUTDOWN_EVENT,
+				)
+
+				put_execution_task = asyncio.create_task(
+					put_execution(									# @aggTrade
+						#———————————————————————————————————————————————————————
+						EXECUTIONS_QUEUE_DICT,
+						#———————————————————————————————————————————————————————
+						EVENT_STREAM_ENABLE,
+						MEAN_LATENCY_DICT,
+						EVENT_1ST_SNAPSHOT,
+						#———————————————————————————————————————————————————————
+						SHARED_TIME_DICT,
+						'LATEST_SLEEP_TIME_BINANCE_STREAM',
+						1.5,		# `sleep_on_ws_reconn`
+						#———————————————————————————————————————————————————————
+						WS_URL, 'STREAM_BINANCE_COM_AGGTRADE',
+						WILDCARD_STREAM_BINANCE_COM_PORT,
+						PORTS_STREAM_BINANCE_COM,
+						#———————————————————————————————————————————————————————
+						WS_PING_INTERVAL, WS_PING_TIMEOUT,
+						SYMBOLS, logger,
+						#———————————————————————————————————————————————————————
+						port_cycling_period_hrs = PORT_CYCLING_PERIOD_HRS,
+						back_up_ready_ahead_sec = BACK_UP_READY_AHEAD_SEC,
+						hotswap_manager = HSM_PUT_EXECUTION_BINANCE_AGGTRADE,
+						shutdown_event	= MAIN_SHUTDOWN_EVENT,
+						handoff_event	= None,
+						is_backup		= False,
+						#———————————————————————————————————————————————————————
+					),
+					name = "put_execution()",
+				)
+				HSM_PUT_EXECUTION_BINANCE_AGGTRADE.\
+					append_task_w_creation_time(
+						put_execution_task,
 					)
 				
 				#———————————————————————————————————————————————————————————————
@@ -368,36 +433,54 @@ if __name__ == "__main__":
 						DESIRED_MAX_SYS_MEM_LOAD,
 						logger,
 					),
-					name="monitor_hardware()",
+					name = "monitor_hardware()",
 				)
 
 				#———————————————————————————————————————————————————————————————
+				# symbol_dump_snapshot @core.py
+				#———————————————————————————————————————————————————————————————
 
-				dump_tasks = []
 				for symbol in SYMBOLS:
 					task = asyncio.create_task(
 						symbol_dump_snapshot(
 							symbol,
 							SAVE_INTERVAL_MIN,
 							SNAPSHOTS_QUEUE_DICT,
-							# it seems unnecessary in `symbol_dump_snapshot`
-							# EVENT_STREAM_ENABLE,
 							LOB_DIR,
-							SYMBOL_TO_FILE_HANDLES,
-							JSON_FLUSH_INTERVAL,
-							LATEST_JSON_FLUSH,
+							FHNDLS_LOB_SPOT_BINANCE,
+							LOB_SAV_INTV_SPOT_BINANCE,		# monitoring
 							PURGE_ON_DATE_CHANGE,
-							MERGE_EXECUTOR,
-							RECORDS_MERGED_DATES,
-							ZNR_EXECUTOR,
-							RECORDS_ZNR_MINUTES,
+							LOB_MERGE_EXC_SPOT_BINANCE,		# fire-and-forget
+							LOB_ZNR_EXC_SPOT_BINANCE,		# fire-and-forget
 							RECORDS_MAX,
 							logger,
-							shutdown_event = MAIN_SHUTDOWN_EVENT,
+							MAIN_SHUTDOWN_EVENT,
 						),
-						name=f"symbol_dump_snapshot({symbol})"
+						name = f"symbol_dump_snapshot({symbol})",
 					)
-					dump_tasks.append(task)
+
+				#———————————————————————————————————————————————————————————————
+				# symbol_dump_execution @core.py
+				#———————————————————————————————————————————————————————————————
+
+				for symbol in SYMBOLS:
+					task = asyncio.create_task(
+						symbol_dump_execution(
+							symbol,
+							SAVE_INTERVAL_MIN,
+							EXECUTIONS_QUEUE_DICT,
+							CHART_DIR,
+							FHNDLS_EXE_SPOT_BINANCE,
+							EXE_SAV_INTV_SPOT_BINANCE,		# monitoring
+							PURGE_ON_DATE_CHANGE,
+							EXE_MERGE_EXC_SPOT_BINANCE,		# fire-and-forget
+							EXE_ZNR_EXC_SPOT_BINANCE,		# fire-and-forget
+							RECORDS_MAX,
+							logger,
+							MAIN_SHUTDOWN_EVENT,
+						),
+						name = f"symbol_dump_execution({symbol})",
+					)
 
 				#———————————————————————————————————————————————————————————————
 
@@ -411,18 +494,8 @@ if __name__ == "__main__":
 						logger,
 						shutdown_event = MAIN_SHUTDOWN_EVENT,
 					),
-					name="gate_streaming_by_latency()",
+					name = "gate_streaming_by_latency()",
 				)
-
-				#———————————————————————————————————————————————————————————————
-
-				all_tasks = [
-					estimate_latency_task,
-					put_snapshot_task,
-					monitor_hardware_task,
-					*dump_tasks,
-					gate_streaming_by_latency_task,
-				]
 
 				#———————————————————————————————————————————————————————————————
 				# Cleanup Callback for HotSwapManaters

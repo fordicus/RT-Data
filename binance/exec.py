@@ -1,4 +1,4 @@
-# core.py @2025-08-14 / DO NOT BLINDLY MODIFY THIS CODE
+# exec.py @2025-08-14 / DO NOT BLINDLY MODIFY THIS CODE
 
 #———————————————————————————————————————————————————————————————————————————————
 
@@ -53,7 +53,7 @@ def get_date_from_suffix(suffix: str) -> str:
 #———————————————————————————————————————————————————————————————————————————————
 
 def proc_zip_n_remove_jsonl(
-	lob_dir:	  str,
+	chart_dir:	  str,
 	symbol_upper: str,
 	last_suffix:  str,
 	max_retries:  int   = 100,
@@ -153,17 +153,13 @@ def proc_zip_n_remove_jsonl(
 
 	try:
 
-		# get_subprocess_logger().warning(
-		# 	f"\tproc_zip_n_remove_jsonl() invoked"
-		# )
-
 		last_jsonl_path = os.path.join(
 			os.path.join(
-				lob_dir, "temporary",
-				f"{symbol_upper}_orderbook_"
+				chart_dir, "temporary",
+				f"{symbol_upper}_execution_"
 				f"{get_date_from_suffix(last_suffix)}",
 			),
-			f"{symbol_upper}_orderbook_{last_suffix}.jsonl"
+			f"{symbol_upper}_execution_{last_suffix}.jsonl"
 		)
 
 		zip_and_remove(last_jsonl_path)
@@ -198,11 +194,11 @@ def proc_symbol_consolidate_a_day(
 		# Construct working directories and target paths
 
 		tmp_dir = os.path.join(base_dir, "temporary",
-			f"{symbol.upper()}_orderbook_{day_str}"
+			f"{symbol.upper()}_execution_{day_str}"
 		)
 
 		merged_path = os.path.join(base_dir,
-			f"{symbol.upper()}_orderbook_{day_str}.jsonl"
+			f"{symbol.upper()}_execution_{day_str}.jsonl"
 		)
 
 		if not os.path.isdir(tmp_dir):
@@ -427,12 +423,12 @@ def proc_symbol_consolidate_a_day(
 #———————————————————————————————————————————————————————————————————————————————
 
 @ensure_logging_on_exception
-async def symbol_dump_snapshot(
+async def symbol_dump_execution(
 	#———————————————————————————————————————————————————————————————————————————
 	symbol:					str,
 	save_interval_min:		int,
-	snapshots_queue_dict:	dict[str, asyncio.Queue],
-	lob_dir:				str,
+	executions_queue_dict:	dict[str, asyncio.Queue],
+	chart_dir:				str,
 	managed_fhndls:			dict[str, tuple[str, TextIOWrapper]],
 	save_intv_monitor:		dict[str, deque[int]],
 	purge_on_date_change:	int,
@@ -490,7 +486,7 @@ async def symbol_dump_snapshot(
 		file_path:		str,
 		suffix:			str,
 		symbol:			str,
-		managed_fhndls: dict[str, tuple[str, TextIOWrapper]],
+		managed_fhndls:	dict[str, tuple[str, TextIOWrapper]],
 		#———————————————————————————————————————————————————————————————————————
 	) -> Optional[TextIOWrapper]:
 
@@ -548,7 +544,7 @@ async def symbol_dump_snapshot(
 
 	#———————————————————————————————————————————————————————————————————————————
 
-	async def fetch_snapshot(
+	async def fetch_execution(
 		#———————————————————————————————————————————————————————————————————————
 		queue:  asyncio.Queue,
 		symbol: str,
@@ -563,7 +559,7 @@ async def symbol_dump_snapshot(
 
 			logger.error(
 				f"[{my_name()}][{symbol.upper()}] "
-				f"Failed to get snapshot from queue: {e}",
+				f"Failed to get execution from queue: {e}",
 				exc_info = True,
 			)
 			return None
@@ -605,7 +601,7 @@ async def symbol_dump_snapshot(
 	def get_suffix_n_date(
 		#———————————————————————————————————————————————————————————————————————
 		save_interval_min: int,
-		snapshot:		   dict,
+		execution:		   dict,
 		symbol:			   str,
 		#———————————————————————————————————————————————————————————————————————
 	) -> tuple[Optional[str], Optional[str]]:
@@ -614,7 +610,7 @@ async def symbol_dump_snapshot(
 
 			suffix = get_file_suffix(
 				save_interval_min,
-				snapshot.get("recv_ms"),		# align with <symbol>@aggTrade
+				execution.get('recv_ms'),	# align with <symbol>@depth20@100ms
 			)
 
 			date_str = get_date_from_suffix(suffix)
@@ -637,16 +633,16 @@ async def symbol_dump_snapshot(
 		#———————————————————————————————————————————————————————————————————————
 		symbol_upper: str,
 		suffix:		  str,
-		lob_dir:	  str,
+		chart_dir:	  str,
 		date_str:	  str,
 		#———————————————————————————————————————————————————————————————————————
 	) -> Optional[str]:
 		
 		try:
 
-			file_name = f"{symbol_upper}_orderbook_{suffix}.jsonl"
-			temp_dir  = os.path.join(lob_dir, "temporary",
-				f"{symbol_upper}_orderbook_{date_str}",
+			file_name = f"{symbol_upper}_execution_{suffix}.jsonl"
+			temp_dir  = os.path.join(chart_dir, "temporary",
+				f"{symbol_upper}_execution_{date_str}",
 			)
 			await asyncio.to_thread(
 				os.makedirs,
@@ -666,10 +662,10 @@ async def symbol_dump_snapshot(
 
 	#———————————————————————————————————————————————————————————————————————————
 
-	def flush_snapshot(
+	def flush_execution(
 		#———————————————————————————————————————————————————————————————————————
 		json_writer:		TextIOWrapper,
-		snapshot:			dict,
+		execution:			dict,
 		symbol:				str,
 		managed_fhndls:		dict[str, tuple[str, TextIOWrapper]],
 		save_intv_monitor:	dict[str, deque[int]],
@@ -680,7 +676,7 @@ async def symbol_dump_snapshot(
 		bool,	# success flag
 		int,	# latest_json_flush
 	]:
-
+		
 		try:
 
 			if json_writer.closed:
@@ -693,14 +689,13 @@ async def symbol_dump_snapshot(
 
 					logger.warning(
 						f"[{my_name()}][{symbol.upper()}] "
-						f"attempted to write to closed file: "
-						f"{file_path}"
+						f"attempted to write to closed file: {file_path}"
 					)
 
 					return (False, latest_json_flush)
 
 			json_writer.write(
-				orjson.dumps(snapshot).decode() + "\n"
+				orjson.dumps(execution).decode() + "\n"
 			)
 			json_writer.flush()
 
@@ -769,13 +764,13 @@ async def symbol_dump_snapshot(
 
 	#———————————————————————————————————————————————————————————————————————————
 
-	queue				= snapshots_queue_dict[symbol]
+	queue				= executions_queue_dict[symbol]
 	symbol_upper		= symbol.upper()
 	latest_json_flush	= get_current_time_ms()
 	merged_dates_record = OrderedDict()
 	znr_minutes_record	= OrderedDict()
 	
-	last_snapshot_time_ms = None		# checks timestamp order reversal
+	last_execution_time_ms = None		# checks timestamp order reversal
 
 	try:
 
@@ -783,18 +778,18 @@ async def symbol_dump_snapshot(
 
 			#———————————————————————————————————————————————————————————————————
 
-			snapshot = await fetch_snapshot(queue, symbol)
+			execution = await fetch_execution(queue, symbol)
 			
-			if snapshot is None:
+			if execution is None:
 				logger.critical(
 					f"[{my_name()}][{symbol_upper}] "
-					f"snapshot is None, skipping iteration."
+					f"execution is None, skipping iteration."
 				)
 				continue
 			
 			suffix, date_str = get_suffix_n_date(
 				save_interval_min,
-				snapshot, symbol,
+				execution, symbol,
 			)
 
 			if ((suffix is None) or (date_str is None)):
@@ -807,7 +802,7 @@ async def symbol_dump_snapshot(
 
 			file_path = await gen_file_path(
 				symbol_upper, suffix,
-				lob_dir, date_str,
+				chart_dir, date_str,
 			)
 			
 			if file_path is None:
@@ -867,7 +862,7 @@ async def symbol_dump_snapshot(
 
 						znr_executor.submit(# pickle
 							proc_zip_n_remove_jsonl,
-							lob_dir, symbol_upper, 
+							chart_dir, symbol_upper, 
 							last_suffix,
 						)
 
@@ -899,6 +894,8 @@ async def symbol_dump_snapshot(
 
 				if last_suffix:
 
+					pass
+
 					last_date = get_date_from_suffix(last_suffix)
 
 					if ((last_date != date_str) and 
@@ -913,7 +910,7 @@ async def symbol_dump_snapshot(
 						
 						merge_executor.submit(	# pickle
 							proc_symbol_consolidate_a_day,
-							symbol, last_date, lob_dir,
+							symbol, last_date, chart_dir,
 							purge_on_date_change == 1,
 						)
 
@@ -942,35 +939,33 @@ async def symbol_dump_snapshot(
 				del date_str, last_suffix
 
 			#───────────────────────────────────────────────────────────────────
-			# STEP 3: Write snapshot to file and update flush intervals
+			# STEP 3: Write execution to file and update flush intervals
 			#───────────────────────────────────────────────────────────────────
 
-			if last_snapshot_time_ms is not None:
+			if last_execution_time_ms is not None:
 
 				if (
-					snapshot['recv_ms']
-					< last_snapshot_time_ms
+					execution["recv_ms"]
+					< last_execution_time_ms
 				):
 
 					logger.critical(
 						f"[{my_name()}] "
-						f"snapshot timestamp order reversed: "
-						f"{snapshot['recv_ms']} < {last_snapshot_time_ms}"
+						f"execution timestamp order reversed: "
+						f"{execution['recv_ms']} < {last_execution_time_ms}"
 					)
 
-			last_snapshot_time_ms = snapshot['recv_ms']
-
-			#───────────────────────────────────────────────────────────────────
+			last_execution_time_ms = execution["recv_ms"]
 
 			(
 				#───────────────────────────────────────────────────────────────
 				is_success,
 				latest_json_flush,
 				#───────────────────────────────────────────────────────────────
-			) = flush_snapshot(
+			) = flush_execution(
 				#───────────────────────────────────────────────────────────────
 				json_writer,
-				snapshot,
+				execution,
 				symbol,
 				managed_fhndls,
 				save_intv_monitor,
@@ -983,13 +978,13 @@ async def symbol_dump_snapshot(
 
 				logger.critical(
 					f"[{my_name()}][{symbol_upper}] "
-					f"failed to flush snapshot.",
+					f"failed to flush execution.",
 					exc_info = True,
 				)
 
 			# await asyncio.sleep(1)		# when simulating some delays
 
-			del snapshot, file_path, is_success
+			del execution, file_path, is_success
 
 	except asyncio.CancelledError:
 
@@ -1060,29 +1055,25 @@ async def symbol_dump_snapshot(
 #———————————————————————————————————————————————————————————————————————————————
 
 @ensure_logging_on_exception
-async def wrapped_put_snapshot(*args, **kwargs):
-	try: return await put_snapshot(*args, **kwargs)
+async def wrapped_put_execution(*args, **kwargs):
+	try: return await put_execution(*args, **kwargs)
 	except asyncio.CancelledError: pass
 	except Exception as e: raise
 
 #———————————————————————————————————————————————————————————————————————————————
 
 @ensure_logging_on_exception
-async def put_snapshot(					# @depth20@100ms
-	#———————————————————————————————————————————————————————————————————————————
-	# Liveness Monitoring
-	#———————————————————————————————————————————————————————————————————————————
-	put_snapshot_interval:				dict[str, deque[int]],
+async def put_execution(				# @aggTrade
 	#———————————————————————————————————————————————————————————————————————————
 	# Datafication
 	#———————————————————————————————————————————————————————————————————————————
-	snapshots_queue_dict:				dict[str, asyncio.Queue],
+	executions_queue_dict:				dict[str, asyncio.Queue],
 	#———————————————————————————————————————————————————————————————————————————
 	# Latency Control
 	#———————————————————————————————————————————————————————————————————————————
-	event_stream_enable:				asyncio.Event,
-	mean_latency_dict:					dict[str, int],
-	event_1st_snapshot:					asyncio.Event,
+	event_stream_enable:				asyncio.Event,							# to be improved
+	mean_latency_dict:					dict[str, int],							# to be improved
+	event_1st_snapshot:					asyncio.Event,							# to be improved
 	#———————————————————————————————————————————————————————————————————————————
 	# WebSocket Recovery
 	#———————————————————————————————————————————————————————————————————————————
@@ -1093,7 +1084,7 @@ async def put_snapshot(					# @depth20@100ms
 	# WebSocket Peer
 	#———————————————————————————————————————————————————————————————————————————
 	ws_url:								list[str],
-	ws_url_key:							str,
+	ws_url_key:							str,									# manage keys better
 	wildcard_stream_binance_com_port:	str,
 	ports_stream_binance_com:			list[str],
 	ws_ping_interval:					int,
@@ -1115,7 +1106,6 @@ async def put_snapshot(					# @depth20@100ms
 	#———————————————————————————————————————————————————————————————————————————
 	# WebSocket Liveness Control
 	#———————————————————————————————————————————————————————————————————————————
-	base_interval_ms:					int	  = 100,
 	ws_timeout_multiplier:				float =	  8.0,
 	ws_timeout_default_sec:				float =	  2.0,
 	ws_timeout_min_sec:					float =	  1.0,	
@@ -1223,20 +1213,6 @@ async def put_snapshot(					# @depth20@100ms
 	websocket_recv_interval:  deque[float] = deque(
 		maxlen = max(len(symbols), 300)
 	)
-	
-	measured_interval_ms: dict[str, int] = {}
-	measured_interval_ms.clear()
-	measured_interval_ms.update({
-		symbol: None
-		for symbol in symbols
-	})
-	
-	prev_snapshot_time_ms: dict[str, int] = {}
-	prev_snapshot_time_ms.clear()
-	prev_snapshot_time_ms.update({
-		symbol: None
-		for symbol in symbols
-	})
 
 	#———————————————————————————————————————————————————————————————————————————
 	# [DEBUG] We can simulate a specific time via `bias_to_add` if necessary.
@@ -1248,6 +1224,10 @@ async def put_snapshot(					# @depth20@100ms
 	# 	  23, 59, 50
 	# )
 	# bias_to_add = compute_bias_ms(get_current_time_ms(), target_dt,)
+
+	#———————————————————————————————————————————————————————————————————————————
+
+	cnt = 1
 
 	#———————————————————————————————————————————————————————————————————————————
 
@@ -1270,8 +1250,6 @@ async def put_snapshot(					# @depth20@100ms
 				wildcard_stream_binance_com_port,
 				target_port,
 			)
-
-			# print(f"\nws_url_complete: {ws_url_complete}\n"); exit(0)
 
 			#———————————————————————————————————————————————————————————————————
 			# Within WebSocket
@@ -1350,11 +1328,9 @@ async def put_snapshot(					# @depth20@100ms
 								hotswap_manager,
 								backup_start_time,
 								#———————————————————————————————————————————————
-								lambda _event, _is_backup: wrapped_put_snapshot(
+								lambda _event, _is_backup: wrapped_put_execution(
 									#———————————————————————————————————————————
-									put_snapshot_interval,
-									#———————————————————————————————————————————
-									snapshots_queue_dict,
+									executions_queue_dict,
 									#———————————————————————————————————————————
 									event_stream_enable,
 									mean_latency_dict,
@@ -1437,11 +1413,9 @@ async def put_snapshot(					# @depth20@100ms
 							hotswap_manager,
 							backup_start_time,
 							#———————————————————————————————————————————————————
-							lambda _event, _is_backup: wrapped_put_snapshot(
+							lambda _event, _is_backup: wrapped_put_execution(
 								#———————————————————————————————————————
-								put_snapshot_interval,
-								#———————————————————————————————————————
-								snapshots_queue_dict,
+								executions_queue_dict,
 								#———————————————————————————————————————
 								event_stream_enable,
 								mean_latency_dict,
@@ -1621,13 +1595,13 @@ async def put_snapshot(					# @depth20@100ms
 							msg = orjson.loads(raw)
 
 							#———————————————————————————————————————————————————
-							# Validate: <symbol>@depth20@100ms
+							# Validate: <symbol>@aggTrade
 							#———————————————————————————————————————————————————
 
 							stream = msg.get("stream", "")
 							split  = stream.split("@")
 
-							if len(split) != 3:
+							if len(split) != 2:
 
 								raise ValueError(
 									f"unexpected "
@@ -1635,19 +1609,11 @@ async def put_snapshot(					# @depth20@100ms
 								)
 								continue
 
-							if split[1] != "depth20":
+							if split[1] != "aggTrade":
 
 								raise ValueError(
-									f"expected `depth20` but"
+									f"expected `aggTrade` but"
 									f"received {split[1]}; "
-								)
-								continue
-
-							if split[2] != "100ms":
-
-								raise ValueError(
-									f"expected `100ms` but"
-									f"received {split[2]}; "
 								)
 								continue
 
@@ -1681,59 +1647,41 @@ async def put_snapshot(					# @depth20@100ms
 
 							#———————————————————————————————————————————————————
 							# Process the `data` Field
+							# 	https://tinyurl.com/BinanceWsAggTrade
 							#———————————————————————————————————————————————————
 
 							data = msg.get("data", {})
-							bids = data.get("bids")
-							asks = data.get("asks")
 
-							if data.get("lastUpdateId") is None:
+							event_time	= data.get("E")
+							price		= data.get("p")
+							quantity	= data.get("q")
+							is_maker	= data.get("m")
+
+							if (
+								(event_time is None)
+								or (price is None)
+								or (quantity is None)
+								or (is_maker is None)
+							):
 
 								raise ValueError(
-									f"missing `lastUpdateId` @data"
-								)
-								continue
-
-							if ((bids is None) or (asks is None)):
-
-								raise ValueError(
-									f"missing `bids` or `asks` @data"
+									f"missing fields @data"
 								)
 								continue
 
 							del data
 
+							if	 (is_maker == True):  is_maker = '1'
+							elif (is_maker == False): is_maker = '0'
+							else:
+								raise ValueError(f"is_maker: {is_maker}")
+								continue
+
 							#———————————————————————————————————————————————————————
-							# SERVER TIMESTAMP RECONSTRUCTION FOR PARTIAL STREAMS
-							#———————————————————————————————————————————————————————
-							# Binance `@depth20@100ms` streams lack server timestamp
-							# ("E"), unlike diff depth streams. We must estimate it
-							# from local receipt time with delay corrections.
+							# SERVER TIMESTAMP RECONSTRUCTION FOR PARTIAL STREAMS	# new logic
 							#———————————————————————————————————————————————————————
 
 							cur_time_ms = get_current_time_ms()
-
-							if prev_snapshot_time_ms[cur_symbol] is not None:
-
-								measured_interval_ms[cur_symbol] = (
-									cur_time_ms
-									- prev_snapshot_time_ms[cur_symbol]
-								)
-								prev_snapshot_time_ms[
-									cur_symbol
-								] = cur_time_ms
-
-							else:
-
-								prev_snapshot_time_ms[
-									cur_symbol
-								] = cur_time_ms
-
-								continue
-
-							put_snapshot_interval[cur_symbol].append(
-								measured_interval_ms[cur_symbol]
-							)
 
 							#———————————————————————————————————————————————————————
 							# Estimate Extra Timing
@@ -1745,47 +1693,35 @@ async def put_snapshot(					# @depth20@100ms
 								)
 							)
 
-							interval_delay_ms = max(0,
-								measured_interval_ms[cur_symbol]
-								- base_interval_ms
-							)
-
 							#———————————————————————————————————————————————————————
 
-							snapshot = {
+							execution = {
 								#———————————————————————————————————————————————————
-								# recv_ms:		align with <symbol>@aggTrade
+								# recv_ms:		align with <symbol>@depth20@100ms
 								# net_delay_ms: side information
-								# intv_lag_ms:  side information
 								#———————————————————————————————————————————————————
-								"recv_ms":		  cur_time_ms,
-								"net_delay_ms":	  oneway_network_latency_ms,
-								"intv_lag_ms":	  interval_delay_ms,
+								"recv_ms":		cur_time_ms,
+								"net_delay_ms":	oneway_network_latency_ms,			# new logic
 								#———————————————————————————————————————————————————
-								"bids": [
-									[float(p), float(q)]
-									for p, q in bids
-								],
-								#———————————————————————————————————————————————————
-								"asks": [
-									[float(p), float(q)]
-									for p, q in asks
-								],
+								"E": event_time,
+								"p": price,
+								"q": quantity,
+								"m": is_maker,
 								#———————————————————————————————————————————————————
 							}
 
 							#———————————————————————————————————————————————————————
 							# `.qsize()` is less than or equal to one almost surely,
-							# meaning that `snapshots_queue_dict` is being quickly
+							# meaning that `executions_queue_dict` is being quickly
 							# consumed via `.get()`.
 							#———————————————————————————————————————————————————————
 							
-							await snapshots_queue_dict[
+							await executions_queue_dict[
 								cur_symbol
-							].put(snapshot)
+							].put(execution)
 
 							#———————————————————————————————————————————————————————
-							# 1st snapshot gate for FastAPI readiness
+							# 1st execution gate for FastAPI readiness				# new event?
 							#———————————————————————————————————————————————————————
 
 							if not event_1st_snapshot.is_set():
