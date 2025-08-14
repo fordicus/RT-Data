@@ -98,8 +98,7 @@ from dashboard import (
 from util import (
 	my_name,
 	resource_path,
-	get_current_time_ms,
-	ms_to_datetime,
+	get_cur_datetime_str,
 	update_shared_time_dict,
 	format_ws_url,
 	set_global_logger,
@@ -372,8 +371,9 @@ if __name__ == "__main__":
 						is_backup		= False,
 						#———————————————————————————————————————————————————————
 					),
-					name = "put_snapshot()",
+					name = f"put_snapshot() @{get_cur_datetime_str()}",
 				)
+
 				HSM_PUT_SNAPSHOT_BINANCE_DEPTH20_100MS.\
 					append_task_w_creation_time(
 						put_snapshot_task,
@@ -416,8 +416,9 @@ if __name__ == "__main__":
 						is_backup		= False,
 						#———————————————————————————————————————————————————————
 					),
-					name = "put_execution()",
+					name = f"put_execution() @{get_cur_datetime_str()}",
 				)
+				
 				HSM_PUT_EXECUTION_BINANCE_AGGTRADE.\
 					append_task_w_creation_time(
 						put_execution_task,

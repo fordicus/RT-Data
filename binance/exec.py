@@ -12,6 +12,7 @@ from util import (
 	compute_bias_ms,
 	format_ws_url,
 	get_current_time_ms,
+	get_cur_datetime_str,
 	get_global_log_queue,
 	get_subprocess_logger,
 	ensure_logging_on_exception,
@@ -28,6 +29,7 @@ import sys, os, io, asyncio, orjson
 import shutil, zipfile, logging
 import websockets, time
 import numpy as np
+import math
 
 from io import TextIOWrapper
 from collections import OrderedDict, deque
@@ -1107,8 +1109,9 @@ async def put_execution(				# @aggTrade
 	# WebSocket Liveness Control
 	#———————————————————————————————————————————————————————————————————————————
 	ws_timeout_multiplier:				float =	  8.0,
-	ws_timeout_default_sec:				float =	  2.0,
-	ws_timeout_min_sec:					float =	  1.0,	
+	ws_timeout_default_sec:				float =	 30.0,
+	ws_timeout_min_sec:					float =	 15.0,
+	ws_recv_intv_len_per_sym:			int	  =	  100,
 	#———————————————————————————————————————————————————————————————————————————
 ):
 
@@ -1116,31 +1119,6 @@ async def put_execution(				# @aggTrade
 	HINT:
 		asyncio.Queue(maxsize=SNAPSHOTS_QUEUE_MAX)
 	—————————————————————————————————————————————————————————————————————————"""
-
-	def update_ws_recv_timeout(		# to detect websockets with no data
-		data:		deque[float],
-		stat:		dict[str, float],
-		multiplier: float,
-		default:	float,
-		minimum:	float,
-	) -> float:		# ws_timeout_sec (adaptive based on statistics)
-
-		if len(data) >= max(data.maxlen, 300):
-			
-			stat['p90'] = np.percentile(list(data), 90)
-			return max(
-				stat['p90'] * multiplier,
-				minimum,
-			)
-
-		else:
-
-			return max(
-				default,
-				minimum
-			)
-
-	#———————————————————————————————————————————————————————————————————————————
 
 	async def sleep_on_ws_reconn(
 		shared_time_dict:	  dict[str, float],
@@ -1185,6 +1163,54 @@ async def put_execution(				# @aggTrade
 			raise
 
 	#———————————————————————————————————————————————————————————————————————————
+
+	def reset_ws_recv_intv_state(
+		websocket_recv_intv_stat: dict[str, float | None],
+		websocket_recv_interval:  deque[float],
+		last_recv_time_ns:		  Optional[float],
+	) -> Optional[float]:
+
+		websocket_recv_intv_stat['p90'] = None
+		websocket_recv_interval.clear()
+		last_recv_time_ns = None
+		
+		return last_recv_time_ns
+
+	#———————————————————————————————————————————————————————————————————————————
+
+	def update_ws_recv_timeout(		# to detect websockets with no data
+		data:			deque[float],
+		stat:			dict[str, float | None],
+		multiplier:		float,
+		default:		float,
+		minimum:		float,
+		*,
+		max_cap:		float	= 10.0,
+	) -> float:			# ws_timeout_sec (adaptive based on statistics)
+		
+		finite = [
+			x for x in data 
+			if (
+				math.isfinite(x)
+				and x >= 0.0
+			)
+		]
+
+		if len(finite) >= data.maxlen:
+			
+			p90 = float(np.percentile(finite, 90))
+			stat['p90'] = p90
+			cand = max(p90 * multiplier, minimum)
+			
+			return min(cand, max_cap)
+			
+		else:
+			
+			
+			stat['p90'] = None
+			return max(default, minimum)
+
+	#———————————————————————————————————————————————————————————————————————————
 	# Howswap State
 	#———————————————————————————————————————————————————————————————————————————
 
@@ -1208,10 +1234,13 @@ async def put_execution(				# @aggTrade
 	ws_retry_cnt = 0
 	ws_timeout_sec = ws_timeout_default_sec
 	last_recv_time_ns = None
-
-	websocket_recv_intv_stat: dict[str, float] = {"p90": float('inf')}
+	
+	websocket_recv_intv_stat: dict[str, float | None] = {"p90": None}
 	websocket_recv_interval:  deque[float] = deque(
-		maxlen = max(len(symbols), 300)
+		maxlen = (
+			len(symbols) *
+			ws_recv_intv_len_per_sym
+		)
 	)
 
 	#———————————————————————————————————————————————————————————————————————————
@@ -1281,6 +1310,14 @@ async def put_execution(				# @aggTrade
 					ports_stream_binance_com,
 				)
 
+				last_recv_time_ns = reset_ws_recv_intv_state(
+					websocket_recv_intv_stat,
+					websocket_recv_interval,
+					last_recv_time_ns,
+				)
+
+				#———————————————————————————————————————————————————————————————
+
 				logger.info(
 					f"[{my_name()}]🟢\n  "
 					f"{ws_url_to_prt}"
@@ -1322,8 +1359,8 @@ async def put_execution(				# @aggTrade
 						# prepare the next backup
 						#———————————————————————————————————————————————————————
 
-						hsm_create_task(
-							hotswap_manager, hsm_schedule_backup(
+						hsm_create_task(hotswap_manager,
+							hsm_schedule_backup(
 								#———————————————————————————————————————————————
 								hotswap_manager,
 								backup_start_time,
@@ -1363,7 +1400,8 @@ async def put_execution(				# @aggTrade
 								back_up_ready_ahead_sec,
 								ws_start_time,
 								#———————————————————————————————————————————————
-							)
+							),
+							name = f"put_execution() @{get_cur_datetime_str()}",
 						)
 
 						hotswap_manager.handoff_completed = False
@@ -1407,48 +1445,49 @@ async def put_execution(				# @aggTrade
 
 					hotswap_prepared = True
 
-					hsm_create_task(
-						hotswap_manager, hsm_schedule_backup(
+					hsm_create_task(hotswap_manager,
+						hsm_schedule_backup(
 							#———————————————————————————————————————————————————
 							hotswap_manager,
 							backup_start_time,
 							#———————————————————————————————————————————————————
 							lambda _event, _is_backup: wrapped_put_execution(
-								#———————————————————————————————————————
+								#———————————————————————————————————————————————
 								executions_queue_dict,
-								#———————————————————————————————————————
+								#———————————————————————————————————————————————
 								event_stream_enable,
 								mean_latency_dict,
 								event_1st_snapshot,
-								#———————————————————————————————————————
+								#———————————————————————————————————————————————
 								shared_time_dict,
 								shared_time_dict_key,
 								min_reconn_sec,
-								#———————————————————————————————————————
+								#———————————————————————————————————————————————
 								ws_url,
 								ws_url_key,
 								wildcard_stream_binance_com_port,
 								ports_stream_binance_com,
 								ws_ping_interval,
 								ws_ping_timeout,
-								#———————————————————————————————————————
+								#———————————————————————————————————————————————
 								symbols,
 								logger,
-								#———————————————————————————————————————
+								#———————————————————————————————————————————————
 								port_cycling_period_hrs,
 								back_up_ready_ahead_sec,
 								hotswap_manager,
 								shutdown_event,
 								_event,
 								_is_backup,
-								#———————————————————————————————————————
+								#———————————————————————————————————————————————
 							),
 							#———————————————————————————————————————————————————
 							logger,
 							back_up_ready_ahead_sec,
 							ws_start_time,
 							#———————————————————————————————————————————————————
-						)
+						),
+						name = f"put_execution() @{get_cur_datetime_str()}",
 					)
 
 					logger.info(
@@ -1770,33 +1809,70 @@ async def put_execution(				# @aggTrade
 					# No Messages or WebSocket Closed → Backoff + Retry
 					#———————————————————————————————————————————————————————————
 
-					except (
-						asyncio.TimeoutError,
-						websockets.exceptions.ConnectionClosed,
-					) as e:
-						
+					except asyncio.TimeoutError as e:
+
 						if hotswap_manager.is_shutting_down(): break
 
 						ws_retry_cnt += 1
 
-						if isinstance(e, asyncio.TimeoutError):
-							
-							reason = (
-								f"no data received for "
-								f"{ws_timeout_sec:.2f}s; "
-								f"p90 recv intv "
-								f"{websocket_recv_intv_stat['p90'] * 1000.:.2f}ms"
+						p90 = websocket_recv_intv_stat.get('p90')
+						p90_ms_str = (
+							f"{p90 * 1000.0:.2f}ms"
+							if (
+								isinstance(p90, (int, float))
+								and math.isfinite(p90)
 							)
-							
-						else:  # websockets.exceptions.ConnectionClosed
-							
-							close_reason = (
-								getattr(e, "reason", None)
-								or "no close frame"
-							)
-							reason = f"ws connection closed: {close_reason}"
+							else "n/a"
+						)
+						reason = (
+							f"no data received for "
+							f"{ws_timeout_sec:.2f}s; "
+							f"p90 recv intv {p90_ms_str}"
+						)
 
 						logger.warning(
+							f"[{my_name()}] {reason} / "
+							f"reconnecting: {ws_retry_cnt}",
+							exc_info = False,
+						)
+
+						await sleep_on_ws_reconn(
+							shared_time_dict,
+							shared_time_dict_key,
+							min_reconn_sec,
+							logger,
+						)
+
+						break
+
+					except websockets.exceptions.ConnectionClosed as e:
+
+						if hotswap_manager.is_shutting_down(): break
+
+						ws_retry_cnt += 1
+
+						is_ok = isinstance(e,
+							websockets.exceptions.ConnectionClosedOK
+						)
+						
+						close_reason = (
+							getattr(e, "reason", None)
+							or "no close frame"
+						)
+						close_code = getattr(e, "code", None)
+
+						reason = (
+							f"ws connection closed: "
+							f"code={close_code}, "
+							f"reason={close_reason}"
+						)
+
+						log = (
+							logger.info if is_ok
+							else logger.warning
+						)
+
+						log(
 							f"[{my_name()}] {reason} / "
 							f"reconnecting: {ws_retry_cnt}",
 							exc_info = False,

@@ -235,8 +235,10 @@ async def estimate_latency(
 	ws_timeout_sec = ws_timeout_default_sec
 	last_recv_time_ns = None
 
-	websocket_recv_interval	 = deque(maxlen=max(len(symbols), 300))
-	websocket_recv_intv_stat = {"p90": float('inf')}
+	websocket_recv_intv_stat: dict[str, float | None] = {"p90": None}
+	websocket_recv_interval:  deque[float] = deque(
+		maxlen = max(len(symbols), 300)
+	)
 
 	depth_update_id_dict: dict[str, int] = {}
 	depth_update_id_dict.clear()
@@ -487,31 +489,37 @@ async def estimate_latency(
 
 						ws_retry_cnt += 1
 
-						if isinstance(e, asyncio.TimeoutError):
-							
-							reason = (
-								f"no data received for "
-								f"{ws_timeout_sec:.2f}s; "
-								f"p90 recv intv "
-								f"{websocket_recv_intv_stat['p90'] * 1000.:.2f}ms"
-							)
-							
-						else:  # websockets.exceptions.ConnectionClosed
-							
-							close_reason = (
-								getattr(e, "reason", None)
-								or "no close frame"
-							)
-							reason = f"ws connection closed: {close_reason}"
+						#———————————————————————————————————————————————————————
+						# muted at the moment
+						#———————————————————————————————————————————————————————
 
-						logger.warning(
-							f"[{my_name()}] {reason} / "
-							f"reconnecting: {ws_retry_cnt}",
-							exc_info = False,
-						)
+						# if isinstance(e, asyncio.TimeoutError):
+							
+						# 	reason = (
+						# 		f"no data received for "
+						# 		f"{ws_timeout_sec:.2f}s; "
+						# 		f"p90 recv intv "
+						# 		f"{websocket_recv_intv_stat['p90'] * 1000.:.2f}ms"
+						# 	)
+							
+						# else:  # websockets.exceptions.ConnectionClosed
+							
+						# 	close_reason = (
+						# 		getattr(e, "reason", None)
+						# 		or "no close frame"
+						# 	)
+						# 	reason = f"ws connection closed: {close_reason}"
 
-						ws_retry_cnt, last_success_time = await calculate_backoff_and_sleep(
-							ws_retry_cnt, last_success_time,
+						# logger.warning(
+						# 	f"[{my_name()}] {reason} / "
+						# 	f"reconnecting: {ws_retry_cnt}",
+						# 	exc_info = False,
+						# )
+
+						ws_retry_cnt, last_success_time = (
+							await calculate_backoff_and_sleep(
+								ws_retry_cnt, last_success_time,
+							)
 						)
 						
 						break
