@@ -30,11 +30,41 @@ from util import (
 	my_name,
 	get_ssl_context,
 	NanoTimer,
-	get_current_time_ms, geo, 
+	get_current_time_ms, 
 	format_ws_url,
 	ensure_logging_on_exception,
 )
 
+#———————————————————————————————————————————————————————————————————————————————
+
+class LatencyMonitor:
+	
+	def __init__(self, 
+		latency_deque_size:	 	   int,
+		latency_sample_min:	 	   int,
+		latency_threshold_ms:	   int,
+		latency_routine_sleep_sec: float,
+		symbols:			 	   list[str],
+	):
+		
+		self.deque_sz = latency_deque_size
+		self.min_smpl = latency_sample_min
+		self.thrs_ms  = latency_threshold_ms
+		self.rouslsec = latency_routine_sleep_sec
+		
+		self.data_dict: dict[str, int] = {}
+		self.data_dict.clear()
+		self.data_dict.update({
+			symbol: None
+			for symbol in symbols
+		})
+
+		self.evnt_ok_ = asyncio.Event()
+		self.evnt_go_ = asyncio.Event()
+		self.evnt_1st = asyncio.Event()
+
+#———————————————————————————————————————————————————————————————————————————————
+# LEGACY FUNCTIONS
 #———————————————————————————————————————————————————————————————————————————————
 
 async def gate_streaming_by_latency(
@@ -129,23 +159,72 @@ async def gate_streaming_by_latency(
 
 #———————————————————————————————————————————————————————————————————————————————
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#———————————————————————————————————————————————————————————————————————————————
+
 @ensure_logging_on_exception
 async def estimate_latency(
-	websocket_peer:			dict[str, str],
 	ws_ping_interval:		Optional[int],
 	ws_ping_timeout:		Optional[int],
-	latency_deque_size:		int,
-	latency_sample_min:		int,
-	mean_latency_dict:		dict[str, int],
-	latency_threshold_ms:	int,
-	event_latency_valid:  	asyncio.Event,
+	#
+	lat_mon:				LatencyMonitor,
+	#
 	base_backoff:			int,
 	max_backoff:			int,
 	reset_cycle_after:		int,
 	reset_backoff_level:	int,
+	#
 	symbols:				list[str],
 	logger:					logging.Logger,
 	shutdown_event:			Optional[asyncio.Event] = None,
+	#
 	base_interval_ms:		int   = 100,
 	ws_timeout_multiplier:	float =	  8.0,
 	ws_timeout_default_sec:	float =	  2.0,
@@ -250,7 +329,7 @@ async def estimate_latency(
 	latency_dict: dict[str, deque[int]] = {}
 	latency_dict.clear()
 	latency_dict.update({
-		symbol: deque(maxlen=latency_deque_size)
+		symbol: deque(maxlen = lat_mon.deque_sz)
 		for symbol in symbols
 	})
 
@@ -269,41 +348,6 @@ async def estimate_latency(
 				ping_timeout  = ws_ping_timeout,
 				compression	  = None,
 			) as ws:
-
-				ip, port = ws.remote_address or ("?", "?")
-
-				try:
-
-					loc = await geo(ip) if ip != "?" else "?"
-
-				except RuntimeError as e:
-
-					if "cannot reuse already awaited coroutine" in str(e):
-
-						loc = "UNKNOWN"
-						logger.warning(
-							f"[{my_name()}] Coroutine reuse error, "
-							f"using fallback location"
-						)
-
-					else:
-
-						raise
-
-				except Exception as e:
-
-					loc = "UNKNOWN"
-					logger.warning(
-						f"[{my_name()}] Failed to get location for {ip}: {e}"
-					)
-
-				websocket_peer["value"] = (
-					f"{ip}:{port}  ({loc})"
-				)
-
-				logger.info(
-					f"[{my_name()}]🌐 ws peer {websocket_peer['value']}"
-				)
 				
 				logger.info(
 					f"[{my_name()}]🟢\n  "
@@ -334,7 +378,7 @@ async def estimate_latency(
 							# From
 							# 	`message = orjson.loads(raw_msg)`
 							# to
-							#	mean_latency_dict[symbol] = int(
+							#	lat_mon.data_dict[symbol] = int(
 							#		statistics.fmean(
 							#			latency_dict[symbol]
 							#		)
@@ -384,10 +428,10 @@ async def estimate_latency(
 
 							if (
 								len(latency_dict[symbol])
-								>= latency_sample_min
+								>= lat_mon.min_smpl
 							):
 
-								mean_latency_dict[symbol] = int(
+								lat_mon.data_dict[symbol] = int(
 									statistics.fmean(
 										latency_dict[symbol]
 									)
@@ -403,22 +447,22 @@ async def estimate_latency(
 									(	
 										(
 											len(latency_dict[s])
-											>= latency_sample_min
+											>= lat_mon.min_smpl
 										)
 										and (
-											mean_latency_dict[s]
-											< latency_threshold_ms
+											lat_mon.data_dict[s]
+											< lat_mon.thrs_ms
 										)
 									)	for s in symbols
 								):
 
-									if not event_latency_valid.is_set():
+									if not lat_mon.evnt_ok_.is_set():
 
-										event_latency_valid.set()
+										lat_mon.evnt_ok_.set()
 								
 								else:
 
-									event_latency_valid.clear()
+									lat_mon.evnt_ok_.clear()
 
 							#———————————————————————————————————————————————————————
 							# Statistics on Websocket Receipt Interval (put_snapshot과 동일)
@@ -526,11 +570,11 @@ async def estimate_latency(
 
 		except asyncio.CancelledError:
 			
-			event_latency_valid.clear()
+			lat_mon.evnt_ok_.clear()
 			for symbol in symbols:
 				latency_dict[symbol].clear()
 				depth_update_id_dict[symbol] = 0
-				mean_latency_dict[symbol] = None
+				lat_mon.data_dict[symbol] = None
 
 			raise # logging unnecessary
 
@@ -546,7 +590,7 @@ async def estimate_latency(
 				exc_info = True,
 			)
 
-			event_latency_valid.clear()
+			lat_mon.evnt_ok_.clear()
 
 			for symbol in symbols:
 
@@ -564,6 +608,6 @@ async def estimate_latency(
 			)
 
 	logger.info(f"[{my_name()}] task ends")
-	event_latency_valid.clear()
+	lat_mon.evnt_ok_.clear()
 
 #———————————————————————————————————————————————————————————————————————————————

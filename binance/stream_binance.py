@@ -136,17 +136,20 @@ setup_uvloop(logger = logger)
 	LOB_DIR,
 	CHART_DIR,
 	#
-	PURGE_ON_DATE_CHANGE, SAVE_INTERVAL_MIN,
+	PURGE_ON_DATE_CHANGE,
+	SAVE_INTERVAL_MIN,
 	#
-	SNAPSHOTS_QUEUE_MAX, RECORDS_MAX,
+	SNAPSHOTS_QUEUE_MAX,
+	RECORDS_MAX,
 	#
-	LATENCY_DEQUE_SIZE, LATENCY_SAMPLE_MIN,
-	LATENCY_THRESHOLD_MS, LATENCY_ROUTINE_SLEEP_SEC,
+	LAT_MON_SPOT_BINANCE,
 	#
-	BASE_BACKOFF, MAX_BACKOFF,
-	RESET_CYCLE_AFTER, RESET_BACKOFF_LEVEL,
-	#
-	WS_PING_INTERVAL, WS_PING_TIMEOUT,
+	BASE_BACKOFF,
+	MAX_BACKOFF,
+	RESET_CYCLE_AFTER,
+	RESET_BACKOFF_LEVEL,
+	WS_PING_INTERVAL,
+	WS_PING_TIMEOUT,
 	#
 	DASHBOARD_PORT_NUMBER,
 	DASHBOARD_STREAM_INTERVAL,
@@ -176,7 +179,6 @@ LOB_SAV_INTV_SPOT_BINANCE:	dict[str, deque[int]] = {}
 EXE_SAV_INTV_SPOT_BINANCE:	dict[str, deque[int]] = {}		# minimal monitoring
 
 PUT_SNAPSHOT_INTERVAL:		dict[str, deque[int]] = {}
-MEAN_LATENCY_DICT:			dict[str, int] = {}
 WEBSOCKET_PEER:				dict[str, str] = {"value": "UNKNOWN"}
 
 #———————————————————————————————————————————————————————————————————————————————
@@ -225,15 +227,8 @@ if __name__ == "__main__":
 
 			#———————————————————————————————————————————————————————————————————
 
-			(
-			#
-				EVENT_1ST_SNAPSHOT,
-				EVENT_LATENCY_VALID,
-				EVENT_STREAM_ENABLE,
-			#
-			) = init_runtime_state(
+			init_runtime_state(
 				#———————————————————————————————————————————————————————————————
-				MEAN_LATENCY_DICT,
 				LOB_SAV_INTV_SPOT_BINANCE,
 				EXE_SAV_INTV_SPOT_BINANCE,
 				#———————————————————————————————————————————————————————————————
@@ -283,7 +278,7 @@ if __name__ == "__main__":
 				'SYMBOLS':				 SYMBOLS,
 				'WEBSOCKET_PEER':		 WEBSOCKET_PEER,
 				'SNAPSHOTS_QUEUE_DICT':  SNAPSHOTS_QUEUE_DICT,					# TBA
-				'MEAN_LATENCY_DICT':	 MEAN_LATENCY_DICT,
+				'MEAN_LATENCY_DICT':	 LAT_MON_SPOT_BINANCE.data_dict,
 				'JSON_FLUSH_INTERVAL':   LOB_SAV_INTV_SPOT_BINANCE,				# NAME MISMATCH
 				'PUT_SNAPSHOT_INTERVAL': PUT_SNAPSHOT_INTERVAL,
 			}
@@ -301,23 +296,22 @@ if __name__ == "__main__":
 
 			try:
 
+				#———————————————————————————————————————————————————————————————
+
 				estimate_latency_task = asyncio.create_task(
 					estimate_latency(
-						WEBSOCKET_PEER,
-						WS_PING_INTERVAL,
-						WS_PING_TIMEOUT,
-						LATENCY_DEQUE_SIZE,
-						LATENCY_SAMPLE_MIN,
-						MEAN_LATENCY_DICT,
-						LATENCY_THRESHOLD_MS,
-						EVENT_LATENCY_VALID,
+						#
+						WS_PING_INTERVAL, WS_PING_TIMEOUT,
+						#
+						LAT_MON_SPOT_BINANCE,
+						#
 						BASE_BACKOFF,
 						MAX_BACKOFF,
 						RESET_CYCLE_AFTER,
 						RESET_BACKOFF_LEVEL,
-						SYMBOLS,
-						logger,
-						shutdown_event = MAIN_SHUTDOWN_EVENT,
+						#
+						SYMBOLS, logger, shutdown_event = MAIN_SHUTDOWN_EVENT,
+						#
 					), 
 					name = "estimate_latency()",
 				)
@@ -348,9 +342,9 @@ if __name__ == "__main__":
 						#———————————————————————————————————————————————————————
 						SNAPSHOTS_QUEUE_DICT,
 						#———————————————————————————————————————————————————————
-						EVENT_STREAM_ENABLE,
-						MEAN_LATENCY_DICT,
-						EVENT_1ST_SNAPSHOT,
+						LAT_MON_SPOT_BINANCE.evnt_go_,
+						LAT_MON_SPOT_BINANCE.data_dict,
+						LAT_MON_SPOT_BINANCE.evnt_1st,
 						#———————————————————————————————————————————————————————
 						SHARED_TIME_DICT,
 						'LATEST_SLEEP_TIME_BINANCE_STREAM',
@@ -393,9 +387,9 @@ if __name__ == "__main__":
 						#———————————————————————————————————————————————————————
 						EXECUTIONS_QUEUE_DICT,
 						#———————————————————————————————————————————————————————
-						EVENT_STREAM_ENABLE,
-						MEAN_LATENCY_DICT,
-						EVENT_1ST_SNAPSHOT,
+						LAT_MON_SPOT_BINANCE.evnt_go_,
+						LAT_MON_SPOT_BINANCE.data_dict,
+						LAT_MON_SPOT_BINANCE.evnt_1st,
 						#———————————————————————————————————————————————————————
 						SHARED_TIME_DICT,
 						'LATEST_SLEEP_TIME_BINANCE_STREAM',
@@ -405,7 +399,7 @@ if __name__ == "__main__":
 						WILDCARD_STREAM_BINANCE_COM_PORT,
 						PORTS_STREAM_BINANCE_COM,
 						#———————————————————————————————————————————————————————
-						WS_PING_INTERVAL, WS_PING_TIMEOUT,
+						WS_PING_INTERVAL, WS_PING_TIMEOUT, WEBSOCKET_PEER,
 						SYMBOLS, logger,
 						#———————————————————————————————————————————————————————
 						port_cycling_period_hrs = PORT_CYCLING_PERIOD_HRS,
@@ -418,7 +412,7 @@ if __name__ == "__main__":
 					),
 					name = f"put_execution() @{get_cur_datetime_str()}",
 				)
-				
+
 				HSM_PUT_EXECUTION_BINANCE_AGGTRADE.\
 					append_task_w_creation_time(
 						put_execution_task,
@@ -487,10 +481,10 @@ if __name__ == "__main__":
 
 				gate_streaming_by_latency_task = asyncio.create_task(
 					gate_streaming_by_latency(
-						EVENT_LATENCY_VALID,
-						EVENT_STREAM_ENABLE,
-						MEAN_LATENCY_DICT,
-						LATENCY_ROUTINE_SLEEP_SEC,
+						LAT_MON_SPOT_BINANCE.evnt_ok_,
+						LAT_MON_SPOT_BINANCE.evnt_go_,
+						LAT_MON_SPOT_BINANCE.data_dict,
+						LAT_MON_SPOT_BINANCE.rouslsec,
 						SYMBOLS,
 						logger,
 						shutdown_event = MAIN_SHUTDOWN_EVENT,
@@ -525,12 +519,12 @@ if __name__ == "__main__":
 			# Wait for at least one valid snapshot before serving
 			#———————————————————————————————————————————————————————————————————
 
-			try: await EVENT_1ST_SNAPSHOT.wait()
+			try: await LAT_MON_SPOT_BINANCE.evnt_1st.wait()
 			except Exception as e:
 
 				logger.error(
 					f"[{my_name()}] error while "
-					f"waiting for EVENT_1ST_SNAPSHOT: {e}",
+					f"waiting for `LAT_MON_SPOT_BINANCE.evnt_1st`: {e}",
 					exc_info=True
 				)
 				raise SystemExit from e

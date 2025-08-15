@@ -13,6 +13,7 @@ from util import (
 	format_ws_url,
 	get_current_time_ms,
 	get_cur_datetime_str,
+	geo,
 	get_global_log_queue,
 	get_subprocess_logger,
 	ensure_logging_on_exception,
@@ -1091,6 +1092,7 @@ async def put_execution(				# @aggTrade
 	ports_stream_binance_com:			list[str],
 	ws_ping_interval:					int,
 	ws_ping_timeout:					int,
+	websocket_peer:						dict[str, str],
 	#———————————————————————————————————————————————————————————————————————————
 	# Combined Streams & Logging
 	#———————————————————————————————————————————————————————————————————————————
@@ -1318,6 +1320,43 @@ async def put_execution(				# @aggTrade
 
 				#———————————————————————————————————————————————————————————————
 
+				ip, port = ws.remote_address or ("?", "?")
+
+				try:
+
+					loc = await geo(ip) if ip != "?" else "?"
+
+				except RuntimeError as e:
+
+					if "cannot reuse already awaited coroutine" in str(e):
+
+						loc = "UNKNOWN"
+						logger.warning(
+							f"[{my_name()}] Coroutine reuse error, "
+							f"using fallback location"
+						)
+
+					else:
+
+						raise
+
+				except Exception as e:
+
+					loc = "UNKNOWN"
+					logger.warning(
+						f"[{my_name()}] Failed to get location for {ip}: {e}"
+					)
+
+				websocket_peer["value"] = (
+					f"{ip}:{port}  ({loc})"
+				)
+
+				logger.info(
+					f"[{my_name()}]🌐 ws peer {websocket_peer['value']}"
+				)
+
+				#———————————————————————————————————————————————————————————————
+
 				logger.info(
 					f"[{my_name()}]🟢\n  "
 					f"{ws_url_to_prt}"
@@ -1383,6 +1422,7 @@ async def put_execution(				# @aggTrade
 									ports_stream_binance_com,
 									ws_ping_interval,
 									ws_ping_timeout,
+									websocket_peer,
 									#———————————————————————————————————————————
 									symbols,
 									logger,
@@ -1469,6 +1509,7 @@ async def put_execution(				# @aggTrade
 								ports_stream_binance_com,
 								ws_ping_interval,
 								ws_ping_timeout,
+								websocket_peer,
 								#———————————————————————————————————————————————
 								symbols,
 								logger,

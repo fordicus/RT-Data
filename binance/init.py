@@ -13,6 +13,10 @@ from util import(
 	get_current_time_ms,
 )
 
+from latency import (
+	LatencyMonitor,
+)
+
 #———————————————————————————————————————————————————————————————————————————————
 
 def setup_uvloop(
@@ -50,8 +54,12 @@ def setup_uvloop(
 
 #———————————————————————————————————————————————————————————————————————————————
 
+LAT_MON_SPOT_BINANCE = None
+
+#———————————————————————————————————————————————————————————————————————————————
+
 def load_config(
-	logger: logging.Logger,
+	logger:		 logging.Logger,
 	config_path: str = "app.conf"
 ) -> tuple[
 	#
@@ -72,16 +80,12 @@ def load_config(
 	int,			# snapshots_queue_max
 	int,			# records_max
 	#
-	int, 			# latency_deque_size
-	int,			# latency_sample_min
-	int, 			# latency_threshold_ms
-	float,			# latency_routine_sleep_sec
+	LatencyMonitor,	# latency measurement & events
 	#
 	int,			# base_backoff
 	int,			# max_backoff
 	int, 			# reset_cycle_after
 	int,			# reset_backoff_level
-	#
 	Optional[int],	# ws_ping_interval
 	Optional[int],	# ws_ping_timeout
 	#
@@ -161,7 +165,10 @@ def load_config(
 	#——————————————————————————————————————————————————————————————
 
 	def extract_others(
-		config: dict[str, str]
+		#
+		config:  dict[str, str],
+		symbols: list[str],
+		#
 	) -> tuple[
 		str,			# lob_dir
 		str,			# chart_dir
@@ -175,11 +182,6 @@ def load_config(
 		#
 		int,			# snapshots_queue_max
 		int,			# records_max
-		#
-		int, 			# latency_deque_size
-		int,			# latency_sample_min
-		int, 			# latency_threshold_ms
-		float,			# latency_routine_sleep_sec
 		#
 		int,			# base_backoff
 		int,			# max_backoff
@@ -197,6 +199,8 @@ def load_config(
 		float,			# cpu_percent_duration
 		float,			# desired_max_sys_mem_load
 	]:
+
+		global LAT_MON_SPOT_BINANCE
 
 		try:
 
@@ -221,10 +225,13 @@ def load_config(
 			snapshots_queue_max = int(config.get("SNAPSHOTS_QUEUE_MAX"))
 			records_max			= int(config.get("RECORDS_MAX"))
 
-			latency_deque_size   = int(config.get("LATENCY_DEQUE_SIZE"))
-			latency_sample_min   = int(config.get("LATENCY_SAMPLE_MIN"))
-			latency_threshold_ms = int(config.get("LATENCY_THRESHOLD_MS"))
-			latency_routine_sleep_sec = float(config.get("LATENCY_ROUTINE_SLEEP_SEC"))
+			LAT_MON_SPOT_BINANCE = LatencyMonitor(
+				int(config.get('LATENCY_DEQUE_SIZE')),
+				int(config.get('LATENCY_SAMPLE_MIN')),
+				int(config.get('LATENCY_THRESHOLD_MS')),
+				float(config.get('LATENCY_ROUTINE_SLEEP_SEC')),
+				symbols,
+			)
 
 			base_backoff		= int(config.get("BASE_BACKOFF"))
 			max_backoff			= int(config.get("MAX_BACKOFF"))
@@ -245,6 +252,7 @@ def load_config(
 			desired_max_sys_mem_load	 = float(config.get("DESIRED_MAX_SYS_MEM_LOAD"))
 
 			return (
+				#
 				lob_dir,
 				chart_dir,
 				#
@@ -257,11 +265,6 @@ def load_config(
 				#
 				snapshots_queue_max,
 				records_max,
-				#
-				latency_deque_size,
-				latency_sample_min,
-				latency_threshold_ms,
-				latency_routine_sleep_sec,
 				#
 				base_backoff,
 				max_backoff,
@@ -292,6 +295,8 @@ def load_config(
 
 	try:
 
+		#——————————————————————————————————————————————————————————
+
 		with open(
 			resource_path(config_path, logger),
 			'r', encoding='utf-8'
@@ -316,10 +321,15 @@ def load_config(
 					continue
 				key, val = parts
 				config[key.strip()] = val.strip()
+
+		#——————————————————————————————————————————————————————————
 		
 		symbols = extract_symbols(config)
 
+		#——————————————————————————————————————————————————————————
+
 		(
+			#
 			lob_dir,
 			chart_dir,
 			#
@@ -327,17 +337,19 @@ def load_config(
 			port_cycling_period_hrs,
 			back_up_ready_ahead_sec,
 			#
-			purge_on_date_change, save_interval_min,
+			purge_on_date_change,
+			save_interval_min,
 			#
-			snapshots_queue_max, records_max,
+			snapshots_queue_max,
+			records_max,
 			#
-			latency_deque_size, latency_sample_min,
-			latency_threshold_ms, latency_routine_sleep_sec,
+			base_backoff,
+			max_backoff,
+			reset_cycle_after,
+			reset_backoff_level,
 			#
-			base_backoff, max_backoff,
-			reset_cycle_after, reset_backoff_level,
-			#
-			ws_ping_interval, ws_ping_timeout,
+			ws_ping_interval,
+			ws_ping_timeout,
 			#
 			dashboard_port_number,
 			dashboard_stream_interval,
@@ -347,7 +359,7 @@ def load_config(
 			cpu_percent_duration,
 			desired_max_sys_mem_load
 			#
-		) = extract_others(config)
+		) = extract_others(config, symbols)
 
 		if not symbols:
 
@@ -401,15 +413,18 @@ def load_config(
 			lob_dir,
 			chart_dir,
 			#
-			purge_on_date_change, save_interval_min,
+			purge_on_date_change,
+			save_interval_min,
 			#
-			snapshots_queue_max, records_max,
+			snapshots_queue_max,
+			records_max,
 			#
-			latency_deque_size, latency_sample_min,
-			latency_threshold_ms, latency_routine_sleep_sec,
+			LAT_MON_SPOT_BINANCE,
 			#
-			base_backoff, max_backoff,
-			reset_cycle_after, reset_backoff_level,
+			base_backoff,
+			max_backoff,
+			reset_cycle_after,
+			reset_backoff_level,
 			#
 			ws_ping_interval, ws_ping_timeout,
 			#
@@ -435,7 +450,6 @@ def load_config(
 
 def init_runtime_state(
 	#———————————————————————————————————————————————————————————————————————————
-	mean_latency_dict:			dict[str, int],
 	lob_sav_intv_spot_binance:	dict[str, deque[int]],
 	exe_sav_intv_spot_binance:	dict[str, deque[int]],
 	#———————————————————————————————————————————————————————————————————————————
@@ -453,21 +467,11 @@ def init_runtime_state(
 	#———————————————————————————————————————————————————————————————————————————
 	monitoring_deque_len:		int = 100,
 	#———————————————————————————————————————————————————————————————————————————
-) -> tuple[
-	asyncio.Event,
-	asyncio.Event,
-	asyncio.Event,
-]:
+):
 
 	try:
 
 		#———————————————————————————————————————————————————————————————————————
-
-		mean_latency_dict.clear()
-		mean_latency_dict.update({
-			symbol: None
-			for symbol in symbols
-		})
 
 		lob_sav_intv_spot_binance.clear()
 		lob_sav_intv_spot_binance.update({
@@ -520,15 +524,7 @@ def init_runtime_state(
 			f"[{my_name()}]📦 runtime ready"
 		)
 
-		event_1st_snapshot  = asyncio.Event()
-		event_latency_valid = asyncio.Event()
-		event_stream_enable = asyncio.Event()
-
-		return (
-			event_1st_snapshot,
-			event_latency_valid,
-			event_stream_enable,
-		)
+		#———————————————————————————————————————————————————————————————————————
 
 	except Exception as e:
 
