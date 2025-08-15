@@ -13,7 +13,7 @@ from util import (
 	format_ws_url,
 	get_current_time_ms,
 	get_cur_datetime_str,
-	geo,
+	elaborate_ws_peer,
 	get_global_log_queue,
 	get_subprocess_logger,
 	ensure_logging_on_exception,
@@ -26,11 +26,15 @@ from hotswap import (
 	hsm_create_task,
 )
 
+from latency import (
+	LatencyMonitor,
+)
+
 import sys, os, io, asyncio, orjson
 import shutil, zipfile, logging
 import websockets, time
 import numpy as np
-import math
+import math, statistics
 
 from io import TextIOWrapper
 from collections import OrderedDict, deque
@@ -182,10 +186,10 @@ def proc_symbol_consolidate_a_day(
 	symbol:		 str,
 	day_str: 	 str,
 	base_dir:	 str,
+	purge:		 bool  = True,
 	max_retries: int   = 100,
 	retry_delay: float = 0.1,
 	exp_backoff: float = 1.2,
-	purge:		 bool  = True,
 ):
 
 	with NanoTimer() as timer:
@@ -914,7 +918,7 @@ async def symbol_dump_execution(
 						merge_executor.submit(	# pickle
 							proc_symbol_consolidate_a_day,
 							symbol, last_date, chart_dir,
-							purge_on_date_change == 1,
+							purge = (purge_on_date_change == 1),
 						)
 
 						logger.info(
@@ -1074,9 +1078,7 @@ async def put_execution(				# @aggTrade
 	#———————————————————————————————————————————————————————————————————————————
 	# Latency Control
 	#———————————————————————————————————————————————————————————————————————————
-	event_stream_enable:				asyncio.Event,							# to be improved
-	mean_latency_dict:					dict[str, int],							# to be improved
-	event_1st_snapshot:					asyncio.Event,							# to be improved
+	lat_mon:							LatencyMonitor,
 	#———————————————————————————————————————————————————————————————————————————
 	# WebSocket Recovery
 	#———————————————————————————————————————————————————————————————————————————
@@ -1086,7 +1088,7 @@ async def put_execution(				# @aggTrade
 	#———————————————————————————————————————————————————————————————————————————
 	# WebSocket Peer
 	#———————————————————————————————————————————————————————————————————————————
-	ws_url:								list[str],
+	ws_url:								dict[str, str],
 	ws_url_key:							str,									# manage keys better
 	wildcard_stream_binance_com_port:	str,
 	ports_stream_binance_com:			list[str],
@@ -1104,11 +1106,11 @@ async def put_execution(				# @aggTrade
 	port_cycling_period_hrs:			float,
 	back_up_ready_ahead_sec:			float,
 	hotswap_manager:					HotSwapManager,
-	shutdown_event:						Optional[asyncio.Event] = None,
+	shutdown_event:						asyncio.Event,
 	handoff_event:						Optional[asyncio.Event] = None,
 	is_backup:							bool = False,
 	#———————————————————————————————————————————————————————————————————————————
-	# WebSocket Liveness Control
+	# WebSocket Liveness Control;			Executions have Irregular Interval
 	#———————————————————————————————————————————————————————————————————————————
 	ws_timeout_multiplier:				float =	  8.0,
 	ws_timeout_default_sec:				float =	 30.0,
@@ -1119,7 +1121,7 @@ async def put_execution(				# @aggTrade
 
 	"""—————————————————————————————————————————————————————————————————————————
 	HINT:
-		asyncio.Queue(maxsize=SNAPSHOTS_QUEUE_MAX)
+		asyncio.Queue(maxsize=EXECUTIONS_QUEUE_MAX)
 	—————————————————————————————————————————————————————————————————————————"""
 
 	async def sleep_on_ws_reconn(
@@ -1228,6 +1230,7 @@ async def put_execution(				# @aggTrade
 	)
 
 	hotswap_prepared = False
+	standby_reported = False
 
 	#———————————————————————————————————————————————————————————————————————————
 	# WebSocket Liveness Control
@@ -1246,19 +1249,26 @@ async def put_execution(				# @aggTrade
 	)
 
 	#———————————————————————————————————————————————————————————————————————————
-	# [DEBUG] We can simulate a specific time via `bias_to_add` if necessary.
+	# Guarantee Order of Timestamps
 	#———————————————————————————————————————————————————————————————————————————
 
-	# from datetime import datetime
-	# target_dt = datetime(
-	# 	2025,  7, 24, 
-	# 	  23, 59, 50
-	# )
-	# bias_to_add = compute_bias_ms(get_current_time_ms(), target_dt,)
+	last_recv_E: dict[str, int] = {}
+	last_recv_E.clear()
+	last_recv_E.update({
+		symbol: 0
+		for symbol in symbols
+	})
 
 	#———————————————————————————————————————————————————————————————————————————
+	# Latency Estimation
+	#———————————————————————————————————————————————————————————————————————————
 
-	cnt = 1
+	latency_dict: dict[str, deque[int]] = {}
+	latency_dict.clear()
+	latency_dict.update({
+		symbol: deque(maxlen = lat_mon.deque_sz)
+		for symbol in symbols
+	})
 
 	#———————————————————————————————————————————————————————————————————————————
 
@@ -1295,22 +1305,16 @@ async def put_execution(				# @aggTrade
 			) as ws:
 
 				#———————————————————————————————————————————————————————————————
+				# Controlled (Re)connection
+				#———————————————————————————————————————————————————————————————
 
 				update_shared_time_dict(
 					shared_time_dict,
 					shared_time_dict_key,
 				)	# upon successful ws (re)connection
 
-				#———————————————————————————————————————————————————————————————
-
 				ws_retry_cnt = 0
 				ws_start_time = time.time()
-
-				ws_url_to_prt = format_ws_url(
-					ws_url_complete,
-					symbols,
-					ports_stream_binance_com,
-				)
 
 				last_recv_time_ns = reset_ws_recv_intv_state(
 					websocket_recv_intv_stat,
@@ -1318,55 +1322,21 @@ async def put_execution(				# @aggTrade
 					last_recv_time_ns,
 				)
 
-				#———————————————————————————————————————————————————————————————
-
-				ip, port = ws.remote_address or ("?", "?")
-
-				try:
-
-					loc = await geo(ip) if ip != "?" else "?"
-
-				except RuntimeError as e:
-
-					if "cannot reuse already awaited coroutine" in str(e):
-
-						loc = "UNKNOWN"
-						logger.warning(
-							f"[{my_name()}] Coroutine reuse error, "
-							f"using fallback location"
-						)
-
-					else:
-
-						raise
-
-				except Exception as e:
-
-					loc = "UNKNOWN"
-					logger.warning(
-						f"[{my_name()}] Failed to get location for {ip}: {e}"
-					)
-
-				websocket_peer["value"] = (
-					f"{ip}:{port}  ({loc})"
+				ws_url_to_prt = format_ws_url(
+					ws_url_complete,
+					symbols,
+					ports_stream_binance_com,
 				)
-
-				logger.info(
-					f"[{my_name()}]🌐 ws peer {websocket_peer['value']}"
+				
+				await elaborate_ws_peer(
+					websocket_peer,
+					ws.remote_address,
+					logger,
+					ws_url_to_prt,
 				)
 
 				#———————————————————————————————————————————————————————————————
-
-				logger.info(
-					f"[{my_name()}]🟢\n  "
-					f"{ws_url_to_prt}"
-				)
-
-				#———————————————————————————————————————————————————————————————
-				# any backup
-				# → wait_for(handoff_event.wait(), timeout)
-				# 	→ main
-				# 	→ prepare the next backup
+				# [HotSwap] backup standby
 				#———————————————————————————————————————————————————————————————
 
 				if (
@@ -1375,106 +1345,13 @@ async def put_execution(				# @aggTrade
 					and len(ports_stream_binance_com) > 1
 				):
 
-					logger.info(f"[{my_name()}]🕒 backup standby")
+					if not standby_reported:
 
-					try:
-
-						#———————————————————————————————————————————————————————
-						# awaiting handoff event trigger: backup → main
-						#———————————————————————————————————————————————————————
-
-						await asyncio.wait_for(
-							handoff_event.wait(), 
-							timeout = None,
-						)
-						
-						is_active_conn = True
-
-						logger.info(
-							f"[{my_name()}]🔥 backup → main"
-						)
-
-						#———————————————————————————————————————————————————————
-						# prepare the next backup
-						#———————————————————————————————————————————————————————
-
-						hsm_create_task(hotswap_manager,
-							hsm_schedule_backup(
-								#———————————————————————————————————————————————
-								hotswap_manager,
-								backup_start_time,
-								#———————————————————————————————————————————————
-								lambda _event, _is_backup: wrapped_put_execution(
-									#———————————————————————————————————————————
-									executions_queue_dict,
-									#———————————————————————————————————————————
-									event_stream_enable,
-									mean_latency_dict,
-									event_1st_snapshot,
-									#———————————————————————————————————————————
-									shared_time_dict,
-									shared_time_dict_key,
-									min_reconn_sec,
-									#———————————————————————————————————————————
-									ws_url,
-									ws_url_key,
-									wildcard_stream_binance_com_port,
-									ports_stream_binance_com,
-									ws_ping_interval,
-									ws_ping_timeout,
-									websocket_peer,
-									#———————————————————————————————————————————
-									symbols,
-									logger,
-									#———————————————————————————————————————————
-									port_cycling_period_hrs,
-									back_up_ready_ahead_sec,
-									hotswap_manager,
-									shutdown_event,
-									_event,
-									_is_backup,
-									#———————————————————————————————————————————
-								),
-								#———————————————————————————————————————————————
-								logger,
-								back_up_ready_ahead_sec,
-								ws_start_time,
-								#———————————————————————————————————————————————
-							),
-							name = f"put_execution() @{get_cur_datetime_str()}",
-						)
-
-						hotswap_manager.handoff_completed = False
-						
-						logger.info(
-							f"[{my_name()}]📅 next backup scheduled"
-						)
-
-					#———————————————————————————————————————————————————————————
-					# unutilized backup returns
-					#———————————————————————————————————————————————————————————
-
-					except asyncio.TimeoutError:
-
-						logger.critical(
-							f"[{my_name()}] backup handoff timeout, "
-							f"terminating backup"
-						)
-						return
-
-					#———————————————————————————————————————————————————————————
-					# backup returns whenever there's an exception
-					#———————————————————————————————————————————————————————————
-
-					except Exception as e:
-
-						logger.critical(
-							f"[{my_name()}] backup connection error: {e}"
-						)
-						return
+						logger.info(f"[{my_name()}]🕒 backup standby")
+						standby_reported = True
 
 				#———————————————————————————————————————————————————————————————
-				# initial main: prepare a backup
+				# [HotSwap] initial main: prepare a backup
 				#———————————————————————————————————————————————————————————————
 
 				elif (
@@ -1495,9 +1372,7 @@ async def put_execution(				# @aggTrade
 								#———————————————————————————————————————————————
 								executions_queue_dict,
 								#———————————————————————————————————————————————
-								event_stream_enable,
-								mean_latency_dict,
-								event_1st_snapshot,
+								lat_mon,
 								#———————————————————————————————————————————————
 								shared_time_dict,
 								shared_time_dict_key,
@@ -1542,10 +1417,80 @@ async def put_execution(				# @aggTrade
 				while not hotswap_manager.is_shutting_down():
 
 					#———————————————————————————————————————————————————————————
-					# main: commence hotswap
+					# [HotSwap] backup → main
+					#———————————————————————————————————————————————————————————
+				
+					if (
+						is_backup
+						and not is_active_conn
+						and handoff_event
+						and handoff_event.is_set()
+						and len(ports_stream_binance_com) > 1
+					):
+
+						is_active_conn = True
+
+						logger.info(f"[{my_name()}]🔥 backup → main")
+
+						#———————————————————————————————————————————————————————
+						# prepare the next backup
+						#———————————————————————————————————————————————————————
+
+						hsm_create_task(hotswap_manager,
+							hsm_schedule_backup(
+								#———————————————————————————————————————————————
+								hotswap_manager,
+								backup_start_time,
+								#———————————————————————————————————————————————
+								lambda _event, _is_backup: wrapped_put_execution(
+									#———————————————————————————————————————————
+									executions_queue_dict,
+									#———————————————————————————————————————————
+									lat_mon,
+									#———————————————————————————————————————————
+									shared_time_dict,
+									shared_time_dict_key,
+									min_reconn_sec,
+									#———————————————————————————————————————————
+									ws_url,
+									ws_url_key,
+									wildcard_stream_binance_com_port,
+									ports_stream_binance_com,
+									ws_ping_interval,
+									ws_ping_timeout,
+									websocket_peer,
+									#———————————————————————————————————————————
+									symbols,
+									logger,
+									#———————————————————————————————————————————
+									port_cycling_period_hrs,
+									back_up_ready_ahead_sec,
+									hotswap_manager,
+									shutdown_event,
+									_event,
+									_is_backup,
+									#———————————————————————————————————————————
+								),
+								#———————————————————————————————————————————————
+								logger,
+								back_up_ready_ahead_sec,
+								ws_start_time,
+								#———————————————————————————————————————————————
+							),
+							name = f"put_execution() @{get_cur_datetime_str()}",
+						)
+
+						hotswap_manager.handoff_completed = False
+						
+						logger.info(
+							f"[{my_name()}]📅 next backup scheduled"
+						)
+
+					#———————————————————————————————————————————————————————————
+					# [HotSwap] main: commence hotswap
 					#———————————————————————————————————————————————————————————
 					
-					if (
+					elif (
 						is_active_conn
 						and not hotswap_manager.is_shutting_down()
 						and (time.time() - ws_start_time) >= refresh_period_sec
@@ -1631,40 +1576,32 @@ async def put_execution(				# @aggTrade
 						# Receive a Message or Shutting Down
 						#———————————————————————————————————————————————————————
 						
-						done, pending = await asyncio.wait(
-							#
-							[
-								asyncio.create_task(ws.recv()),
-								asyncio.create_task(shutdown_event.wait())
-							],
-							#
-							return_when = asyncio.FIRST_COMPLETED,
-							timeout		= ws_timeout_sec,
+						recv_task	  = asyncio.create_task(ws.recv())
+						shutdown_task = asyncio.create_task(
+							shutdown_event.wait()
 						)
 
-						if not done:
-							
+						done, pending = await asyncio.wait(
+							[
+								recv_task, shutdown_task
+							],
+							return_when = asyncio.FIRST_COMPLETED,
+							timeout = ws_timeout_sec,
+						)
+
+						if not done:		   # timeout
+
+							for t in pending: t.cancel()
 							raise asyncio.TimeoutError()
 
-						if hotswap_manager.is_shutting_down(): break
-						
-						for task in done:
+						if shutdown_task in done:
 
-							if (
-								task is not None
-								and not task.cancelled()
-							):
+							for t in pending: t.cancel()
+							return
 
-								raw = task.result()
-								break
-
-						for task in pending: task.cancel()
-
-						#———————————————————————————————————————————————————————
-						# Backup discards ws messages until it becomes main
-						#———————————————————————————————————————————————————————
-
-						if not is_active_conn: continue
+						# `recv_task` is done
+						raw = recv_task.result()
+						for t in pending: t.cancel()
 
 						#———————————————————————————————————————————————————————
 						# Message Ingestion
@@ -1675,7 +1612,7 @@ async def put_execution(				# @aggTrade
 							msg = orjson.loads(raw)
 
 							#———————————————————————————————————————————————————
-							# Validate: <symbol>@aggTrade
+							# Validate `stream` Field
 							#———————————————————————————————————————————————————
 
 							stream = msg.get("stream", "")
@@ -1687,7 +1624,6 @@ async def put_execution(				# @aggTrade
 									f"unexpected "
 									f"stream: {stream}"
 								)
-								continue
 
 							if split[1] != "aggTrade":
 
@@ -1695,7 +1631,6 @@ async def put_execution(				# @aggTrade
 									f"expected `aggTrade` but"
 									f"received {split[1]}; "
 								)
-								continue
 
 							cur_symbol = (
 								split[0]
@@ -1708,34 +1643,18 @@ async def put_execution(				# @aggTrade
 									f"unexpected "
 									f"symbol: {cur_symbol.upper()}"
 								)
-								continue
-
-							del split
 
 							#———————————————————————————————————————————————————
-							
-							if (mean_latency_dict[cur_symbol] == None):
-
-								continue	# no mean latency available
-
-							if not event_stream_enable.is_set():
-
-								# data ingestion allowed to continue
-								# while we only gate off the trading
-
-								pass
-
-							#———————————————————————————————————————————————————
-							# Process the `data` Field
+							# Validate `data` Field
 							# 	https://tinyurl.com/BinanceWsAggTrade
 							#———————————————————————————————————————————————————
 
 							data = msg.get("data", {})
 
-							event_time	= data.get("E")
-							price		= data.get("p")
-							quantity	= data.get("q")
-							is_maker	= data.get("m")
+							event_time = data.get("E")
+							price	   = data.get("p")
+							quantity   = data.get("q")
+							is_maker   = data.get("m")
 
 							if (
 								(event_time is None)
@@ -1747,32 +1666,81 @@ async def put_execution(				# @aggTrade
 								raise ValueError(
 									f"missing fields @data"
 								)
-								continue
-
-							del data
 
 							if	 (is_maker == True):  is_maker = '1'
 							elif (is_maker == False): is_maker = '0'
 							else:
+
 								raise ValueError(f"is_maker: {is_maker}")
-								continue
 
 							#———————————————————————————————————————————————————————
-							# SERVER TIMESTAMP RECONSTRUCTION FOR PARTIAL STREAMS	# new logic
+							# Event Time Order Guarantees
+							#———————————————————————————————————————————————————————
+
+							if event_time < last_recv_E[cur_symbol]: continue
+
+							last_recv_E[cur_symbol] = event_time
+
+							#———————————————————————————————————————————————————————
+							# Estimate Latency
 							#———————————————————————————————————————————————————————
 
 							cur_time_ms = get_current_time_ms()
 
+							latency_ms = (
+								cur_time_ms - event_time
+							)
+
+							latency_dict[cur_symbol].append(latency_ms)
+
 							#———————————————————————————————————————————————————————
-							# Estimate Extra Timing
+							# Backup discards ws messages until it becomes main
 							#———————————————————————————————————————————————————————
 							
-							oneway_network_latency_ms = max(
-								0, mean_latency_dict.get(
-									cur_symbol, 0
+							if not is_active_conn:
+								
+								continue
+
+							#———————————————————————————————————————————————————————
+							# Latency Statistics
+							#———————————————————————————————————————————————————————
+
+							lat_mon.latency[cur_symbol] = int(
+								statistics.median(
+									latency_dict[cur_symbol]
 								)
 							)
 
+							if lat_mon.latency[cur_symbol] is None:
+
+								continue
+
+							oneway_network_latency_ms = max(
+								0, lat_mon.latency.get(cur_symbol, 0)
+							)
+
+							#———————————————————————————————————————————————————————
+
+							if all(
+								lat_mon.latency[s] is not None
+								for s in symbols
+							):
+
+								if all(
+									lat_mon.latency[s] < lat_mon.thrs_ms
+									for s in symbols
+								):
+
+									lat_mon.evnt_ok_.set()
+								
+								elif all(
+									len(latency_dict[s])
+									>= latency_dict[s].maxlen
+									for s in symbols
+								):
+
+									lat_mon.evnt_ok_.clear()
+									
 							#———————————————————————————————————————————————————————
 
 							execution = {
@@ -1781,7 +1749,7 @@ async def put_execution(				# @aggTrade
 								# net_delay_ms: side information
 								#———————————————————————————————————————————————————
 								"recv_ms":		cur_time_ms,
-								"net_delay_ms":	oneway_network_latency_ms,			# new logic
+								"net_delay_ms":	oneway_network_latency_ms,
 								#———————————————————————————————————————————————————
 								"E": event_time,
 								"p": price,
@@ -1801,12 +1769,12 @@ async def put_execution(				# @aggTrade
 							].put(execution)
 
 							#———————————————————————————————————————————————————————
-							# 1st execution gate for FastAPI readiness				# new event?
+							# 1st execution gate for FastAPI readiness
 							#———————————————————————————————————————————————————————
 
-							if not event_1st_snapshot.is_set():
+							if not lat_mon.evnt_1st_exe.is_set():
 
-								event_1st_snapshot.set()
+								lat_mon.evnt_1st_exe.set()
 
 							#———————————————————————————————————————————————————————
 							# Statistics on WebSocket Receipt Interval
@@ -1832,6 +1800,8 @@ async def put_execution(				# @aggTrade
 								ws_timeout_min_sec,
 							)
 
+							#———————————————————————————————————————————————————————
+
 						except Exception as e:
 
 							sym = (
@@ -1841,7 +1811,7 @@ async def put_execution(				# @aggTrade
 							)
 							logger.warning(
 								f"[{my_name()}][{sym.upper()}] "
-								f"failed to process message: {e}",
+								f"failed to process ws msg: {e}",
 								exc_info = True,
 							)
 							continue  	# stay in the websocket loop

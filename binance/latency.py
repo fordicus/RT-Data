@@ -36,71 +36,80 @@ from util import (
 )
 
 #———————————————————————————————————————————————————————————————————————————————
+# Old Name					New Name				Type
+#———————————————————————————————————————————————————————————————————————————————
+# MEAN_LATENCY_DICT       
+# mean_latency_dict			lat_mon.latency			dict[str, int]
+#
+# EVENT_LATENCY_VALID     
+# event_latency_valid		lat_mon.evnt_ok_		asyncio.Event
+#
+# EVENT_STREAM_ENABLE     
+# event_stream_enable		lat_mon.evnt_go_		asyncio.Event
+#
+# EVENT_1ST_SNAPSHOT      
+# event_1st_snapshot		lat_mon.evnt_1st_dom	asyncio.Event
+# 							lat_mon.evnt_1st_exe
+#
+# latency_routine_sleep_sec	lat_mon.rouslsec		float
+#———————————————————————————————————————————————————————————————————————————————
 
 class LatencyMonitor:
 	
 	def __init__(self, 
 		latency_deque_size:	 	   int,
-		latency_sample_min:	 	   int,
 		latency_threshold_ms:	   int,
 		latency_routine_sleep_sec: float,
 		symbols:			 	   list[str],
 	):
 		
 		self.deque_sz = latency_deque_size
-		self.min_smpl = latency_sample_min
 		self.thrs_ms  = latency_threshold_ms
 		self.rouslsec = latency_routine_sleep_sec
 		
-		self.data_dict: dict[str, int] = {}
-		self.data_dict.clear()
-		self.data_dict.update({
+		self.latency: dict[str, int] = {}
+		self.latency.clear()
+		self.latency.update({
 			symbol: None
 			for symbol in symbols
 		})
 
 		self.evnt_ok_ = asyncio.Event()
 		self.evnt_go_ = asyncio.Event()
-		self.evnt_1st = asyncio.Event()
+
+		self.evnt_1st_dom = asyncio.Event()
+		self.evnt_1st_exe = asyncio.Event()
 
 #———————————————————————————————————————————————————————————————————————————————
 # LEGACY FUNCTIONS
 #———————————————————————————————————————————————————————————————————————————————
 
 async def gate_streaming_by_latency(
-	event_latency_valid:  asyncio.Event,
-	event_stream_enable:  asyncio.Event,
-	mean_latency_dict:	  dict[str, int],
-	latency_routine_sleep_sec: float,
-	symbols:			  list[str],
-	logger:				  logging.Logger,
-	shutdown_event:		  Optional[asyncio.Event] = None,
+	lat_mon:		LatencyMonitor,
+	symbols:		list[str],
+	logger:			logging.Logger,
+	evnt_shutdown:	asyncio.Event,
 ):
-
-	#———————————————————————————————————————————————————————————————————————————
-
-	def is_shutting_down():
-		return (shutdown_event and shutdown_event.is_set())
-
-	#———————————————————————————————————————————————————————————————————————————
 
 	has_logged_warmup = False
 
-	while not is_shutting_down():	# infinite standalone loop
+	while not evnt_shutdown.is_set():				# infinite standalone loop
+
+		#———————————————————————————————————————————————————————————————————————
 
 		try:
 
-			latency_passed = event_latency_valid.is_set()
-			stream_currently_on = event_stream_enable.is_set()
-			has_all_latency = all(
-				mean_latency_dict[s]
+			latency_passed	= lat_mon.evnt_ok_.is_set()
+			is_stream_on	= lat_mon.evnt_go_.is_set()
+			has_all_latency	= all(
+				lat_mon.latency[s]
 				is not None
 				for s in symbols
 			)
 
 			if (
 				latency_passed
-				and not stream_currently_on
+				and not is_stream_on
 			):
 
 				logger.info(
@@ -108,7 +117,7 @@ async def gate_streaming_by_latency(
 					f"📈 latency normalized"
 				)
 
-				event_stream_enable.set()
+				lat_mon.evnt_go_.set()
 				has_logged_warmup = False
 
 			elif not latency_passed:
@@ -126,7 +135,7 @@ async def gate_streaming_by_latency(
 
 				elif (
 					has_all_latency
-					and stream_currently_on
+					and is_stream_on
 				):
 
 					logger.warning(
@@ -134,13 +143,17 @@ async def gate_streaming_by_latency(
 						f"📉 latency degraded"
 					)
 
-					event_stream_enable.clear()
+					lat_mon.evnt_go_.clear()
 
-			await asyncio.sleep(latency_routine_sleep_sec)
+			await asyncio.sleep(lat_mon.rouslsec)
+
+		#———————————————————————————————————————————————————————————————————————
 
 		except asyncio.CancelledError:
 
 			raise # logging unnecessary
+
+		#———————————————————————————————————————————————————————————————————————
 
 		except Exception as e:
 
@@ -151,463 +164,12 @@ async def gate_streaming_by_latency(
 				exc_info=True
 			)
 
-			await asyncio.sleep(latency_routine_sleep_sec)
+			await asyncio.sleep(lat_mon.rouslsec)
+
+		#———————————————————————————————————————————————————————————————————————
 			
 	logger.info(
 		f"[{my_name()}] task ends"
 	)
-
-#———————————————————————————————————————————————————————————————————————————————
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-#———————————————————————————————————————————————————————————————————————————————
-
-@ensure_logging_on_exception
-async def estimate_latency(
-	ws_ping_interval:		Optional[int],
-	ws_ping_timeout:		Optional[int],
-	#
-	lat_mon:				LatencyMonitor,
-	#
-	base_backoff:			int,
-	max_backoff:			int,
-	reset_cycle_after:		int,
-	reset_backoff_level:	int,
-	#
-	symbols:				list[str],
-	logger:					logging.Logger,
-	shutdown_event:			Optional[asyncio.Event] = None,
-	#
-	base_interval_ms:		int   = 100,
-	ws_timeout_multiplier:	float =	  8.0,
-	ws_timeout_default_sec:	float =	  2.0,
-	ws_timeout_min_sec:		float =	  1.0,
-):
-
-	"""—————————————————————————————————————————————————————————————————————————
-	CORE FUNCTIONALITY:
-		Measure network latency via @depth@100ms stream with timeout-based recv
-	—————————————————————————————————————————————————————————————————————————"""
-
-	def is_shutting_down():
-		return (shutdown_event and shutdown_event.is_set())
-
-	#———————————————————————————————————————————————————————————————————————————
-
-	def update_ws_recv_timeout(
-		data:		deque[float],
-		stat:		dict[str, float],
-		multiplier: float,
-		default:	float,
-		minimum:	float,
-	) -> float:		# ws_timeout_sec
-
-		if len(data) >= max(data.maxlen, 300):
-			
-			stat['p90'] = np.percentile(list(data), 90)
-			return max(stat['p90'] * multiplier, minimum)
-
-		else:
-
-			return max(default, minimum)
-
-	#———————————————————————————————————————————————————————————————————————————
-
-	async def calculate_backoff_and_sleep(
-		retry_count: int,
-		last_success_time: Optional[float] = None,
-		reset_retry_count_after_sec: float = 3600,	# an hour
-	) -> tuple[int, float]:
-		
-		current_time = time.time()
-		
-		if retry_count > reset_cycle_after:
-
-			retry_count = reset_backoff_level
-
-		elif (
-			last_success_time and 
-			(
-				current_time - last_success_time
-			) > reset_retry_count_after_sec
-		):
-
-			logger.info(
-				f"[{my_name()}] "
-				f"Resetting retry_count after {reset_retry_count_after_sec} sec; "
-				f"previous retry_count={retry_count}."
-			)
-
-			retry_count = 0
-
-		backoff = min(
-			max_backoff,
-			base_backoff ** retry_count
-		) + random.uniform(0, 1)
-
-		logger.warning(
-			f"[{my_name()}] "
-			f"Retrying in {backoff:.1f} seconds..."
-		)
-		
-		await asyncio.sleep(backoff)
-		
-		return retry_count, last_success_time
-
-	#———————————————————————————————————————————————————————————————————————————
-
-	url = (
-		"wss://stream.binance.com:443/stream?streams="
-		+ "/".join(f"{symbol}@depth@100ms" for symbol in symbols)
-	)
-
-	ws_retry_cnt = 0
-	last_success_time = time.time()
-
-	ws_timeout_sec = ws_timeout_default_sec
-	last_recv_time_ns = None
-
-	websocket_recv_intv_stat: dict[str, float | None] = {"p90": None}
-	websocket_recv_interval:  deque[float] = deque(
-		maxlen = max(len(symbols), 300)
-	)
-
-	depth_update_id_dict: dict[str, int] = {}
-	depth_update_id_dict.clear()
-	depth_update_id_dict.update({
-		symbol: 0
-		for symbol in symbols
-	})
-
-	latency_dict: dict[str, deque[int]] = {}
-	latency_dict.clear()
-	latency_dict.update({
-		symbol: deque(maxlen = lat_mon.deque_sz)
-		for symbol in symbols
-	})
-
-	#———————————————————————————————————————————————————————————————————————————
-
-	while not is_shutting_down():	# infinite standalone loop
-
-		cur_symbol = "UNKNOWN"
-
-		try:
-
-			async with websockets.connect(
-				url,
-				ssl			  = get_ssl_context(),
-				ping_interval = ws_ping_interval,
-				ping_timeout  = ws_ping_timeout,
-				compression	  = None,
-			) as ws:
-				
-				logger.info(
-					f"[{my_name()}]🟢\n  "
-					f"{format_ws_url(url, symbols)}"
-				)
-
-				ws_retry_cnt = 0
-				last_success_time = time.time()
-
-				while not is_shutting_down():
-
-					try:
-
-						if is_shutting_down(): break
-
-						raw_msg = await asyncio.wait_for(
-							ws.recv(),
-							timeout = ws_timeout_sec
-						)
-
-						if is_shutting_down(): break
-
-						try:
-
-							#———————————————————————————————————————————————————————
-							# LATENCY MEASUREMENT ACCURACY & SYSTEM REQUIREMENTS
-							#———————————————————————————————————————————————————————
-							# From
-							# 	`message = orjson.loads(raw_msg)`
-							# to
-							#	lat_mon.data_dict[symbol] = int(
-							#		statistics.fmean(
-							#			latency_dict[symbol]
-							#		)
-							#	),
-							# execution time is sub-millisec. even on basic Python
-							# interpreter without optimization. This ensures
-							# accurate network latency measurement with negligible
-							# computational delay.
-							#———————————————————————————————————————————————————————
-							# Time Synchronization: Client system uses Chrony with
-							# trusted local time servers. Since latency measurement
-							# relies on `get_current_time_ms(): time.time_ns()`,
-							# accurate system clock synchronization is essential.
-							#———————————————————————————————————————————————————————
-
-							message = orjson.loads(raw_msg)
-							data = message.get("data", {})
-							server_time_ms = data.get("E")
-
-							if server_time_ms is None:
-								continue  # drop malformed
-
-							stream_name = message.get("stream", "")
-							symbol = stream_name.split(
-								"@", 1
-							)[0].lower()
-
-							if symbol not in symbols:
-								continue  # ignore unexpected
-
-							update_id = data.get("u")
-
-							if ((update_id is None) or
-								(update_id <= 
-								depth_update_id_dict.get(symbol, 0))
-							): continue  # duplicate or out-of-order
-
-							#———————————————————————————————————————————————————————
-
-							depth_update_id_dict[symbol] = update_id
-
-							latency_ms = (
-								get_current_time_ms() - server_time_ms
-							)
-
-							latency_dict[symbol].append(latency_ms)
-
-							if (
-								len(latency_dict[symbol])
-								>= lat_mon.min_smpl
-							):
-
-								lat_mon.data_dict[symbol] = int(
-									statistics.fmean(
-										latency_dict[symbol]
-									)
-								)
-
-								#———————————————————————————————————————————————————
-								# TODO: The gating logic here must be redefined
-								# when trading is the concern. See also
-								# 	gate_streaming_by_latency().
-								#———————————————————————————————————————————————————
-
-								if all(
-									(	
-										(
-											len(latency_dict[s])
-											>= lat_mon.min_smpl
-										)
-										and (
-											lat_mon.data_dict[s]
-											< lat_mon.thrs_ms
-										)
-									)	for s in symbols
-								):
-
-									if not lat_mon.evnt_ok_.is_set():
-
-										lat_mon.evnt_ok_.set()
-								
-								else:
-
-									lat_mon.evnt_ok_.clear()
-
-							#———————————————————————————————————————————————————————
-							# Statistics on Websocket Receipt Interval (put_snapshot과 동일)
-							#———————————————————————————————————————————————————————
-
-							cur_time_ns = time.time_ns()
-
-							if last_recv_time_ns is not None:
-								
-								websocket_recv_interval.append(
-									(
-										cur_time_ns - last_recv_time_ns
-									) / 1_000_000_000.0
-								)
-								
-							last_recv_time_ns = cur_time_ns
-
-							ws_timeout_sec = update_ws_recv_timeout(
-								websocket_recv_interval,
-								websocket_recv_intv_stat,
-								ws_timeout_multiplier,
-								ws_timeout_default_sec,
-								ws_timeout_min_sec,
-							)
-
-						except Exception as e:
-
-							logger.warning(
-								f"[{my_name()}] "
-								f"Failed to process message: {e}",
-								exc_info=True
-							)
-							continue
-
-					#———————————————————————————————————————————————————————————
-					# No Messages or WebSocket Closed → Backoff + Retry
-					#———————————————————————————————————————————————————————————
-					
-					# except asyncio.TimeoutError:
-
-					# 	if is_shutting_down(): break
-
-					# 	ws_retry_cnt += 1
-
-					# 	logger.warning(
-					# 		f"[{my_name()}]\n"
-					# 		f"\tno data received for "
-					# 		f"{ws_timeout_sec:.6f}s\n"
-					# 		f"\tp90 ws.recv() intv.: "
-					# 		f"{websocket_recv_intv_stat['p90']:.6f}.\n"
-					# 		f"\t(ws_retry_cnt {ws_retry_cnt}) "
-					# 		f"reconnecting...",
-					# 		exc_info = False,
-					# 	)
-
-					# 	ws_retry_cnt, last_success_time = await calculate_backoff_and_sleep(
-					# 		ws_retry_cnt, last_success_time,
-					# 	)
-
-					# 	break
-
-					except (
-						asyncio.TimeoutError,
-						websockets.exceptions.ConnectionClosed,
-					) as e:
-						
-						if is_shutting_down(): break
-
-						ws_retry_cnt += 1
-
-						#———————————————————————————————————————————————————————
-						# muted at the moment
-						#———————————————————————————————————————————————————————
-
-						# if isinstance(e, asyncio.TimeoutError):
-							
-						# 	reason = (
-						# 		f"no data received for "
-						# 		f"{ws_timeout_sec:.2f}s; "
-						# 		f"p90 recv intv "
-						# 		f"{websocket_recv_intv_stat['p90'] * 1000.:.2f}ms"
-						# 	)
-							
-						# else:  # websockets.exceptions.ConnectionClosed
-							
-						# 	close_reason = (
-						# 		getattr(e, "reason", None)
-						# 		or "no close frame"
-						# 	)
-						# 	reason = f"ws connection closed: {close_reason}"
-
-						# logger.warning(
-						# 	f"[{my_name()}] {reason} / "
-						# 	f"reconnecting: {ws_retry_cnt}",
-						# 	exc_info = False,
-						# )
-
-						ws_retry_cnt, last_success_time = (
-							await calculate_backoff_and_sleep(
-								ws_retry_cnt, last_success_time,
-							)
-						)
-						
-						break
-
-		except asyncio.CancelledError:
-			
-			lat_mon.evnt_ok_.clear()
-			for symbol in symbols:
-				latency_dict[symbol].clear()
-				depth_update_id_dict[symbol] = 0
-				lat_mon.data_dict[symbol] = None
-
-			raise # logging unnecessary
-
-		except Exception as e:
-
-			if is_shutting_down(): break
-
-			ws_retry_cnt += 1
-
-			logger.warning(
-				f"[{my_name()}] ws error: {e} / "
-				f"reconnecting: {ws_retry_cnt}",
-				exc_info = True,
-			)
-
-			lat_mon.evnt_ok_.clear()
-
-			for symbol in symbols:
-
-				latency_dict[symbol].clear()
-				depth_update_id_dict[symbol] = 0
-
-			ws_retry_cnt, last_success_time = await calculate_backoff_and_sleep(
-				ws_retry_cnt, last_success_time,
-			)
-
-		finally:
-
-			logger.info(
-				f"[{my_name()}]📴 ws closed"
-			)
-
-	logger.info(f"[{my_name()}] task ends")
-	lat_mon.evnt_ok_.clear()
 
 #———————————————————————————————————————————————————————————————————————————————

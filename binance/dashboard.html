@@ -95,7 +95,7 @@
 					Queue Size<br>Total: 0
 				</th>
 				<th>
-					Mean Latency<br>Avg.: 0 [ms]
+					Latency<br>Avg.: 0 [ms]
 				</th>
 			</tr>
 		</thead>
@@ -183,7 +183,7 @@
 		"\"asyncio.Queue.qsize()\" values over a monitoring period. " +
 		"This value is typically close to zero, as the " +
 		"\"asyncio.Queue\" is consumed almost instantaneously.<br>" +
-		"<strong>Mean Latency:</strong> The mean one-way network " +
+		"<strong>Latency:</strong> The mean one-way network " +
 		"latency from Binance servers, calculated over a sampling " +
 		"period. This estimate defines \"net_delay_ms\", which—like " +
 		"\"intv_lag_ms\"—serves as side information for AI models.";
@@ -326,7 +326,7 @@
 				"Avg.: " + flushAvg + " [ms]</th>" +
 				"<th id=\"queueSizeHeader\">Queue Size<br>" +
 				"Total: " + queueTotal + "</th>" +
-				"<th>Mean Latency<br>" +
+				"<th>Latency<br>" +
 				"Avg.: " + latAvg + " [ms]</th>";
 		}
 

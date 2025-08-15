@@ -279,7 +279,7 @@ class NanoTimer:
 # Web Utilities
 #———————————————————————————————————————————————————————————————————————————————
 
-@lru_cache(maxsize=256)						# cache to hit the API once per IP
+@lru_cache(maxsize = 256)					# cache to hit the API once per IP
 async def geo(ip: str) -> str:
 
 	"""
@@ -294,7 +294,7 @@ async def geo(ip: str) -> str:
 	try:
 
 		async with aiohttp.ClientSession(
-			timeout=aiohttp.ClientTimeout(total=2)
+			timeout = aiohttp.ClientTimeout(total = 2)
 		) as s:
 
 			async with s.get(url) as r:
@@ -353,6 +353,82 @@ async def geo(ip: str) -> str:
 
 	return "?"
 
+#———————————————————————————————————————————————————————————————————————————————
+
+async def elaborate_ws_peer(
+	#
+	ws_peer:	   dict[str, str],
+	ws_ra:		   Optional[tuple[str, int]],
+	logger:		   logging.Logger,
+	ws_url_to_prt: str,
+	timeout:	   float = 5.0,
+	#
+) -> None:
+
+	if isinstance(ws_ra, tuple) and len(ws_ra) >= 2:
+
+		ip, port = ws_ra[0], ws_ra[1]
+
+	else:
+
+		ip, port = "?", "?"
+
+	try:
+
+		if ip == "?": loc = "?"
+
+		else:
+
+			try:
+
+				loc = await asyncio.wait_for(
+					geo(ip), timeout = timeout,
+				)
+
+			except asyncio.TimeoutError:
+
+				loc = "UNKNOWN"
+				logger.warning(
+					f"[{my_name()}] geo({ip}) timed out; "
+					f"using fallback location",
+					exc_info = False,
+				)
+
+	except asyncio.CancelledError: raise
+
+	except Exception as e:
+
+		loc = "UNKNOWN"
+
+		if (
+			isinstance(e, RuntimeError)
+			and "cannot reuse already awaited coroutine" in str(e)
+		):
+
+			msg = "Coroutine reuse error, using fallback location"
+
+		else:
+
+			msg = f"Failed to get location for {ip}: {e}"
+
+		logger.warning(f"[{my_name()}] {msg}", exc_info = False)
+
+	ip_disp  = (
+		f"[{ip}]"
+		if (":" in ip and not ip.startswith("["))
+		else ip
+	)
+	port_str = str(port)
+
+	ws_peer["value"] = (
+		f"{ip_disp}:{port_str}  ({loc})"
+	)
+
+	logger.info(
+		f"[{my_name()}]🌐 "
+		f"ws peer {ws_peer['value']}\n"
+		f"  {ws_url_to_prt}"
+	)
 
 #———————————————————————————————————————————————————————————————————————————————
 

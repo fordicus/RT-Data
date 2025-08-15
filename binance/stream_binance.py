@@ -87,7 +87,6 @@ from exec import (
 
 from latency import (
 	gate_streaming_by_latency,
-	estimate_latency,
 )
 
 from dashboard import (
@@ -140,6 +139,7 @@ setup_uvloop(logger = logger)
 	SAVE_INTERVAL_MIN,
 	#
 	SNAPSHOTS_QUEUE_MAX,
+	EXECUTIONS_QUEUE_MAX,
 	RECORDS_MAX,
 	#
 	LAT_MON_SPOT_BINANCE,
@@ -236,7 +236,9 @@ if __name__ == "__main__":
 				#———————————————————————————————————————————————————————————————
 				SNAPSHOTS_QUEUE_DICT,
 				SNAPSHOTS_QUEUE_MAX,
+				#———————————————————————————————————————————————————————————————
 				EXECUTIONS_QUEUE_DICT,
+				EXECUTIONS_QUEUE_MAX,
 				#———————————————————————————————————————————————————————————————
 				FHNDLS_LOB_SPOT_BINANCE,
 				FHNDLS_EXE_SPOT_BINANCE,
@@ -278,7 +280,7 @@ if __name__ == "__main__":
 				'SYMBOLS':				 SYMBOLS,
 				'WEBSOCKET_PEER':		 WEBSOCKET_PEER,
 				'SNAPSHOTS_QUEUE_DICT':  SNAPSHOTS_QUEUE_DICT,					# TBA
-				'MEAN_LATENCY_DICT':	 LAT_MON_SPOT_BINANCE.data_dict,
+				'LATENCY_DICT':	 		 LAT_MON_SPOT_BINANCE.latency,
 				'JSON_FLUSH_INTERVAL':   LOB_SAV_INTV_SPOT_BINANCE,				# NAME MISMATCH
 				'PUT_SNAPSHOT_INTERVAL': PUT_SNAPSHOT_INTERVAL,
 			}
@@ -295,26 +297,6 @@ if __name__ == "__main__":
 			#———————————————————————————————————————————————————————————————————
 
 			try:
-
-				#———————————————————————————————————————————————————————————————
-
-				estimate_latency_task = asyncio.create_task(
-					estimate_latency(
-						#
-						WS_PING_INTERVAL, WS_PING_TIMEOUT,
-						#
-						LAT_MON_SPOT_BINANCE,
-						#
-						BASE_BACKOFF,
-						MAX_BACKOFF,
-						RESET_CYCLE_AFTER,
-						RESET_BACKOFF_LEVEL,
-						#
-						SYMBOLS, logger, shutdown_event = MAIN_SHUTDOWN_EVENT,
-						#
-					), 
-					name = "estimate_latency()",
-				)
 
 				#———————————————————————————————————————————————————————————————
 				# Websocket (re)connection attempt requires at minimum 1.0s
@@ -342,9 +324,7 @@ if __name__ == "__main__":
 						#———————————————————————————————————————————————————————
 						SNAPSHOTS_QUEUE_DICT,
 						#———————————————————————————————————————————————————————
-						LAT_MON_SPOT_BINANCE.evnt_go_,
-						LAT_MON_SPOT_BINANCE.data_dict,
-						LAT_MON_SPOT_BINANCE.evnt_1st,
+						LAT_MON_SPOT_BINANCE,
 						#———————————————————————————————————————————————————————
 						SHARED_TIME_DICT,
 						'LATEST_SLEEP_TIME_BINANCE_STREAM',
@@ -387,9 +367,7 @@ if __name__ == "__main__":
 						#———————————————————————————————————————————————————————
 						EXECUTIONS_QUEUE_DICT,
 						#———————————————————————————————————————————————————————
-						LAT_MON_SPOT_BINANCE.evnt_go_,
-						LAT_MON_SPOT_BINANCE.data_dict,
-						LAT_MON_SPOT_BINANCE.evnt_1st,
+						LAT_MON_SPOT_BINANCE,
 						#———————————————————————————————————————————————————————
 						SHARED_TIME_DICT,
 						'LATEST_SLEEP_TIME_BINANCE_STREAM',
@@ -481,13 +459,10 @@ if __name__ == "__main__":
 
 				gate_streaming_by_latency_task = asyncio.create_task(
 					gate_streaming_by_latency(
-						LAT_MON_SPOT_BINANCE.evnt_ok_,
-						LAT_MON_SPOT_BINANCE.evnt_go_,
-						LAT_MON_SPOT_BINANCE.data_dict,
-						LAT_MON_SPOT_BINANCE.rouslsec,
+						LAT_MON_SPOT_BINANCE,
 						SYMBOLS,
 						logger,
-						shutdown_event = MAIN_SHUTDOWN_EVENT,
+						MAIN_SHUTDOWN_EVENT,
 					),
 					name = "gate_streaming_by_latency()",
 				)
@@ -519,15 +494,8 @@ if __name__ == "__main__":
 			# Wait for at least one valid snapshot before serving
 			#———————————————————————————————————————————————————————————————————
 
-			try: await LAT_MON_SPOT_BINANCE.evnt_1st.wait()
-			except Exception as e:
-
-				logger.error(
-					f"[{my_name()}] error while "
-					f"waiting for `LAT_MON_SPOT_BINANCE.evnt_1st`: {e}",
-					exc_info=True
-				)
-				raise SystemExit from e
+			await LAT_MON_SPOT_BINANCE.evnt_1st_dom.wait()
+			await LAT_MON_SPOT_BINANCE.evnt_1st_exe.wait()
 
 			#———————————————————————————————————————————————————————————————————
 			# FastAPI

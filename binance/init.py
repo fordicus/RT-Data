@@ -65,7 +65,7 @@ def load_config(
 	#
 	list[str],		# symbols
 	#
-	list[str],		# ws_url
+	dict[str, str],	# ws_url
 	str,			# wildcard_stream_binance_com_port
 	list[str],		# ports_stream_binance_com
 	float,			# port_cycling_period_hrs
@@ -78,6 +78,7 @@ def load_config(
 	int,			# save_interval_min
 	#
 	int,			# snapshots_queue_max
+	int,			# executions_queue_max
 	int,			# records_max
 	#
 	LatencyMonitor,	# latency measurement & events
@@ -181,6 +182,7 @@ def load_config(
 		int,			# save_interval_min
 		#
 		int,			# snapshots_queue_max
+		int,			# executions_queue_max
 		int,			# records_max
 		#
 		int,			# base_backoff
@@ -222,12 +224,12 @@ def load_config(
 			if save_interval_min > 1440:
 				raise ValueError("SAVE_INTERVAL_MIN must be ≤ 1440")
 
-			snapshots_queue_max = int(config.get("SNAPSHOTS_QUEUE_MAX"))
-			records_max			= int(config.get("RECORDS_MAX"))
+			snapshots_queue_max	 = int(config.get("SNAPSHOTS_QUEUE_MAX"))
+			executions_queue_max = int(config.get("EXECUTIONS_QUEUE_MAX"))
+			records_max			 = int(config.get("RECORDS_MAX"))
 
 			LAT_MON_SPOT_BINANCE = LatencyMonitor(
 				int(config.get('LATENCY_DEQUE_SIZE')),
-				int(config.get('LATENCY_SAMPLE_MIN')),
 				int(config.get('LATENCY_THRESHOLD_MS')),
 				float(config.get('LATENCY_ROUTINE_SLEEP_SEC')),
 				symbols,
@@ -264,6 +266,7 @@ def load_config(
 				save_interval_min,
 				#
 				snapshots_queue_max,
+				executions_queue_max,
 				records_max,
 				#
 				base_backoff,
@@ -341,6 +344,7 @@ def load_config(
 			save_interval_min,
 			#
 			snapshots_queue_max,
+			executions_queue_max,
 			records_max,
 			#
 			base_backoff,
@@ -417,6 +421,7 @@ def load_config(
 			save_interval_min,
 			#
 			snapshots_queue_max,
+			executions_queue_max,
 			records_max,
 			#
 			LAT_MON_SPOT_BINANCE,
@@ -457,7 +462,9 @@ def init_runtime_state(
 	#———————————————————————————————————————————————————————————————————————————
 	snapshots_queue_dict:		dict[str, asyncio.Queue],
 	snapshots_queue_max:		int,
+	#———————————————————————————————————————————————————————————————————————————
 	executions_queue_dict:		dict[str, asyncio.Queue],
+	executions_queue_max:		int,
 	#———————————————————————————————————————————————————————————————————————————
 	fhndls_lob_spot_binance:	dict[str, tuple[str, TextIOWrapper]],
 	fhndls_exe_spot_binance:	dict[str, tuple[str, TextIOWrapper]],
@@ -508,7 +515,7 @@ def init_runtime_state(
 		executions_queue_dict.clear()
 		executions_queue_dict.update({
 			symbol: asyncio.Queue(
-				maxsize = snapshots_queue_max
+				maxsize = executions_queue_max
 			)
 			for symbol in symbols
 		})
