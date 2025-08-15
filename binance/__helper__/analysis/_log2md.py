@@ -1,12 +1,10 @@
 # log2md.py
 
-#———————————————————————————————————————————————————————————————————————————————
-# python C:\workspace\RT-Data\binance\__helper__\analysis\_log2md.py "C:\workspace\RT-Data\binance\__temp__\stream_binance.log"
-#———————————————————————————————————————————————————————————————————————————————
-
 r"""————————————————————————————————————————————————————————————————————————————
 
-python log2md.py "C:\workspace\RT-Data\binance\__temp__\stream_binance.log"
+python C:\workspace\RT-Data\binance\__helper__\analysis\_log2md.py "C:\workspace\RT-Data\binance\__temp__\stream_binance.log"
+
+python C:\workspace\RT-Data\binance\__helper__\analysis\_log2md.py "C:\workspace\RT-Data\binance\stream_binance.log"
 
 ————————————————————————————————————————————————————————————————————————————————
 

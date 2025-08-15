@@ -6,10 +6,10 @@ import sys, os, time, inspect, logging, multiprocessing
 import asyncio, uvloop
 import aiohttp, socket
 import ssl, certifi
-from functools import lru_cache
 from datetime import datetime, timezone
 from logging.handlers import QueueHandler, QueueListener
 from typing import Callable, Optional
+from collections import OrderedDict
 
 #———————————————————————————————————————————————————————————————————————————
 # https://tinyurl.com/ANSI-256-Color-Palette
@@ -279,22 +279,27 @@ class NanoTimer:
 # Web Utilities
 #———————————————————————————————————————————————————————————————————————————————
 
-@lru_cache(maxsize = 256)					# cache to hit the API once per IP
-async def geo(ip: str) -> str:
+_GEO_CACHE_MAX = 256
+_GEO_CACHE: "OrderedDict[str, str]" = OrderedDict()
+_GEO_INFLIGHT: dict[str, "asyncio.Task[str]"] = {}
+_GEO_LOCK = asyncio.Lock()
+
+async def _geo_fetch(ip: str) -> str:
 
 	"""
-	Return 'City, Country' (or '?' if unknown) for a public IP.
-	Uses the free ip-api.com JSON endpoint (≈ 45 ms median, no key required).
+	Actual query logic. (Caching/concurrency control is handled by geo())
+	Return 'City, Country' or inferred AWS region, or '?' if all lookups fail.
 	"""
 
-	url = (
-		f"http://ip-api.com/json/{ip}?fields=city,country"
-	)   # :contentReference[oaicite:0]{index=0}
+	# free, no API key required
+	url = f"http://ip-api.com/json/{ip}?fields=city,country" 
+
+	# 1) Query ip-api.com
 
 	try:
 
 		async with aiohttp.ClientSession(
-			timeout = aiohttp.ClientTimeout(total = 2)
+			timeout=aiohttp.ClientTimeout(total=2)
 		) as s:
 
 			async with s.get(url) as r:
@@ -302,14 +307,15 @@ async def geo(ip: str) -> str:
 				if r.status == 200:
 
 					data = await r.json()
+
 					return (
 						f"{data.get('city') or '?'} "
 						f"{data.get('country') or ''}".strip()
 					)
-
 	except Exception as e:
-
+		
 		try:
+
 
 			logger = get_subprocess_logger()
 			logger.warning(
@@ -318,28 +324,26 @@ async def geo(ip: str) -> str:
 
 		except Exception:
 
-			force_print_exception(
-				my_name(), e
-			)
+			force_print_exception(my_name(), e)
 
-	# fallback: try reverse‑DNS for AWS / GCP hosts (region code often embedded)
+	# 2) On failure, attempt reverse DNS to infer AWS region
 
 	try:
 
-		# :contentReference[oaicite:1]{index=1}
 		host, *_ = socket.gethostbyaddr(ip)
 
-		# e.g. ec2‑54‑250‑75‑34.ap‑northeast‑1.compute.amazonaws.com
-		# →  ap‑northeast‑1 (Tokyo)
+		# e.g. ec2-54-250-75-34.ap-northeast-1.compute.amazonaws.com
+		# → ap-northeast-1
 
 		if ".compute.amazonaws.com" in host:
 
-			region = host.split(".")[-4]	# ap‑northeast‑1
+			region = host.split(".")[-4]  # ap-northeast-1
 			return region.replace("-", " ").title()
 
 	except Exception as e:
-		
+
 		try:
+
 			logger = get_subprocess_logger()
 			logger.warning(
 				f"[{my_name()}] DNS lookup failed for {ip}: {e}"
@@ -347,11 +351,79 @@ async def geo(ip: str) -> str:
 
 		except Exception:
 
-			force_print_exception(
-				my_name(), e
-			)
+			force_print_exception(my_name(), e)
+
+	# 3) Final failure
 
 	return "?"
+
+async def geo(ip: str) -> str:
+
+	"""
+	Asynchronous LRU-cached geolocation lookup.
+	- Value caching: returns instantly if IP already queried
+	- In-flight deduplication: concurrent calls for
+	  the same IP reuse one request
+	"""
+
+	# Fast path: cache hit
+
+	async with _GEO_LOCK:
+
+		if ip in _GEO_CACHE:
+
+			# Update LRU: move recently used entry to the end
+
+			_GEO_CACHE.move_to_end(ip, last = True)
+			return _GEO_CACHE[ip]
+
+		# Reuse any in-progress request
+
+		task = _GEO_INFLIGHT.get(ip)
+
+		if task is None:
+
+			task = asyncio.create_task(_geo_fetch(ip))
+			_GEO_INFLIGHT[ip] = task
+
+	try:
+
+		result = await task
+
+	except Exception as e:
+
+		# On fetch failure, store '?' to avoid excessive retries
+
+		try:
+
+			logger = get_subprocess_logger()
+			logger.warning(
+				f"[{my_name()}] geo({ip}) fetch error: {e}"
+			)
+
+		except Exception:
+
+			pass
+
+		result = "?"
+
+	finally:
+
+		# Cleanup in-flight record + store in LRU cache
+
+		async with _GEO_LOCK:
+
+			_GEO_INFLIGHT.pop(ip, None)
+			_GEO_CACHE[ip] = result
+			_GEO_CACHE.move_to_end(ip, last = True)
+
+			# Evict oldest entry if capacity exceeded
+
+			while len(_GEO_CACHE) > _GEO_CACHE_MAX:
+
+				_GEO_CACHE.popitem(last = False)
+
+	return result
 
 #———————————————————————————————————————————————————————————————————————————————
 
@@ -366,27 +438,17 @@ async def elaborate_ws_peer(
 ) -> None:
 
 	if isinstance(ws_ra, tuple) and len(ws_ra) >= 2:
-
 		ip, port = ws_ra[0], ws_ra[1]
-
 	else:
-
 		ip, port = "?", "?"
 
 	try:
-
-		if ip == "?": loc = "?"
-
+		if ip == "?":
+			loc = "?"
 		else:
-
 			try:
-
-				loc = await asyncio.wait_for(
-					geo(ip), timeout = timeout,
-				)
-
+				loc = await asyncio.wait_for(geo(ip), timeout=timeout)
 			except asyncio.TimeoutError:
-
 				loc = "UNKNOWN"
 				logger.warning(
 					f"[{my_name()}] geo({ip}) timed out; "
@@ -394,7 +456,9 @@ async def elaborate_ws_peer(
 					exc_info = False,
 				)
 
-	except asyncio.CancelledError: raise
+	except asyncio.CancelledError:
+
+		raise
 
 	except Exception as e:
 
@@ -411,23 +475,16 @@ async def elaborate_ws_peer(
 
 			msg = f"Failed to get location for {ip}: {e}"
 
-		logger.warning(f"[{my_name()}] {msg}", exc_info = False)
+		logger.warning(f"[{my_name()}] {msg}", exc_info=False)
 
-	ip_disp  = (
-		f"[{ip}]"
-		if (":" in ip and not ip.startswith("["))
-		else ip
-	)
+	ip_disp  = f"[{ip}]" if (":" in ip and not ip.startswith("[")) else ip
+
 	port_str = str(port)
 
-	ws_peer["value"] = (
-		f"{ip_disp}:{port_str}  ({loc})"
-	)
+	ws_peer["value"] = f"{ip_disp}:{port_str}  ({loc})"
 
 	logger.info(
-		f"[{my_name()}]🌐 "
-		f"ws peer {ws_peer['value']}\n"
-		f"  {ws_url_to_prt}"
+		f"[{my_name()}]🌐 ws peer {ws_peer['value']}\n  {ws_url_to_prt}"
 	)
 
 #———————————————————————————————————————————————————————————————————————————————
