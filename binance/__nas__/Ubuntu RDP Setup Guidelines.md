@@ -9,27 +9,31 @@
 
 ## 💡Tips  
 
-A. To restart `dnsmasq`, type at Terminal:
+A. Update Software:
+```bash
+sudo apt update
+sudo apt full-upgrade -y
+```
+
+B. To restart `dnsmasq`, type at Terminal:
 ```bash
 sudo systemctl restart dnsmasq
 ```
 
-B. To check the Ubuntu system’s `internal IP` address, type at Terminal:
+C. To check the Ubuntu system’s `internal IP` address, type at Terminal:
 ```bash
 hostname -I
 ```
 
-C. To check the router’s `public IP` addresses, type at Terminal:
+D. To check the router’s `public IP` addresses, type at Terminal:
 ```bash
 curl 'https://api.ipify.org'
 curl 'https://api6.ipify.org'
 ```
 
-D. Useful `connectivity` tests:
+E. Useful `connectivity` tests:
 ```bash
 sudo systemctl status ssh
-
-# sudo apt update && sudo apt install net-tools
 sudo netstat -tlnp
 
 nslookup <your-domain>
@@ -105,7 +109,7 @@ X. Monitor Status of Ports Externally: [`UptimeRobot`](https://uptimerobot.com/)
 **Modify `/etc/systemd/logind.conf`**:
 
 ```bash
-# /etc/systemd/logind.conf
+# sudo nano /etc/systemd/logind.conf
 
 HandleLidSwitch=ignore
 HandleLidSwitchDocked=ignore
@@ -120,13 +124,30 @@ sudo systemctl restart systemd-logind
 To disable AC power-based sleep/blanking behavior in `Xfce`, create and execute the following script:
 
 ```bash
-nano ~/disable-xfce-ac-power-saving.sh  
-chmod +x ~/disable-xfce-ac-power-saving.sh  
-./disable-xfce-ac-power-saving.sh
-```
-
-```bash
-# ~/disable-xfce-ac-power-saving.sh  
+#-------------------------------------------------------------------------------
+# sudo nano /etc/apt/sources.list.d/ubuntu.sources
+# 
+# Types: deb
+# URIs: http://ch.archive.ubuntu.com/ubuntu/
+# Suites: noble
+# Components: main universe multiverse restricted		# add beyond main
+# Architectures: amd64 i386
+# Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+# 
+# Types: deb
+# URIs: http://security.ubuntu.com/ubuntu/
+# Suites: noble-security
+# Components: main universe multiverse restricted		# add beyond main
+# Architectures: amd64 i386
+# Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+# 
+# sudo apt update && sudo apt install -y xfconf
+# which xfconf-query
+#-------------------------------------------------------------------------------
+# sudo nano ~/disable-xfce-ac-power-saving.sh  
+# chmod +x ~/disable-xfce-ac-power-saving.sh  
+# ./disable-xfce-ac-power-saving.sh
+#-------------------------------------------------------------------------------
 
 set -e
 
@@ -151,14 +172,9 @@ echo "✅ All AC-mode power saving features have been disabled for Xfce."
 ```
 
 To ensure the script above runs automatically at login:
-
-```bash
-mkdir -p ~/.config/autostart  
-nano ~/.config/autostart/disable-xfce-ac-power-saving.desktop
-```
-
 ```ini
-# ~/.config/autostart/disable-xfce-ac-power-saving.desktop
+# mkdir -p ~/.config/autostart  
+# sudo nano ~/.config/autostart/disable-xfce-ac-power-saving.desktop
 
 [Desktop Entry]
 Type=Application
@@ -171,12 +187,8 @@ Comment=Prevents suspend and screen blanking while on AC power
 ```
 
 Next, let `xserver` be persistent all the time:
-
 ```bash
-sudo nano /etc/X11/xorg.conf
-```
-```bash
-# /etc/X11/xorg.conf
+# sudo nano /etc/X11/xorg.conf
 
 Section "Device"
 	Identifier	 "Device0"
@@ -193,12 +205,8 @@ sudo systemctl restart display-manager
 ```
 
 Prevent any display timeout or power-saving interruptions of `Xorg-based xrdp` without needing a physical monitor by configuring as follows:
-
 ```bash
-nano ~/.xsession
-```
-```bash
-# ~/.xsession
+# sudo nano ~/.xsession
 
 xset s off
 xset s noblank
@@ -227,17 +235,9 @@ Remark. `HDMI Dummy Plug Dongle` (Headless Display Emulator) can emulate a live 
 #### Enable auto-cpufreq for CPU
 
 ```bash
-sudo snap install auto-cpufreq --classic
-sudo auto-cpufreq --install
+sudo snap install auto-cpufreq
+snap services auto-cpufreq
 ```
-
-**To verify:**
-
-```bash
-systemctl status auto-cpufreq
-```
-
-Should show: `active (running)`
 
 #### Enable Persistence Mode for NVIDIA GPU
 
@@ -268,11 +268,7 @@ Enable and start:
 ```bash
 sudo systemctl daemon-reexec
 sudo systemctl enable --now nvidia-persist.service
-```
 
-**To verify:**
-
-```bash
 systemctl status nvidia-persist.service
 ```
 
@@ -314,22 +310,17 @@ Unattended-Upgrade::Allowed-Origins {
 
 ```bash
 sudo apt update
-sudo apt install chrony
+sudo apt install -y chrony
 ```
 
 Chrony starts automatically upon installation.
 
 #### ⚙️ Configure Regional NTP Servers
 
-Edit the configuration file:
-
-```bash
-sudo nano /etc/chrony/chrony.conf
-```
-
-Replace or append NTP server pools to use geographically close and reliable sources, e.g., in Switzerland, one may access:
-
+Edit the configuration file: replace or append NTP server pools to use geographically close and reliable sources, e.g., in Switzerland, one may access:
 ```conf
+# sudo nano /etc/chrony/chrony.conf
+
 pool ch.pool.ntp.org iburst
 pool de.pool.ntp.org iburst
 pool fr.pool.ntp.org iburst
@@ -408,11 +399,12 @@ If using GNOME (default Ubuntu Desktop), ensure correct session:
 
 ```bash
 echo "gnome-session" > ~/.xsession
+sudo chown c01hyka:c01hyka ~/.xsession
+chmod 755 ~/.xsession
 sudo systemctl restart xrdp
+
+systemctl status xrdp
 ```
-
-**To verify:** run `systemctl status xrdp` and ensure it shows "active (running)".
-
 
 
 ### 2.2 🚫 Disable `Wayland` (if GUI apps open on local screen only)
@@ -420,14 +412,11 @@ sudo systemctl restart xrdp
 **Edit:** `/etc/gdm3/custom.conf`
 
 ```ini
+# sudo nano /etc/gdm3/custom.conf
 WaylandEnable=false
 ```
 
-Reboot:
-
-```bash
-sudo reboot
-```
+Then, reboot.
 
 **To verify:** after RDP login, applications should open inside the remote session, not on the physical screen.
 
@@ -435,15 +424,11 @@ sudo reboot
 
 ### 2.3 🌐 Assign or Monitor `Internal IP Address`
 
-Check internal IP. For UNIX systems:
+Check internal IP:
 ```bash
-ip a | grep inet
+ip a | grep inet	# Ubuntu
+ipconfig			# Windows
 ```
-For Windows:
-```bash
-ipconfig
-```
-
 
 Example result: `192.168.0.100` from  
 ```bash
@@ -474,7 +459,7 @@ Check that <your-port>/tcp is listed as `ALLOW`.
 
 
 
-### 2.5 🦆 DuckDNS Setup for `External Access`
+### 2.5 🦆 DuckDNS Setup for `External Access` (Deprecated)
 
 1. Register at [https://www.duckdns.org](https://www.duckdns.org)
 2. Choose a subdomain (e.g., `\<your-subdomain\>.duckdns.org`)
@@ -575,6 +560,7 @@ ListenAddress ::
 Restart `ssh` and confirm the status:
 ```bash
 sudo systemctl restart ssh
+sudo apt install -y net-tools
 sudo netstat -tlnp
 ```
 
@@ -594,7 +580,7 @@ sudo ufw status
 # It includes all IP addresses within this range in the local network.
 ```
 
-### 3.3 📶 Router `Port Forwarding`
+### 3.3 📶 Router `Port Forwarding` (Deprecated)
 | Field			| Value						|
 | ------------- | ------------------------- |
 | Rule Nmae		| `<your-rule-name>`		|
@@ -613,10 +599,10 @@ Use the following configuration for SFTP access:
 
 | Setting		| Value									|
 | ------------- | ------------------------------------- |
-| **Host**		| `sftp://<your-subdomain>.duckdns.org`	|
+| **Host**		| `sftp://<your-local-ip>`				|
 | **Username**	| `<your-username>`						|
 | **Password**	| `<your-password>`						|
-| **Port**		| `<your-ssh-port>`						|		  |
+| **Port**		| `<your-ssh-port>`						|
 
 Once connected, you can browse and transfer files between your local machine and the Ubuntu server over a secure SSH channel.
 
@@ -686,16 +672,10 @@ First, ensure your FastAPI application has the necessary endpoints for serving t
 
 #### 5.2.1 Install and Configure `NginX`
 
-Execute the following commands on your Ubuntu server:
-
-```bash
-sudo apt update && sudo apt install nginx
-sudo nano /etc/nginx/sites-available/<name-your-site>
-```
-
-Configuration file content:
+Configure:
 ```nginx
-# /etc/nginx/sites-available/<name-your-site>
+# sudo apt update && sudo apt install nginx
+# sudo nano /etc/nginx/sites-available/<name-your-site>
 
 server {
 	listen <inbound-port>;
@@ -756,7 +736,7 @@ sudo ufw status
 # It includes all IP addresses within this range in the local network.
 ```
 
-#### 5.2.3 `Port Forwarding` at your Router
+#### 5.2.3 `Port Forwarding` at your Router (Deprecated)
 
 The device IP assigned by your router can be checked on the Ubuntu home server using:
 
@@ -830,7 +810,7 @@ Use such credentials to automate dynamic IPv4 updates at CloudFlare,
 for instance, through a Python script;  
 see [Cloudflare API – Update DNS Record](https://developers.cloudflare.com/api/resources/dns/subresources/records/methods/edit/).
 
-#### 5.3.3 `Security` Enhancements for your Domain
+#### 5.3.3 `Security` Enhancements for your Domain (Deprecated)
 Restrict UFW Firewall to CloudFlare IP Ranges via
 ```bash
 sudo ufw enable
@@ -977,8 +957,12 @@ mkdir -p /etc/wireguard
 chmod 700 /etc/wireguard			# restrict dir access to owner only
 cd /etc/wireguard
 umask 077							# ensure new files are owner-readable only
+wg genkey | tee server.key | wg pubkey > server.pub
+chmod 600 server.key
+chmod 644 server.pub
+sudo cat /etc/wireguard/server.key
+sudo cat /etc/wireguard/server.pub
 exit								# privileged session ends
-sudo cat /etc/wireguard/server.pub	# public key to access the server
 ```
 ***Configure*** *WireGuard* `interface` at the server:
 ```bash

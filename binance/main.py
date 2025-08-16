@@ -22,18 +22,28 @@ How to Run:
 Dependency:
 
 	python==3.11.13
+    
 	aiohttp==3.12.14
 	fastapi==0.116.1
-	pyinstaller==6.12.0
-	orjson==3.11.0
-	psutil==7.0.0
-	uvicorn==0.35.0
-	websockets==15.0.1
-	numpy==2.3.2
-	uvloop==0.21.0
 	memray==1.17.2
+    numpy==2.3.2
+    orjson==3.11.0
+    psutil==7.0.0
+    pyinstaller==6.12.0
+	uvicorn==0.35.0
+	uvloop==0.21.0
+    websockets==15.0.1
 
-	conda list | egrep '^(uvloop|websockets|aiohttp|orjson|fastapi|uvicorn|psutil|pyinstaller|memray)[[:space:]]+'
+Environment Initialization:
+    
+    conda create --name binance python=3.11.13
+    conda activate binance
+    pip install --upgrade pip
+    pip install -r /home/$(whoami)/RT-Data/binance/__helper__/requirements.txt
+
+Package Validation:
+
+	conda list | egrep '^(uvloop|websockets|aiohttp|orjson|fastapi|uvicorn|psutil|pyinstaller|memray|numpy)[[:space:]]+'
 
 Note:
 
