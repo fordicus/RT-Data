@@ -15,23 +15,18 @@ sudo apt update
 sudo apt full-upgrade -y
 ```
 
-B. To restart `dnsmasq`, type at Terminal:
-```bash
-sudo systemctl restart dnsmasq
-```
-
-C. To check the Ubuntu system’s `internal IP` address, type at Terminal:
+B. To check the Ubuntu system’s `internal IP` address, type at Terminal:
 ```bash
 hostname -I
 ```
 
-D. To check the router’s `public IP` addresses, type at Terminal:
+C. To check the router’s `public IP` addresses, type at Terminal:
 ```bash
 curl 'https://api.ipify.org'
 curl 'https://api6.ipify.org'
 ```
 
-E. Useful `connectivity` tests:
+D. Useful `connectivity` tests:
 ```bash
 sudo systemctl status ssh
 sudo netstat -tlnp
@@ -61,7 +56,7 @@ X. Monitor Status of Ports Externally: [`UptimeRobot`](https://uptimerobot.com/)
 
 [***2. RDP Setup***](#2-rdp-setup)  
 &nbsp;&nbsp;&nbsp;&nbsp;[2.1 🧩 Install and Enable `xrdp` Service](#21-🧩-install-and-enable-xrdp-service)  
-&nbsp;&nbsp;&nbsp;&nbsp;[2.2 🚫 Disable `Wayland` (if GUI apps open on local screen only)](#22-🚫-disable-wayland-if-gui-apps-open-on-local-screen-only)  
+&nbsp;&nbsp;&nbsp;&nbsp;[2.2 🛠️ XFCE RDP Setup with D-Bus and Session Diagnostics](#22-🛠️-xfce-rdp-setup-with-d-bus-and-session-diagnostics)    
 &nbsp;&nbsp;&nbsp;&nbsp;[2.3 🌐 Assign or Monitor `Internal IP Address`](#23-🌐-assign-or-monitor-internal-ip-address)  
 &nbsp;&nbsp;&nbsp;&nbsp;[2.4 🛡️ Allow Remote Desktop through UFW `Firewall` within the Local Network](#24-🛡️-allow-remote-desktop-through-ufw-firewall-within-the-local-network)  
 &nbsp;&nbsp;&nbsp;&nbsp;[2.5 🦆 DuckDNS Setup for `External Access`](#25-🦆-duckdns-setup-for-external-access)  
@@ -215,9 +210,38 @@ startxfce4
 ```
 Any new `Xorg` sessions will follow this configuration onward.
 
+To permanently prevent screen blanking and DPMS under GNOME with X11,
+disable session idle timeout and power sleep:
+```bash
+gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type 'nothing'
+gsettings set org.gnome.desktop.session idle-delay 0
+```
 
+To disable X11 screen blanking and DPMS on login,
+append this to `~/.xprofile` (run once):
+```bash
+echo 'xset s off -dpms s noblank' >> ~/.xprofile
+chmod +x ~/.xprofile
+```
 
-We also ensure the systemd inhibitor settings as follows. Run once:
+Then create a `.desktop` autostart entry:
+```bash
+# ~/.config/autostart/xset-noblank.desktop
+
+[Desktop Entry]
+Name=XSet No Blank
+Exec=/usr/bin/xset s off -dpms s noblank
+Type=Application
+X-GNOME-Autostart-enabled=true
+```
+
+Ensure proper file ownership and check current X11 display power settings:
+```
+sudo chown $(whoami):$(whoami) ~/.config/autostart/xset-noblank.desktop
+xset -q | grep -E "blanking|DPMS"
+```
+
+We ensure the systemd inhibitor settings as follows. Run once:
 ```bash
 sudo systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
 ```
@@ -393,7 +417,7 @@ sudo apt update
 sudo apt install xrdp -y
 sudo systemctl enable xrdp
 sudo systemctl start xrdp
-```
+````
 
 If using GNOME (default Ubuntu Desktop), ensure correct session:
 
@@ -406,20 +430,99 @@ sudo systemctl restart xrdp
 systemctl status xrdp
 ```
 
+**Note:**
+If you encounter issues where GUI apps (like Nautilus) refuse to open or RDP sessions crash after login,
+consider switching from `gnome-session` + `gdm3` to `xfce4` + `lightdm`.
+This combination provides a more stable X11 environment for xrdp, resolving session scope and display binding issues.
 
-### 2.2 🚫 Disable `Wayland` (if GUI apps open on local screen only)
+```bash
+# Install lightweight desktop and display manager
+sudo apt install xfce4 xfce4-goodies -y
 
-**Edit:** `/etc/gdm3/custom.conf`
-
-```ini
-# sudo nano /etc/gdm3/custom.conf
-WaylandEnable=false
+# During installation, choose "lightdm" when prompted
+# Then restart xrdp:
+sudo systemctl restart xrdp
 ```
 
-Then, reboot.
+### 2.2 🛠️ XFCE RDP Setup with D-Bus and Session Diagnostics
 
-**To verify:** after RDP login, applications should open inside the remote session, not on the physical screen.
+If switching to `xfce4` + `lightdm`, run the following script to ensure proper D-Bus session, eliminate GUI inconsistencies, and suppress common warnings (e.g., Nautilus, portal services):
 
+```bash
+#!/bin/bash
+
+###############################################################################
+# ✅ XFCE RDP Session Setup with dbus, GUI Optimizations, and Diagnostics
+###############################################################################
+
+# ▶️ Write clean ~/.xsession to launch XFCE with a guaranteed D-Bus session
+cat <<'EOF' > ~/.xsession
+#!/bin/bash
+
+# Start dbus session (export all needed env vars)
+if command -v dbus-launch >/dev/null 2>&1; then
+    eval $(dbus-launch --sh-syntax)
+    export DBUS_SESSION_BUS_ADDRESS
+    export DBUS_SESSION_BUS_PID
+fi
+
+# Start XFCE desktop session
+exec startxfce4
+EOF
+
+chmod +x ~/.xsession
+
+# ▶️ Pre-create GTK bookmarks file to suppress Nautilus warnings
+touch ~/.gtk-bookmarks
+
+# ▶️ Mask resource-hungry user-level services (run once)
+systemctl --user mask tracker3-miner-fs.service
+systemctl --user mask tracker3.service
+systemctl --user mask tracker3-store.service
+systemctl --user mask xdg-desktop-portal.service
+
+# ▶️ Restart XRDP to apply updated ~/.xsession
+sudo systemctl restart xrdp
+
+
+###############################################################################
+# 🔍 Diagnostic: Confirm current dbus and session state
+###############################################################################
+
+# Check installed dbus-related packages
+apt list --installed | grep dbus --no-pager
+
+# Check system-level dbus broker status
+systemctl status dbus
+
+# Check session bus environment variable
+echo "DBUS_SESSION_BUS_ADDRESS = $DBUS_SESSION_BUS_ADDRESS"
+
+# Check which dbus-launch binary is used
+which dbus-launch
+
+# Review final .xsession content
+echo -e "\nFinal .xsession content:"
+cat ~/.xsession
+```
+
+Only execute this section if you are using `xfce4` as your RDP desktop environment.  
+It ensures that session-wide D-Bus and GUI context are properly scoped within  
+the XRDP virtual display, avoiding app misplacement or failure.
+
+
+🧷 Let RDP Sessions Be Persistent Unless Server Reboots
+
+Ensure the user session (and open windows) survive RDP disconnections or logouts,  
+as long as the server is not rebooted:
+
+```bash
+# Check whether session persistence (linger) is enabled
+loginctl show-user $USER | grep Linger
+
+# If it shows "Linger=no", enable it to persist GUI sessions
+sudo loginctl enable-linger $USER
+```
 
 
 ### 2.3 🌐 Assign or Monitor `Internal IP Address`
@@ -975,21 +1078,11 @@ PrivateKey = </etc/wireguard/server.key>
 SaveConfig = false	# only can be manually edited
 ```
 
-***Configure*** `w0` service at the server:
-```bash
-# sudo systemctl edit wg-quick@wg0
-
-[Unit]
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Restart=on-failure
-RestartSec=5
-```
-
 ***Activate*** *WireGuard* interface `wg0`:
 ```bash
+# ⚠️ No need to override `wg-quick@wg0`.
+# The default unit already handles proper 
+# rdering and interface setup.
 sudo systemctl enable wg-quick@wg0
 sudo systemctl start wg-quick@wg0
 
@@ -1056,33 +1149,32 @@ server=8.8.8.8
 ```
 
 <span style="color:yellow">***Do***</span>
-*generate* `/etc/systemd/system/dnsmasq.service.d/override.conf`:
+*generate* `dnsmasq-wireguard.service`:
 ```bash
-# sudo mkdir -p /etc/systemd/system/dnsmasq.service.d
-# sudo nano /etc/systemd/system/dnsmasq.service.d/override.conf
+# sudo nano /etc/systemd/system/dnsmasq-wireguard.service
 
 [Unit]
-
-# Ensure dnsmasq starts after WireGuard and network are fully online
-After=wg-quick@wg0.service network-online.target
-
-# Express preference for WireGuard service to be running
-Wants=wg-quick@wg0.service
-
-# Create strong dependency - if WireGuard stops, dnsmasq stops too
-BindsTo=wg-quick@wg0.service
-
+Description=Lightweight DNS forwarder for WireGuard
+After=network-online.target wg-quick@wg0.service
+Requires=network-online.target
 
 [Service]
+ExecStartPre=/bin/bash -c 'for i in {1..10}; do ip addr show wg0 | grep -q "inet " && break; sleep 0.5; done'
+ExecStart=/usr/sbin/dnsmasq --keep-in-foreground --conf-file=/etc/dnsmasq.conf
+Restart=always
 
-# Automatically restart dnsmasq if it fails
-Restart=on-failure
+[Install]
+WantedBy=multi-user.target
+```
 
-# Wait 10 seconds before attempting restart
-RestartSec=10
-
-# Wait for wg0 interface to be available before starting dnsmasq
-ExecStartPre=/bin/bash -c 'until ip link show wg0 > /dev/null 2>&1; do sleep 1; done'
+```bash
+sudo systemctl daemon-reexec
+sudo systemctl daemon-reload
+sudo systemctl enable --now dnsmasq-wireguard
+sudo systemctl disable --now dnsmasq.service
+sudo systemctl mask dnsmasq.service
+systemctl status dnsmasq-wireguard --no-pager
+systemctl is-enabled dnsmasq-wireguard
 ```
 
 <span style="color:yellow">***Do***</span>
@@ -1099,7 +1191,7 @@ echo "nameserver 1.1.1.1" | sudo tee /etc/resolv.conf
 ```bash
 sudo systemctl daemon-reexec
 sudo systemctl restart wg-quick@wg0
-sudo systemctl restart dnsmasq
+sudo systemctl restart dnsmasq-wireguard
 
 sudo systemctl status dnsmasq --no-pager	# useful
 ss -ulpn | grep :53							# 10.10.0.1:53
@@ -1167,11 +1259,15 @@ PersistentKeepalive = 25
 
 ***Reload*** *WireGuard* `interace` at the server:
 ```bash
-sudo systemctl reload wg-quick@wg0
+sudo systemctl daemon-reexec
+sudo systemctl daemon-reload
+sudo systemctl restart wg-quick@wg0
+sudo systemctl restart dnsmasq-wireguard
 
 ip addr show wg0
-systemctl status wg-quick@wg0 --no-pager
 sudo wg
+systemctl status wg-quick@wg0 --no-pager
+systemctl status dnsmasq-wireguard --no-pager
 ```
 
 ***Configure*** *WireGuard* `interface` at the client:
@@ -1190,61 +1286,30 @@ AllowedIPs = 10.10.0.0/24
 PersistentKeepalive = 3
 ```
 
+***Verify*** after reboot:
+```bash
+systemctl status wg-quick@wg0 --no-pager
+systemctl status dnsmasq-wireguard --no-pager
+ip addr show wg0
+ss -ulpn | grep 51820
+dig @127.0.0.1 google.com
+dig @1.1.1.1 google.com
+```
+
 <!-- ———————————————————————————————————————————————————————————————————————————————— -->
 
 ## Y. Reboot Checklist
 
-After reboot, we want to ensure all services are active and the server will not be suspended:
-```bash
-nano get_status.sh
-```
-```bash
-# get_status.sh
+After reboot, we want to ensure all services are active
+and the server will not be suspended; see `stat.py`.
 
-echo "=== Core Services ==="
-systemctl status xrdp | grep Active
-systemctl status auto-cpufreq | grep Active
-systemctl status nvidia-persist.service | grep Active
-systemctl status chrony | grep Active
-
-echo "=== Power Management ==="
-xfconf-query -c xfce4-power-manager -l -v | grep -E "(blank|sleep|monitor-power)-on-ac"
-xset q | grep -E 'timeout.*0|DPMS.*disabled|prefer blanking.*no'
-
-echo "=== Display & Sleep Prevention ==="
-grep -E 'AllowEmpty|ConnectedMonitor|Virtual screen size|DFP-0: connected' /var/log/Xorg.0.log 2>/dev/null | grep -v 'WW' | tail -3
-systemctl status sleep.target suspend.target hibernate.target hybrid-sleep.target | grep Active
-
-echo "=== WireGuard & DNS ==="
-systemctl status wg-quick@wg0 | grep Active
-systemctl status dnsmasq | grep Active
-ip addr show wg0 2>/dev/null | grep "inet 10.10.0.1" || echo "❌ wg0 interface not ready"
-ss -ulpn | grep "10.10.0.1:53" >/dev/null && echo "✅ dnsmasq listening on wg0" || echo "❌ dnsmasq not listening on wg0"
-
-echo "=== Fail2Ban Status ==="
-if systemctl is-active --quiet fail2ban; then
-	echo "✅ Fail2Ban is active"
-	sudo fail2ban-client status
-else
-	echo "❌ Fail2Ban is not running"
-fi
-```
-
-```bash
-chmod +x get_status.sh
-```
-
-The expected output after running `./get_status.sh` reads:
-```bash
-TBE
-```
-
-✅ If all succeed, no additional manual action is needed after reboot.
 
 ### 6.3 Enhancing Security via `fail2ban`
 ***Install*** and configure:
 ```bash
-# sudo apt update && sudo apt install fail2ban
+# git clone https://github.com/fail2ban/fail2ban.git
+# cd fail2ban
+# sudo python3 setup.py install
 # sudo nano /etc/fail2ban/jail.local
 
 [DEFAULT]
@@ -1283,13 +1348,31 @@ failregex = .*xrdp_wm_log_msg: login failed for user .* from <HOST>.*$
 ignoreregex =
 ```
 
+```bash
+# which fail2ban-server
+# 	ExecStart=/usr/local/bin/fail2ban-server
+# sudo nano /etc/systemd/system/fail2ban.service
+
+[Unit]
+Description=Fail2Ban Service
+After=network.target iptables.service firewalld.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/fail2ban-server -xf start
+ExecStop=/usr/local/bin/fail2ban-client stop
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+```
+
 ***Do*** *enable and start*:
 ```bash
+sudo systemctl daemon-reload
 sudo systemctl enable fail2ban
 sudo systemctl start fail2ban
-
 sudo systemctl status fail2ban
-sudo fail2ban-client status
 ```
 
 <!-- ———————————————————————————————————————————————————————————————————————————————— -->

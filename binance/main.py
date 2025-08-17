@@ -24,6 +24,7 @@ Dependency:
 	python==3.11.13
     
 	aiohttp==3.12.14
+	certifi==2025.7.14
 	fastapi==0.116.1
 	memray==1.17.2
     numpy==2.3.2
@@ -43,7 +44,7 @@ Environment Initialization:
 
 Package Validation:
 
-	conda list | egrep '^(uvloop|websockets|aiohttp|orjson|fastapi|uvicorn|psutil|pyinstaller|memray|numpy)[[:space:]]+'
+	conda list | egrep '^(uvloop|websockets|aiohttp|orjson|fastapi|uvicorn|psutil|pyinstaller|memray|numpy|certifi)[[:space:]]+'
 
 Note:
 
