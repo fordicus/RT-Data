@@ -18,17 +18,18 @@ _Anaconda Prompt_.lnk
 # ========================
 
 data/
-temp/
 
 __unshared__/
 
 __dev__/
+__temp__/
 
 __bom_2025-07-25_nas__/
 __dns__
 __rdp__/
 
 byzantine/
+fredtrading/
 
 
 # ========================
