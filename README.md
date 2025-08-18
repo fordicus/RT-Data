@@ -1,3 +1,5 @@
+***This repository is deprecated to be private as of 2025-08-18.***
+
 # High-Frequency Spot OrderBook and Chart Dataset
 
 This repository manages high-frequency Level 2 (DOM) data 
@@ -108,3 +110,4 @@ This project is licensed under the
 ⚠️ No warranty is provided.
 
 [![License: CC BY-NC 4.0](https://licensebuttons.net/l/by-nc/4.0/88x31.png)](https://creativecommons.org/licenses/by-nc/4.0/legalcode)
+
